@@ -1,4 +1,5 @@
 import { createDb, migrate } from '@spend-brake/db';
+import { keyWrapperFromEnv } from '@spend-brake/shared';
 import { Redis } from 'ioredis';
 import pino from 'pino';
 import { loadEnv } from './config.js';
@@ -15,6 +16,7 @@ const metrics = new Metrics();
 const server = metrics.serve(env.METRICS_PORT);
 
 const worker = new Worker({
+  wrapper: await keyWrapperFromEnv(process.env),
   db,
   valkey,
   queueConnection,

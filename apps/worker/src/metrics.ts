@@ -36,6 +36,12 @@ export class Metrics {
     help: 'Usage events waiting in Valkey streams for the ledger, over all orgs',
     registers: [this.registry],
   });
+  readonly reconcileDrift = new Gauge({
+    name: 'brake_reconcile_drift_ratio',
+    help: 'Ledger vs Google billing export, |ledger - billed| / billed, latest checked day',
+    labelNames: ['org'],
+    registers: [this.registry],
+  });
   readonly lastLoop = new Gauge({
     name: 'brake_worker_last_loop_timestamp_seconds',
     help: 'When each worker loop last finished',

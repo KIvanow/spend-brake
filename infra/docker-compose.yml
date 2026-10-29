@@ -99,6 +99,8 @@ services:
     restart: unless-stopped
     environment:
       <<: *stores
+      # Decrypts the billing-export service account (reconciliation).
+      BRAKE_MASTER_KEY: ${BRAKE_MASTER_KEY}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       GITHUB_REPO: ${GITHUB_REPO:-}
     # The API runs migrations first.

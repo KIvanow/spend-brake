@@ -13,6 +13,7 @@ const ALERT_TYPES = [
   'catalog_underpriced',
   'upstream_key_error',
   'reservations_expired',
+  'reconcile_drift',
 ] as const;
 
 /** Envelope context for webhook URLs and signing secrets. */

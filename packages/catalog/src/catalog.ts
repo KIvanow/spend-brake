@@ -46,7 +46,15 @@ export function parseCatalog(yamlText: string): Catalog {
   const skus = new Map<string, SkuPrice>();
   for (const [id, s] of Object.entries(raw.skus)) {
     if ('free' in s) {
-      skus.set(id, { id, name: s.name, free: true, freeMonthly: 0n, bands: [], per1000: [] });
+      skus.set(id, {
+        id,
+        name: s.name,
+        googleSku: s.googleSku,
+        free: true,
+        freeMonthly: 0n,
+        bands: [],
+        per1000: [],
+      });
       continue;
     }
     const bands = raw.bands[s.band];
@@ -58,6 +66,7 @@ export function parseCatalog(yamlText: string): Catalog {
     skus.set(id, {
       id,
       name: s.name,
+      googleSku: s.googleSku,
       free: false,
       freeMonthly: BigInt(s.freeMonthly),
       bands: bands.map((b) => (b === null ? null : BigInt(b))),

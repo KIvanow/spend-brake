@@ -148,6 +148,15 @@ export function buildMessage(alertId: string, job: AlertJob, o: LinkOptions): Me
         text: 'Their reservations were committed at worst case after 120 s. A proxy instance probably stopped mid-request.',
         actions: view('/#/events'),
       };
+    case 'reconcile_drift': {
+      const ratio = typeof job.ratio === 'number' ? Math.round(job.ratio * 1000) / 10 : null;
+      return {
+        ...base,
+        title: `Spend differs from Google's bill by ${ratio ?? '?'}% on ${String(job.day)}`,
+        text: `The proxy recorded ${usd(job.ledgerMicros)} and the billing export shows ${usd(job.billedMicros)} for ${String(job.day)} (Pacific time). Check for traffic that bypasses the proxy or a catalog price that changed.`,
+        actions: view('/#/spend'),
+      };
+    }
     case 'catalog_drift':
       return {
         ...base,

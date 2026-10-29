@@ -95,6 +95,27 @@ describe('alert messages', () => {
     expect(noKey.actions.map((x) => x.id)).not.toContain('kill');
   });
 
+  it('describes reconciliation drift', () => {
+    const m = buildMessage(
+      'a',
+      {
+        type: 'reconcile_drift',
+        orgId: 'o',
+        day: '2026-10-28',
+        ledgerMicros: '1000000',
+        billedMicros: '1100000',
+        ratio: 0.0909,
+      },
+      links,
+    );
+    expect(m.title).toBe("Spend differs from Google's bill by 9.1% on 2026-10-28");
+    expect(m.text).toContain('$1.00');
+    expect(m.text).toContain('$1.10');
+    expect(m.actions).toEqual([
+      { id: 'view', label: 'View', url: 'https://app.example.com/#/spend' },
+    ]);
+  });
+
   it('maps scopes to the kill target that stops them', () => {
     expect(killTargetFor('key:k1')).toBe('key:k1');
     expect(killTargetFor('sess:s1')).toBe('sess:s1');

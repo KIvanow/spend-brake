@@ -151,6 +151,11 @@ key opts into a small fail-open allowance.
 **Migration estimate:** `brake estimate` (or the dashboard) prices your last 30 days on Geoapify,
 Stadia Maps and Open Places API, and shows what would stay on Google.
 
+**Reconciliation:** connect the Google Cloud Billing export (`brake reconcile set --table
+project.dataset.table --service-account reader.json`) and the worker compares the ledger with
+Google's bill every day, per SKU family; drift above 5% raises an alert. Without it, the
+dashboard says spend is measured by the proxy only.
+
 **Tracing:** set `OTEL_EXPORTER_OTLP_ENDPOINT` and the services export OpenTelemetry traces;
 secrets are stripped from every span. Prometheus metrics are on `:9465` (proxy) and `:9464`
 (worker).

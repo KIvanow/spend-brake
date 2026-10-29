@@ -12,6 +12,7 @@ export const ALERT_TYPES = [
   'upstream_key_error',
   'reservations_expired',
   'catalog_drift',
+  'reconcile_drift',
 ] as const;
 
 export type AlertType = (typeof ALERT_TYPES)[number];

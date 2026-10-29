@@ -12,6 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@google-cloud/bigquery": "^9.5.0",
     "@spend-brake/budget": "workspace:^",
     "@spend-brake/catalog": "workspace:^",
     "@spend-brake/db": "workspace:^",

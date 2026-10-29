@@ -1,11 +1,25 @@
 import { BudgetEngine } from '@spend-brake/budget';
 import { loadGoogleMapsCatalog, loadPlacesFields } from '@spend-brake/catalog';
-import { type Db, ensureUsagePartitions, orgs } from '@spend-brake/db';
+import { type Db, ensureUsagePartitions, orgs, reconciliationConfigs } from '@spend-brake/db';
+import {
+  type Envelope,
+  type KeyWrapper,
+  billingExportContext,
+  decryptSecret,
+  redactText,
+} from '@spend-brake/shared';
 import type { Redis } from 'ioredis';
 import { type Alert, AlertQueue } from './alerts.js';
 import { checkSources, openDriftIssue } from './drift.js';
 import { LedgerConsumer } from './ledger.js';
 import { Metrics } from './metrics.js';
+import {
+  type BillingSource,
+  bigQuerySource,
+  daysToCheck,
+  markRun,
+  reconcileDay,
+} from './reconcile.js';
 
 export interface Logger {
   info(obj: object, msg?: string): void;
@@ -21,8 +35,17 @@ export interface WorkerDeps {
   workerId: string;
   log: Logger;
   metrics?: Metrics;
-  intervals?: { ledgerMs?: number; sweepMs?: number; driftMs?: number; orgsMs?: number };
+  intervals?: {
+    ledgerMs?: number;
+    sweepMs?: number;
+    driftMs?: number;
+    orgsMs?: number;
+    reconcileMs?: number;
+  };
   fetchPage?: (url: string) => Promise<string>;
+  /** Decrypts billing-export service accounts; reconciliation is off without it. */
+  wrapper?: KeyWrapper | null;
+  billingSource?: (table: string, serviceAccountJson: string) => Promise<BillingSource>;
   github?: { repo: string; token: string };
   now?: () => Date;
 }
@@ -124,6 +147,49 @@ export class Worker {
     return changed.length;
   }
 
+  /**
+   * Compare the ledger with each configured org's Google billing export for the last few billing
+   * days (the export lags); upserts results, alerts on drift above 5%.
+   */
+  async reconcileOnce(): Promise<number> {
+    if (!this.deps.wrapper) return 0;
+    const catalog = loadGoogleMapsCatalog();
+    const configs = await this.deps.db.select().from(reconciliationConfigs);
+    let checked = 0;
+    for (const cfg of configs) {
+      let saJson = '';
+      try {
+        saJson = await decryptSecret(
+          this.deps.wrapper,
+          cfg.envelope as Envelope,
+          billingExportContext(cfg.orgId),
+        );
+        const source = await (this.deps.billingSource ?? bigQuerySource)(cfg.exportTable, saJson);
+        const alerts: Alert[] = [];
+        let latest: number | null = null;
+        for (const day of daysToCheck(this.now(), catalog.billingTimeZone)) {
+          const r = await reconcileDay(this.deps.db, source, catalog, cfg, day, this.now());
+          latest ??= r.total.driftRatio;
+          if (r.alert) alerts.push(r.alert);
+          checked++;
+        }
+        if (latest !== null) this.metrics.reconcileDrift.set({ org: cfg.orgId }, latest);
+        await this.alerts.add(alerts);
+        await markRun(this.deps.db, cfg.orgId, this.now(), null);
+      } catch (err) {
+        // Errors are stored and logged: keep the service account's key out of them.
+        const secrets = saJson
+          ? [saJson, (JSON.parse(saJson) as { private_key?: string }).private_key ?? '']
+          : [];
+        const message = redactText((err as Error).message, secrets).slice(0, 500);
+        this.deps.log.warn({ orgId: cfg.orgId, err: message }, 'reconciliation failed');
+        await markRun(this.deps.db, cfg.orgId, this.now(), message);
+      }
+    }
+    this.metrics.lastLoop.set({ loop: 'reconcile' }, Date.now() / 1000);
+    return checked;
+  }
+
   private every(ms: number, name: string, fn: () => Promise<unknown>): void {
     let busy = false;
     const tick = () => {
@@ -153,6 +219,7 @@ export class Worker {
     this.every(i.sweepMs ?? 10_000, 'sweep', () => this.sweepOnce());
     this.every(6 * 3600_000, 'partitions', () => this.partitionsOnce());
     this.every(i.driftMs ?? 24 * 3600_000, 'drift', () => this.driftOnce());
+    this.every(i.reconcileMs ?? 6 * 3600_000, 'reconcile', () => this.reconcileOnce());
     this.deps.log.info({ workerId: this.deps.workerId }, 'worker started');
   }
 

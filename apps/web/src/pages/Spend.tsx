@@ -21,6 +21,25 @@ export function Spend() {
       api<{ items: Row[] }>(`/v1/spend?groupBy=${by}&from=${encodeURIComponent(since(days))}`),
   });
   const total = (daily.data?.items ?? []).reduce((a, r) => a + r.costMicros, 0);
+  const rec = useQuery({
+    queryKey: ['reconciliation'],
+    queryFn: () =>
+      api<{ configured: boolean; message: string; lastError: string | null }>('/v1/reconciliation'),
+  });
+  const drift = useQuery({
+    queryKey: ['reconciliation', 'report'],
+    queryFn: () =>
+      api<{
+        items: {
+          day: string;
+          family: string;
+          ledgerMicros: number;
+          billedMicros: number;
+          driftRatio: number | null;
+        }[];
+      }>('/v1/reconciliation/report'),
+    enabled: rec.data?.configured === true,
+  });
 
   return (
     <section>
@@ -46,6 +65,35 @@ export function Spend() {
             label: String(r.day),
             value: r.costMicros,
           }))}
+        />
+      )}
+      <h3>Compared with Google's bill</h3>
+      <p className={rec.data?.lastError ? 'error' : 'muted'}>
+        {rec.data?.lastError
+          ? `Last check failed: ${rec.data.lastError}`
+          : (rec.data?.message ?? '')}
+      </p>
+      {rec.data?.configured && (
+        <Table
+          rows={(drift.data?.items ?? []).filter((r) => r.family === 'total')}
+          empty="No billing days compared yet."
+          columns={[
+            { label: 'Billing day (PT)', render: (r) => r.day },
+            { label: 'Proxy ledger', render: (r) => usd(r.ledgerMicros), numeric: true },
+            { label: 'Google bill', render: (r) => usd(r.billedMicros), numeric: true },
+            {
+              label: 'Drift',
+              render: (r) =>
+                r.driftRatio === null ? (
+                  '—'
+                ) : (
+                  <span className={r.driftRatio > 0.05 ? 'badge danger' : 'badge'}>
+                    {(r.driftRatio * 100).toFixed(1)}%
+                  </span>
+                ),
+              numeric: true,
+            },
+          ]}
         />
       )}
       <div className="row">

@@ -7,3 +7,4 @@ export * from './google-maps/adapter.js';
 export { TIERS, type Tier, type PlacesFields, resolveFieldMask } from './google-maps/places.js';
 export { computeRoutesTier, computeRouteMatrixTier } from './google-maps/routes.js';
 export * from './migration.js';
+export * from './reconcile.js';

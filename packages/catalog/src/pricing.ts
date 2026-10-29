@@ -5,6 +5,8 @@ export const MICROS_PER_USD = 1_000_000n;
 export interface SkuPrice {
   id: string;
   name: string;
+  /** Google's own SKU id (as in the billing export), when the provider is Google. */
+  googleSku?: string;
   /** No charge at any volume. */
   free: boolean;
   freeMonthly: bigint;

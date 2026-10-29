@@ -6,6 +6,7 @@ import {
   jsonb,
   pgTable,
   primaryKey,
+  real,
   text,
   timestamp,
   uniqueIndex,
@@ -179,4 +180,38 @@ export const webhookDeliveries = pgTable(
     at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('webhook_deliveries_hook_at').on(t.webhookId, t.at)],
+);
+
+/** Optional Google Cloud Billing export (BigQuery) per org, for reconciliation. */
+export const reconciliationConfigs = pgTable('reconciliation_configs', {
+  orgId: text('org_id')
+    .primaryKey()
+    .references(() => orgs.id),
+  /** `project.dataset.table` of the detailed or standard usage cost export. */
+  exportTable: text('export_table').notNull(),
+  /** Read-only service account JSON, envelope-encrypted. */
+  envelope: jsonb('envelope').notNull(),
+  serviceAccount: text('service_account').notNull(),
+  /** Google Cloud project ids whose costs count (the projects that own the proxied keys). */
+  projectIds: text('project_ids').array().notNull().default([]),
+  createdAt: created(),
+  lastRunAt: timestamp('last_run_at', { withTimezone: true }),
+  lastError: text('last_error'),
+});
+
+/** Ledger vs billing export, per SKU family per billing day (Pacific time). */
+export const reconciliationResults = pgTable(
+  'reconciliation_results',
+  {
+    orgId: text('org_id').notNull(),
+    day: text('day').notNull(),
+    /** Catalog SKU family (tier stripped), or `total`. */
+    family: text('family').notNull(),
+    ledgerMicros: bigint('ledger_micros', { mode: 'bigint' }).notNull(),
+    billedMicros: bigint('billed_micros', { mode: 'bigint' }).notNull(),
+    /** |ledger - billed| / billed; null when nothing was billed. */
+    driftRatio: real('drift_ratio'),
+    computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.orgId, t.day, t.family] })],
 );

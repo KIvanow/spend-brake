@@ -18,6 +18,7 @@ let routes: Record<string, (c: Call) => [number, unknown]>;
 beforeEach(() => {
   calls = [];
   sessionStorage.clear();
+  window.location.hash = '';
   routes = {
     'GET /v1/org': (c) =>
       c.auth === 'Bearer sbt_good' ? [200, { id: 'acme' }] : [401, { message: 'bad token' }],
@@ -211,10 +212,40 @@ describe('dashboard', () => {
   });
 
   it('charts spend and totals the period', async () => {
+    routes['GET /v1/reconciliation'] = () => [
+      200,
+      { configured: false, message: 'Spend is measured by the proxy only.', lastError: null },
+    ];
     const user = await signIn();
     await user.click(screen.getByRole('button', { name: 'Spend' }));
     expect(await screen.findByText('$0.04')).toBeTruthy();
     expect(screen.getByRole('img')).toBeTruthy();
     expect(await screen.findByText('$0.0420')).toBeTruthy();
+    expect(await screen.findByText('Spend is measured by the proxy only.')).toBeTruthy();
+  });
+
+  it('shows billing drift when an export is connected', async () => {
+    routes['GET /v1/reconciliation'] = () => [
+      200,
+      { configured: true, message: 'Compared daily.', lastError: null },
+    ];
+    routes['GET /v1/reconciliation/report'] = () => [
+      200,
+      {
+        items: [
+          {
+            day: '2026-10-28',
+            family: 'total',
+            ledgerMicros: 1_000_000,
+            billedMicros: 1_100_000,
+            driftRatio: 0.0909,
+          },
+        ],
+      },
+    ];
+    const user = await signIn();
+    await user.click(screen.getByRole('button', { name: 'Spend' }));
+    expect(await screen.findByText('9.1%')).toBeTruthy();
+    expect(screen.getByText('9.1%').className).toContain('danger');
   });
 });

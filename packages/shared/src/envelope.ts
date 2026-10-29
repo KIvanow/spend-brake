@@ -204,3 +204,9 @@ export async function keyWrapperFromEnv(
   if (env.BRAKE_MASTER_KEY) return new LocalKeyWrapper(env.BRAKE_MASTER_KEY);
   return null;
 }
+
+/** Context the billing-export service account is sealed with. */
+export const billingExportContext = (orgId: string) => ({
+  purpose: 'billing-export-service-account',
+  orgId,
+});

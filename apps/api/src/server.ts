@@ -15,6 +15,7 @@ import { ledgerRoutes } from './routes/ledger.js';
 import type { KeyCheck } from './google-check.js';
 import { estimateRoutes } from './routes/estimates.js';
 import { meRoutes } from './routes/me.js';
+import { reconciliationRoutes } from './routes/reconciliation.js';
 import { sessionRoutes } from './routes/sessions.js';
 import { setupRoutes } from './routes/setup.js';
 import { webhookRoutes } from './routes/webhooks.js';
@@ -113,6 +114,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   setupRoutes(app, router, ctx, deps.setupToken);
   meRoutes(app, router, ctx);
   estimateRoutes(router, ctx);
+  reconciliationRoutes(router, ctx);
 
   const spec = router.document();
   app.get('/v1/openapi.json', { config: { rateLimit: false } }, () => spec);

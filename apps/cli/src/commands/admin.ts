@@ -249,6 +249,55 @@ export function adminCommands(program: Command, io: Io, done: (code: number) => 
       },
     );
 
+  // --- reconciliation ------------------------------------------------------------------------
+  const rec = program
+    .command('reconcile')
+    .description("Compare the ledger with Google's billing export");
+  leaf(rec, 'status').action(async (_o: unknown, cmd: Command) => {
+    print(io, await apiCall(io, 'GET', '/v1/reconciliation'), pretty(cmd));
+    done(EXIT.ok);
+  });
+  leaf(rec, 'set')
+    .requiredOption('--table <project.dataset.table>', 'the billing export table in BigQuery')
+    .requiredOption('--service-account <file>', 'read-only service account key file (JSON)')
+    .option('--project <id...>', 'only count these Google Cloud projects')
+    .action(
+      async (o: { table: string; serviceAccount: string; project?: string[] }, cmd: Command) => {
+        const { readFileSync } = await import('node:fs');
+        const r = await apiCall(io, 'PUT', '/v1/reconciliation', {
+          exportTable: o.table,
+          serviceAccountJson: readFileSync(o.serviceAccount, 'utf8'),
+          projectIds: o.project ?? [],
+        });
+        print(io, r, pretty(cmd));
+        done(EXIT.ok);
+      },
+    );
+  leaf(rec, 'report').action(async (_o: unknown, cmd: Command) => {
+    const r = await apiCall<{
+      items: {
+        day: string;
+        family: string;
+        ledgerMicros: number;
+        billedMicros: number;
+        driftRatio: number | null;
+      }[];
+    }>(io, 'GET', '/v1/reconciliation/report');
+    print(
+      io,
+      r,
+      pretty(cmd),
+      r.items.map((x) => ({
+        ...x,
+        ledger: money(x.ledgerMicros),
+        billed: money(x.billedMicros),
+        drift: x.driftRatio === null ? '' : `${(x.driftRatio * 100).toFixed(1)}%`,
+      })),
+      ['day', 'family', 'ledger', 'billed', 'drift'],
+    );
+    done(EXIT.ok);
+  });
+
   // --- migration estimate ------------------------------------------------------------------------
   leaf(program, 'estimate')
     .description('What the last N days would cost on Geoapify, Stadia Maps or Open Places API')
