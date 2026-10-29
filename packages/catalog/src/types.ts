@@ -39,6 +39,11 @@ export type Classified =
       /** One request can bill several SKUs (legacy Places data SKUs). */
       items: LineItem[];
       normalizedHash: string;
+      /**
+       * Where a message goes (messaging providers): the proxy applies country allow-lists and
+       * pumping limits to it. `country` is null when the number cannot be placed.
+       */
+      destination?: { number: string; country: string | null; prefix: string };
     }
   | {
       priced: false;

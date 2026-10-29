@@ -1,4 +1,9 @@
-import { GenericAdapter, GoogleMapsAdapter, type ProviderAdapter } from '@spend-brake/catalog';
+import {
+  GenericAdapter,
+  GoogleMapsAdapter,
+  type ProviderAdapter,
+  TwilioAdapter,
+} from '@spend-brake/catalog';
 import { Registry } from '@spend-brake/budget';
 import { keyWrapperFromEnv } from '@spend-brake/shared';
 import { Redis } from 'ioredis';
@@ -19,6 +24,7 @@ const valkey = new Redis(env.VALKEY_URL, {
 });
 const adapters: ProviderAdapter[] = [
   new GoogleMapsAdapter(),
+  new TwilioAdapter(),
   ...(env.BRAKE_GENERIC_PROVIDERS ?? []).map(
     (cfg) => new GenericAdapter(cfg as ConstructorParameters<typeof GenericAdapter>[0]),
   ),

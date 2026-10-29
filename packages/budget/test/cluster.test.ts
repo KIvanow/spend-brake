@@ -64,6 +64,7 @@ describe('budget engine on a 3-node cluster', () => {
         scopes: [{ kind: 'org' } as Scope, keyScope, { kind: 'env', name: 'ci' } as Scope],
         killTargets: [{ kind: 'org' as const }, { kind: 'key' as const, id: 'k1' }],
         timeZone: 'Europe/Sofia',
+        now: NOW,
       };
       const a = { ...base, reqId: newReq(), amount: 2_000_000n };
       const r = await engine.reserve(a);

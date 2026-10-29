@@ -4,6 +4,7 @@ import {
   type CapTemplate,
   type Crossing,
   DEFAULT_LOOP_POLICY,
+  DEFAULT_PUMPING_POLICY,
   type KeyRecord,
   type KillTarget,
   type OrgRecord,
@@ -32,7 +33,14 @@ import { type Dispatcher, request as undiciRequest } from 'undici';
 import { TtlCache } from './cache.js';
 import { outcomes, sendError } from './errors.js';
 import { ProxyMetrics } from './metrics.js';
-import { decodeBody, outgoingHeaders, parseJson, responseHeaders, upstreamUrl } from './forward.js';
+import {
+  decodeBody,
+  outgoingHeaders,
+  parseBody,
+  parseJson,
+  responseHeaders,
+  upstreamUrl,
+} from './forward.js';
 import { LocalBudget } from './local-budget.js';
 import type { SecretStore } from './secrets.js';
 
@@ -69,6 +77,8 @@ declare module 'fastify' {
 class KeyNotFound extends Error {}
 
 const SESSION_ID = /^[A-Za-z0-9_.-]{1,128}$/;
+/** Messaging destinations allowed when a key has no country list: high-risk ones need opting in. */
+const DEFAULT_COUNTRIES = ['US', 'CA'];
 const CONFIG_STALE_MS = 10 * 60_000;
 const DEFAULT_SKU = 'unpriced';
 
@@ -346,7 +356,7 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
       path,
       query,
       headers: request.headers as Record<string, string | undefined>,
-      body: parseJson(rawBody),
+      body: parseBody(rawBody, request.headers['content-type']),
     };
     const providerCfg = org.providers[adapter.id] ?? {
       trustFreeTier: false,
@@ -421,6 +431,64 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
       return sendError(reply, 'sku_not_allowed', 'Key may not call this SKU.', {
         skus: priced.items.map((i) => i.sku),
       });
+    }
+
+    // Messaging: destination country allow-list and the pumping guard, before any money moves.
+    const dest = priced.classified?.destination;
+    if (dest) {
+      const allowed = key.countries ?? DEFAULT_COUNTRIES;
+      if (!dest.country || !allowed.includes(dest.country)) {
+        emit(org.id, {
+          type: 'blocked',
+          reason: 'country_not_allowed',
+          reqId: request.id,
+          keyId: key.id,
+          provider: adapter.id,
+          country: dest.country ?? 'unknown',
+        });
+        return sendError(
+          reply,
+          'sku_not_allowed',
+          `This key may not send to ${dest.country ?? 'that number'}; allowed: ${allowed.join(', ')}.`,
+          { country: dest.country },
+        );
+      }
+      try {
+        const pump = await engine.pumpCheck(
+          org.id,
+          key.id,
+          {
+            numberHash: createHash('sha256').update(dest.number).digest('hex').slice(0, 32),
+            prefix: dest.prefix.replace(/\D/g, ''),
+          },
+          key.pumping ?? DEFAULT_PUMPING_POLICY,
+        );
+        if (!pump.ok) {
+          emit(org.id, {
+            type: pump.tripped ? 'loop' : 'blocked',
+            reason: 'pumping',
+            reqId: request.id,
+            keyId: key.id,
+            provider: adapter.id,
+            prefix: dest.prefix,
+          });
+          reply.header('retry-after', String(pump.retryAfterSec));
+          return sendError(
+            reply,
+            'loop_detected',
+            'Too many messages to one number or number range; this key is paused. Stop and ask the user.',
+            { retryAfter: pump.retryAfterSec, reason: 'pumping' },
+          );
+        }
+      } catch {
+        if (!key.failOpenMicros) {
+          return sendError(
+            reply,
+            'budget_unavailable',
+            'Budget store unavailable; request blocked.',
+          );
+        }
+      }
     }
 
     // 3-4. Loop check and reserve, in one atomic script.

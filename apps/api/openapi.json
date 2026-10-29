@@ -266,6 +266,42 @@
           },
           "canMintSessions": {
             "type": "boolean"
+          },
+          "countries": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Z]{2}$"
+            },
+            "maxItems": 250
+          },
+          "pumping": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "perNumberPerHour": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              "perPrefixPerHour": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              "cooldownSec": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              }
+            },
+            "required": [
+              "perNumberPerHour",
+              "perPrefixPerHour",
+              "cooldownSec"
+            ]
           }
         },
         "required": [
@@ -395,6 +431,42 @@
           },
           "canMintSessions": {
             "type": "boolean"
+          },
+          "countries": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Z]{2}$"
+            },
+            "maxItems": 250
+          },
+          "pumping": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "perNumberPerHour": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              "perPrefixPerHour": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              "cooldownSec": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              }
+            },
+            "required": [
+              "perNumberPerHour",
+              "perPrefixPerHour",
+              "cooldownSec"
+            ]
           }
         }
       },

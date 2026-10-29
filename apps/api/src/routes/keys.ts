@@ -26,6 +26,21 @@ const keyFields = {
   allowedIps: z.array(z.string().min(1)).nullable().optional(),
   expiresAt: z.iso.datetime().nullable().optional(),
   canMintSessions: z.boolean().optional(),
+  /** Messaging: destination countries (ISO alpha-2); null = default US and CA only. */
+  countries: z
+    .array(z.string().regex(/^[A-Z]{2}$/))
+    .max(250)
+    .nullable()
+    .optional(),
+  /** Messaging pumping limits; null = defaults (5 per number, 50 per prefix, per hour). */
+  pumping: z
+    .object({
+      perNumberPerHour: z.number().int().positive(),
+      perPrefixPerHour: z.number().int().positive(),
+      cooldownSec: z.number().int().positive(),
+    })
+    .nullable()
+    .optional(),
 };
 
 const createBody = z.object(keyFields).openapi('CreateKey');
@@ -77,6 +92,8 @@ function record(keyId: string, orgId: string, f: Fields, base?: KeyRecord): KeyR
     failOpenMicros: pick('failOpenMicros', base?.failOpenMicros ?? null, (v) => v.toString()),
     allowedIps: pick('allowedIps', base?.allowedIps ?? null, (v) => v),
     canMintSessions: f.canMintSessions ?? base?.canMintSessions ?? false,
+    countries: pick('countries', base?.countries ?? null, (v) => v),
+    pumping: pick('pumping', base?.pumping ?? null, (v) => v),
     // Session-key fields are set only by POST /v1/sessions.
     sessionId: base?.sessionId ?? null,
     agentDayCapMicros: base?.agentDayCapMicros ?? null,
@@ -132,6 +149,8 @@ export function keyRoutes(r: Router, ctx: Ctx): void {
         credentials: parent.credentials,
         skus: parent.skus,
         allowedIps: parent.allowedIps,
+        countries: parent.countries,
+        pumping: parent.pumping,
         env: parent.env,
         loop: parent.loop,
         expiresAt,

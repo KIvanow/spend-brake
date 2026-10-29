@@ -21,6 +21,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "libphonenumber-js": "^1.13.11",
     "yaml": "^2.9.0",
     "zod": "^4.4.3"
   }

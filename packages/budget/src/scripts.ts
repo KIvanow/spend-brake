@@ -251,6 +251,30 @@ end
 return 'OK'
 `;
 
+/**
+ * Messaging pumping guard (SMS traffic pumping / toll fraud): sends per destination number and
+ * per number prefix per hour. Going over either opens the key's circuit for the cooldown.
+ *
+ * KEYS: circuit, perNumber, perPrefix
+ * ARGV: maxPerNumber, maxPerPrefix, cooldownSec
+ * Returns {'OK'} | {'PUMP', retryAfterSec, tripped}
+ */
+export const PUMP_LUA = `
+local open = redis.call('TTL', KEYS[1])
+if open > 0 then
+  return {'PUMP', open, 0}
+end
+local n = redis.call('INCR', KEYS[2])
+redis.call('EXPIRE', KEYS[2], 3600, 'NX')
+local p = redis.call('INCR', KEYS[3])
+redis.call('EXPIRE', KEYS[3], 3600, 'NX')
+if n > tonumber(ARGV[1]) or p > tonumber(ARGV[2]) then
+  redis.call('SET', KEYS[1], '1', 'EX', ARGV[3])
+  return {'PUMP', tonumber(ARGV[3]), 1}
+end
+return {'OK'}
+`;
+
 interface Script {
   source: string;
   sha: string;
@@ -265,6 +289,7 @@ export const scripts = {
   commit: script(COMMIT_LUA),
   settle: script(SETTLE_LUA),
   record: script(RECORD_LUA),
+  pump: script(PUMP_LUA),
 };
 
 /** EVALSHA, falling back to EVAL when the script cache is cold (restart, failover, new node). */

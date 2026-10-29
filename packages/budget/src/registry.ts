@@ -58,6 +58,22 @@ export const keyRecordSchema = z.strictObject({
   /** Source IPs (exact match) allowed to use the key; null allows any. */
   allowedIps: z.array(z.string()).nullable().default(null),
   canMintSessions: z.boolean().default(false),
+  /**
+   * Messaging: destination countries (ISO 3166 alpha-2) the key may send to. Null means the
+   * default, US and CA only: every other country is denied until allowed explicitly.
+   */
+  countries: z
+    .array(z.string().regex(/^[A-Z]{2}$/))
+    .nullable()
+    .default(null),
+  pumping: z
+    .strictObject({
+      perNumberPerHour: z.number().int().positive(),
+      perPrefixPerHour: z.number().int().positive(),
+      cooldownSec: z.number().int().positive(),
+    })
+    .nullable()
+    .default(null),
   /** Session keys minted by `brake session`: every request belongs to this session. */
   sessionId: id.nullable().default(null),
   /** Daily cap created for the key's agent scope on first use (the agent's budget per day). */

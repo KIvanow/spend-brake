@@ -60,6 +60,7 @@ export function adminCommands(program: Command, io: Io, done: (code: number) => 
     .option('--session-cap <usd>', 'budget for each X-Brake-Session the key opens')
     .option('--can-mint-sessions', 'allow `brake session` with this key')
     .option('--expires <iso>', 'expiry time')
+    .option('--countries <cc...>', 'messaging: destination countries allowed (default US CA)')
     .action(
       async (
         o: {
@@ -71,6 +72,7 @@ export function adminCommands(program: Command, io: Io, done: (code: number) => 
           sessionCap?: string;
           canMintSessions?: boolean;
           expires?: string;
+          countries?: string[];
         },
         cmd: Command,
       ) => {
@@ -90,6 +92,7 @@ export function adminCommands(program: Command, io: Io, done: (code: number) => 
           ...(o.sessionCap ? { sessionCapMicros: usdToMicros(o.sessionCap).toString() } : {}),
           ...(o.canMintSessions ? { canMintSessions: true } : {}),
           ...(o.expires ? { expiresAt: o.expires } : {}),
+          ...(o.countries ? { countries: o.countries.map((c) => c.toUpperCase()) } : {}),
         });
         print(io, r, pretty(cmd));
         done(EXIT.ok);

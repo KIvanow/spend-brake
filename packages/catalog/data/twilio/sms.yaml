@@ -1,0 +1,234 @@
+# Twilio outbound SMS price per segment, by destination country: the highest carrier price in
+# the country (the carrier is not known before sending), copied from Twilio's price CSV.
+source: https://assets.cdn.prod.twilio.com/pricing-csv/SMSPricing.csv
+verifiedAt: 2026-10-29
+currency: USD
+# US carrier pass-through fees per segment / message (highest carrier), from the US pricing page.
+carrierFeesSource: https://www.twilio.com/en-us/sms/pricing/us
+usCarrierFees: { sms: '0.0062', mms: '0.0135' }
+# MMS is only priced where Twilio publishes it; elsewhere MMS is unpriced and denied.
+mms: { US: '0.022' }
+mmsSource: https://www.twilio.com/en-us/sms/pricing/us
+countries:
+  AD: { name: 'Andorra', sms: '0.14640' }
+  AE: { name: 'United Arab Emirates', sms: '0.11760' }
+  AF: { name: 'Afghanistan', sms: '0.44600' }
+  AG: { name: 'Antigua and Barbuda', sms: '0.23840' }
+  AI: { name: 'Anguilla', sms: '0.24150' }
+  AL: { name: 'Albania', sms: '0.14190' }
+  AM: { name: 'Armenia', sms: '0.29960' }
+  AN: { name: 'Netherlands Antilles', sms: '0.17230' }
+  AO: { name: 'Angola', sms: '0.31540' }
+  AR: { name: 'Argentina', sms: '0.10340' }
+  AS: { name: 'American Samoa', sms: '0.18810' }
+  AT: { name: 'Austria', sms: '0.09790' }
+  AU: { name: 'Australia', sms: '0.05150' }
+  AW: { name: 'Aruba', sms: '0.27890' }
+  AZ: { name: 'Azerbaijan', sms: '0.41100' }
+  BA: { name: 'Bosnia and Herzegovina', sms: '0.51100' }
+  BB: { name: 'Barbados', sms: '0.26240' }
+  BD: { name: 'Bangladesh', sms: '0.59620' }
+  BE: { name: 'Belgium', sms: '0.11130' }
+  BF: { name: 'Burkina Faso', sms: '0.25680' }
+  BG: { name: 'Bulgaria', sms: '0.14660' }
+  BH: { name: 'Bahrain', sms: '0.03860' }
+  BI: { name: 'Burundi', sms: '0.46300' }
+  BJ: { name: 'Benin', sms: '0.29850' }
+  BM: { name: 'Bermuda', sms: '0.26300' }
+  BN: { name: 'Brunei', sms: '0.06500' }
+  BO: { name: 'Bolivia', sms: '0.22150' }
+  BR: { name: 'Brazil', sms: '0.05990' }
+  BS: { name: 'Bahamas', sms: '0.09040' }
+  BT: { name: 'Bhutan', sms: '0.40070' }
+  BW: { name: 'Botswana', sms: '0.15800' }
+  BY: { name: 'Belarus', sms: '0.25210' }
+  BZ: { name: 'Belize', sms: '0.29020' }
+  CA: { name: 'Canada', sms: '0.00830' }
+  CD: { name: 'DR Congo', sms: '0.29940' }
+  CF: { name: 'Central Africa', sms: '0.45180' }
+  CG: { name: 'Congo', sms: '0.33710' }
+  CH: { name: 'Switzerland', sms: '0.07690' }
+  CI: { name: 'Ivory Coast', sms: '0.49250' }
+  CK: { name: 'Cook Islands', sms: '0.13960' }
+  CL: { name: 'Chile', sms: '0.07970' }
+  CM: { name: 'Cameroon', sms: '0.31700' }
+  CN: { name: 'China', sms: '0.10820' }
+  CO: { name: 'Colombia', sms: '0.05920' }
+  CR: { name: 'Costa Rica', sms: '0.10310' }
+  CV: { name: 'Cape Verde', sms: '0.22390' }
+  CY: { name: 'Cyprus', sms: '0.08640' }
+  CZ: { name: 'Czech Republic', sms: '0.07060' }
+  DE: { name: 'Germany', sms: '0.11200' }
+  DJ: { name: 'Djibouti', sms: '0.16240' }
+  DK: { name: 'Denmark', sms: '0.05920' }
+  DM: { name: 'Dominica', sms: '0.25330' }
+  DO: { name: 'Dominican Republic', sms: '0.13080' }
+  DZ: { name: 'Algeria', sms: '0.27300' }
+  EC: { name: 'Ecuador', sms: '0.33900' }
+  EE: { name: 'Estonia', sms: '0.09580' }
+  EG: { name: 'Egypt', sms: '0.39590' }
+  ER: { name: 'Eritrea', sms: '0.12360' }
+  ES: { name: 'Spain', sms: '0.08750' }
+  ET: { name: 'Ethiopia', sms: '0.34250' }
+  FI: { name: 'Finland', sms: '0.08610' }
+  FJ: { name: 'Fiji', sms: '0.22000' }
+  FK: { name: 'Falkland Islands', sms: '0.16720' }
+  FM: { name: 'Micronesia', sms: '0.07350' }
+  FO: { name: 'Faroe Islands', sms: '0.07170' }
+  FR: { name: 'France', sms: '0.07980' }
+  GA: { name: 'Gabon', sms: '0.31460' }
+  GB: { name: 'United Kingdom', sms: '0.05600' }
+  GD: { name: 'Grenada', sms: '0.29130' }
+  GE: { name: 'Georgia', sms: '0.16840' }
+  GF: { name: 'French Guiana', sms: '0.18420' }
+  GG: { name: 'Guernsey', sms: '0.05240' }
+  GH: { name: 'Ghana', sms: '0.37410' }
+  GI: { name: 'Gibraltar', sms: '0.12250' }
+  GL: { name: 'Greenland', sms: '0.04100' }
+  GM: { name: 'Gambia', sms: '0.26060' }
+  GN: { name: 'Guinea', sms: '0.27880' }
+  GP: { name: 'Guadeloupe', sms: '0.22740' }
+  GQ: { name: 'Equatorial Guinea', sms: '0.33690' }
+  GR: { name: 'Greece', sms: '0.06570' }
+  GT: { name: 'Guatemala', sms: '0.24980' }
+  GU: { name: 'Guam', sms: '0.09830' }
+  GW: { name: 'Guinea-Bissau', sms: '0.47220' }
+  GY: { name: 'Guyana', sms: '0.33660' }
+  HK: { name: 'Hong Kong', sms: '0.07230' }
+  HN: { name: 'Honduras', sms: '0.32960' }
+  HR: { name: 'Croatia', sms: '0.13790' }
+  HT: { name: 'Haiti', sms: '0.29210' }
+  HU: { name: 'Hungary', sms: '0.09100' }
+  ID: { name: 'Indonesia', sms: '0.44140' }
+  IE: { name: 'Ireland', sms: '0.07790' }
+  IL: { name: 'Israel', sms: '0.25750' }
+  IN: { name: 'India', sms: '0.08320' }
+  IQ: { name: 'Iraq', sms: '0.50300' }
+  IS: { name: 'Iceland', sms: '0.07190' }
+  IT: { name: 'Italy', sms: '0.09270' }
+  JE: { name: 'Jersey', sms: '0.05240' }
+  JM: { name: 'Jamaica', sms: '0.31510' }
+  JO: { name: 'Jordan', sms: '0.44290' }
+  JP: { name: 'Japan', sms: '0.08900' }
+  KE: { name: 'Kenya', sms: '0.31340' }
+  KG: { name: 'Kyrgyzstan', sms: '0.45880' }
+  KH: { name: 'Cambodia', sms: '0.44180' }
+  KI: { name: 'Kiribati', sms: '0.14550' }
+  KM: { name: 'Comoros', sms: '0.41750' }
+  KN: { name: 'St Kitts and Nevis', sms: '0.25750' }
+  KR: { name: 'Korea Republic of', sms: '0.05240' }
+  KW: { name: 'Kuwait', sms: '0.31640' }
+  KY: { name: 'Cayman Islands', sms: '0.27560' }
+  KZ: { name: 'Kazakhstan', sms: '0.33820' }
+  LA: { name: 'Laos PDR', sms: '0.31180' }
+  LB: { name: 'Lebanon', sms: '0.36190' }
+  LC: { name: 'St Lucia', sms: '0.26230' }
+  LI: { name: 'Liechtenstein', sms: '0.03620' }
+  LK: { name: 'Sri Lanka', sms: '0.42000' }
+  LR: { name: 'Liberia', sms: '0.26770' }
+  LS: { name: 'Lesotho', sms: '0.41230' }
+  LT: { name: 'Lithuania', sms: '0.05780' }
+  LU: { name: 'Luxembourg', sms: '0.08180' }
+  LV: { name: 'Latvia', sms: '0.08010' }
+  LY: { name: 'Libya', sms: '0.44350' }
+  MA: { name: 'Morocco', sms: '0.22440' }
+  MC: { name: 'Monaco', sms: '0.18560' }
+  MD: { name: 'Moldova', sms: '0.16950' }
+  ME: { name: 'Montenegro', sms: '0.20440' }
+  MG: { name: 'Madagascar', sms: '0.58990' }
+  MH: { name: 'Marshall Islands', sms: '0.15890' }
+  MK: { name: 'Macedonia', sms: '0.20120' }
+  ML: { name: 'Mali', sms: '0.35900' }
+  MM: { name: 'Myanmar', sms: '0.41430' }
+  MN: { name: 'Mongolia', sms: '0.35410' }
+  MO: { name: 'Macao', sms: '0.05900' }
+  MQ: { name: 'Martinique', sms: '0.18970' }
+  MR: { name: 'Mauritania', sms: '0.36180' }
+  MS: { name: 'Montserrat', sms: '0.25250' }
+  MT: { name: 'Malta', sms: '0.06890' }
+  MU: { name: 'Mauritius', sms: '0.26640' }
+  MV: { name: 'Maldives', sms: '0.40470' }
+  MW: { name: 'Malawi', sms: '0.33070' }
+  MX: { name: 'Mexico', sms: '0.18190' }
+  MY: { name: 'Malaysia', sms: '0.33890' }
+  MZ: { name: 'Mozambique', sms: '0.41700' }
+  NA: { name: 'Namibia', sms: '0.11670' }
+  NC: { name: 'New Caledonia', sms: '0.17610' }
+  NE: { name: 'Niger', sms: '0.36520' }
+  NF: { name: 'Norfolk Island', sms: '0.02817' }
+  NG: { name: 'Nigeria', sms: '0.38680' }
+  NI: { name: 'Nicaragua', sms: '0.18560' }
+  NL: { name: 'Netherlands', sms: '0.11430' }
+  NO: { name: 'Norway', sms: '0.06970' }
+  NP: { name: 'Nepal', sms: '0.30820' }
+  NU: { name: 'Niue', sms: '0.23350' }
+  NZ: { name: 'New Zealand', sms: '0.10500' }
+  OM: { name: 'Oman', sms: '0.21580' }
+  PA: { name: 'Panama', sms: '0.18360' }
+  PE: { name: 'Peru', sms: '0.24760' }
+  PF: { name: 'French Polynesia', sms: '0.17970' }
+  PG: { name: 'Papua New Guinea', sms: '0.75440' }
+  PH: { name: 'Philippines', sms: '0.24100' }
+  PK: { name: 'Pakistan', sms: '0.47340' }
+  PL: { name: 'Poland', sms: '0.04570' }
+  PM: { name: 'St Pierre and Miquelon', sms: '0.15970' }
+  PR: { name: 'Puerto Rico', sms: '0.05400' }
+  PS: { name: 'Palestinian Territory', sms: '0.41010' }
+  PT: { name: 'Portugal', sms: '0.05010' }
+  PW: { name: 'Palau', sms: '0.13420' }
+  PY: { name: 'Paraguay', sms: '0.12080' }
+  QA: { name: 'Qatar', sms: '0.26340' }
+  RE: { name: 'Reunion/Mayotte', sms: '0.19110' }
+  RO: { name: 'Romania', sms: '0.07810' }
+  RS: { name: 'Serbia', sms: '0.40980' }
+  RU: { name: 'Russia', sms: '0.75220' }
+  RW: { name: 'Rwanda', sms: '0.32610' }
+  SA: { name: 'Saudi Arabia', sms: '0.19490' }
+  SB: { name: 'Solomon Islands', sms: '0.12650' }
+  SC: { name: 'Seychelles', sms: '0.30770' }
+  SD: { name: 'Sudan', sms: '0.47490' }
+  SE: { name: 'Sweden', sms: '0.06460' }
+  SG: { name: 'Singapore', sms: '0.05910' }
+  SI: { name: 'Slovenia', sms: '0.20510' }
+  SK: { name: 'Slovakia', sms: '0.08830' }
+  SL: { name: 'Sierra Leone', sms: '0.78490' }
+  SM: { name: 'San Marino', sms: '0.12560' }
+  SN: { name: 'Senegal', sms: '0.55060' }
+  SO: { name: 'Somalia', sms: '0.37030' }
+  SR: { name: 'Suriname', sms: '0.31720' }
+  SS: { name: 'South Sudan', sms: '0.23990' }
+  ST: { name: 'Sao Tome and Principe', sms: '0.15810' }
+  SV: { name: 'El Salvador', sms: '0.29900' }
+  SZ: { name: 'Swaziland', sms: '0.26500' }
+  TC: { name: 'Turks and Caicos Islands', sms: '0.29230' }
+  TD: { name: 'Chad', sms: '0.34580' }
+  TG: { name: 'Togo', sms: '0.49460' }
+  TH: { name: 'Thailand', sms: '0.03050' }
+  TJ: { name: 'Tajikistan', sms: '0.45050' }
+  TL: { name: 'East Timor', sms: '0.25860' }
+  TM: { name: 'Turkmenistan', sms: '0.32330' }
+  TN: { name: 'Tunisia', sms: '0.53790' }
+  TO: { name: 'Tonga', sms: '0.21770' }
+  TR: { name: 'Turkey', sms: '0.03050' }
+  TT: { name: 'Trinidad and Tobago', sms: '0.29920' }
+  TV: { name: 'Tuvalu', sms: '0.38010' }
+  TW: { name: 'Taiwan', sms: '0.08420' }
+  TZ: { name: 'Tanzania', sms: '0.43360' }
+  UA: { name: 'Ukraine', sms: '0.22680' }
+  UG: { name: 'Uganda', sms: '0.32890' }
+  US: { name: 'United States', sms: '0.00830' }
+  UY: { name: 'Uruguay', sms: '0.08520' }
+  UZ: { name: 'Uzbekistan', sms: '0.45710' }
+  VC: { name: 'St Vincent Grenadines', sms: '0.33380' }
+  VE: { name: 'Venezuela', sms: '0.22570' }
+  VG: { name: 'Virgin Islands, British', sms: '0.30800' }
+  VI: { name: 'Virgin Islands, U.S.', sms: '0.19870' }
+  VN: { name: 'Vietnam', sms: '0.28520' }
+  VU: { name: 'Vanuatu', sms: '0.21910' }
+  WF: { name: 'Wallis and Futuna', sms: '0.11000' }
+  WS: { name: 'Samoa', sms: '0.26750' }
+  XK: { name: 'Kosovo', sms: '0.25090' }
+  YE: { name: 'Yemen', sms: '0.29290' }
+  ZA: { name: 'South Africa', sms: '0.13550' }
+  ZM: { name: 'Zambia', sms: '0.39420' }
+  ZW: { name: 'Zimbabwe', sms: '0.32120' }

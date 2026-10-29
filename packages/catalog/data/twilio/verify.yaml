@@ -1,0 +1,14 @@
+# Twilio Verify: a base fee per successful verification plus the channel's delivery fee.
+source: https://www.twilio.com/en-us/verify/pricing
+verifiedAt: 2026-10-29
+currency: USD
+baseFee: '0.05'
+channels:
+  # SMS: priced like an SMS to the destination country (sms.yaml), always charged.
+  sms: { fee: sms }
+  # WhatsApp authentication templates: the page lists $0.0034 and $0.0147 for the US; the higher
+  # is used. Other countries are not published there, so WhatsApp outside the US is unpriced.
+  whatsapp: { fee: '0.0147', countries: [US] }
+  email: { fee: '0' }
+  # Voice delivery is billed at voice rates, which are not published as data: unpriced.
+  call: { fee: null }

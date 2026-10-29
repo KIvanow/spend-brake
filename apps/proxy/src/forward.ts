@@ -93,3 +93,19 @@ export function parseJson(buf: Buffer | undefined): unknown {
     return undefined;
   }
 }
+
+/**
+ * The request body as the classifier sees it: form-encoded bodies (Twilio) become an object
+ * (repeated fields become arrays); anything else is parsed as JSON.
+ */
+export function parseBody(buf: Buffer | undefined, contentType: string | undefined): unknown {
+  if (buf && /application\/x-www-form-urlencoded/i.test(contentType ?? '')) {
+    const out: Record<string, string | string[]> = {};
+    for (const [k, v] of new URLSearchParams(buf.toString('utf8'))) {
+      const prev = out[k];
+      out[k] = prev === undefined ? v : Array.isArray(prev) ? [...prev, v] : [prev, v];
+    }
+    return out;
+  }
+  return parseJson(buf);
+}

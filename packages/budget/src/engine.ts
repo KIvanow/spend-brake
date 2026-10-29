@@ -106,6 +106,19 @@ export interface RecordSpendRequest {
   event?: Record<string, string>;
 }
 
+export interface PumpingPolicy {
+  perNumberPerHour: number;
+  perPrefixPerHour: number;
+  cooldownSec: number;
+}
+
+/** Messaging defaults: a handful of messages per number, a few dozen per prefix, per hour. */
+export const DEFAULT_PUMPING_POLICY: PumpingPolicy = {
+  perNumberPerHour: 5,
+  perPrefixPerHour: 50,
+  cooldownSec: 3600,
+};
+
 export const DEFAULT_LOOP_POLICY: LoopPolicy = {
   identical: 20,
   windowSec: 60,
@@ -428,6 +441,27 @@ export class BudgetEngine {
       else result.alreadySettled++;
     }
     return result;
+  }
+
+  /**
+   * Count a message send against the pumping limits (per destination number and per number
+   * prefix, per hour); over either, the key's circuit opens for the cooldown.
+   */
+  async pumpCheck(
+    orgId: string,
+    keyId: string,
+    dest: { numberHash: string; prefix: string },
+    limits: PumpingPolicy,
+  ): Promise<{ ok: true } | { ok: false; retryAfterSec: number; tripped: boolean }> {
+    const k = orgKeys(orgId);
+    const reply = (await runScript(
+      this.client,
+      scripts.pump,
+      [k.circuit(keyId), k.pumpNumber(keyId, dest.numberHash), k.pumpPrefix(keyId, dest.prefix)],
+      [limits.perNumberPerHour, limits.perPrefixPerHour, limits.cooldownSec],
+    )) as [string, number?, number?];
+    if (reply[0] === 'OK') return { ok: true };
+    return { ok: false, retryAfterSec: Number(reply[1]), tripped: reply[2] === 1 };
   }
 
   /** Close a key's loop circuit early (the alert's "Reset circuit" action). */

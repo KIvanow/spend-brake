@@ -197,7 +197,12 @@ describe('provider credentials', () => {
 
 describe('virtual keys', () => {
   it('shows the token once and writes the key through to Valkey by hash', async () => {
-    const k = await key(a, { env: 'ci', sessionCapMicros: 5_000_000, skus: ['geocoding'] });
+    const k = await key(a, {
+      env: 'ci',
+      sessionCapMicros: 5_000_000,
+      skus: ['geocoding'],
+      countries: ['DE', 'FR'],
+    });
     expect(k.token).toMatch(/^sb_live_[0-9A-Za-z]{22}$/);
     const rec = await env.registry.getKeyByToken(k.token);
     expect(rec).toMatchObject({
@@ -206,6 +211,7 @@ describe('virtual keys', () => {
       env: 'ci',
       sessionCapMicros: '5000000',
       skus: ['geocoding'],
+      countries: ['DE', 'FR'],
       status: 'active',
     });
     const list = await call(a.viewer, { url: '/v1/keys' });

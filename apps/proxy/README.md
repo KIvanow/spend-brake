@@ -110,3 +110,13 @@ Last run (2026-10-29, one proxy process, Valkey 8 in Docker, everything includin
 0 errors over 120,000 requests. **The p99 target (< 5 ms added) is not met on this machine yet.**
 The proxy process runs at about 60% of one core at 2,000 rps; the median overhead is under
 0.5 ms, and the tail comes from Node scheduling under that load rather than from Valkey.
+
+## Messaging (Twilio)
+
+On top of dollar caps, message sends are checked before any money moves:
+
+- **Countries:** a key may only send to the countries in its `countries` list; without a list,
+  only the US and Canada. Other destinations get `403 sku_not_allowed` with the country.
+- **Pumping:** at most 5 sends per destination number and 50 per number prefix (country code + 3
+  digits) per hour per key (`pumping` on the key overrides it). Going over opens the key's circuit
+  for an hour: `429 loop_detected` with `reason: "pumping"`, and a loop alert.

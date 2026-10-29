@@ -297,3 +297,29 @@ describe('one-round-trip settle', () => {
     expect(await fields(org)).toEqual([]);
   });
 });
+
+describe('pumping guard', () => {
+  it('trips the key circuit past the per-number or per-prefix hourly limit', async () => {
+    const org = newOrg();
+    const limits = { perNumberPerHour: 2, perPrefixPerHour: 3, cooldownSec: 600 };
+    expect(await engine.pumpCheck(org, 'k1', { numberHash: 'n1', prefix: '1415' }, limits)).toEqual(
+      { ok: true },
+    );
+    expect(await engine.pumpCheck(org, 'k1', { numberHash: 'n1', prefix: '1415' }, limits)).toEqual(
+      { ok: true },
+    );
+    expect(await engine.pumpCheck(org, 'k1', { numberHash: 'n1', prefix: '1415' }, limits)).toEqual(
+      { ok: false, retryAfterSec: 600, tripped: true },
+    );
+    // The circuit now blocks everything on the key, including other numbers.
+    expect(
+      await engine.pumpCheck(org, 'k1', { numberHash: 'n9', prefix: '4420' }, limits),
+    ).toMatchObject({ ok: false, tripped: false });
+    await engine.resetCircuit(org, 'k1');
+    const p = (n: string) => engine.pumpCheck(org, 'k2', { numberHash: n, prefix: '1212' }, limits);
+    expect((await p('a')).ok).toBe(true);
+    expect((await p('b')).ok).toBe(true);
+    expect((await p('c')).ok).toBe(true);
+    expect((await p('d')).ok).toBe(false);
+  });
+});

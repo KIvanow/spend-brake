@@ -83,6 +83,11 @@ export function keys(orgId: string) {
     billingSession: (provider: string, tokenHash: string) =>
       `${p}:bsess:${part(provider, 'provider')}:${part(tokenHash, 'hash')}`,
     events: () => `${p}:events`,
+    /** Messaging sends to one destination number (hashed) / one number prefix, per hour. */
+    pumpNumber: (keyId: string, numberHash: string) =>
+      `${p}:pump:n:${part(keyId, 'key id')}:${part(numberHash, 'hash')}`,
+    pumpPrefix: (keyId: string, prefix: string) =>
+      `${p}:pump:p:${part(keyId, 'key id')}:${part(prefix, 'prefix')}`,
     resexp: () => `${p}:resexp`,
     kill: () => `${p}:kill`,
   };

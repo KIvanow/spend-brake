@@ -8,3 +8,5 @@ export { TIERS, type Tier, type PlacesFields, resolveFieldMask } from './google-
 export { computeRoutesTier, computeRouteMatrixTier } from './google-maps/routes.js';
 export * from './migration.js';
 export * from './reconcile.js';
+export * from './twilio/adapter.js';
+export { countSegments } from './twilio/segments.js';

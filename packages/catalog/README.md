@@ -75,3 +75,19 @@ new GenericAdapter({
   routes: [{ method: 'POST', path: '/v1/search', sku: 'search', pricePerRequest: '0.005' }],
 });
 ```
+
+## Twilio (Messaging and Verify)
+
+Prefixes `/twilio` (`https://api.twilio.com`) and `/twilio-verify` (`https://verify.twilio.com`);
+the credential is `<AccountSid>:<AuthToken>` (or an API key pair), injected as Basic auth.
+
+- **SMS:** segments × the destination country's highest carrier price from Twilio's price CSV
+  (`data/twilio/sms.yaml`, source and verifiedAt in the file), plus the US carrier pass-through fee
+  for US numbers. Segments follow GSM-7 / UCS-2 rules (153 / 67 per concatenated segment,
+  extension characters and surrogate pairs never split).
+- **MMS:** per message where Twilio publishes a price (US); elsewhere unpriced and denied.
+- **Verify:** $0.05 base fee per verification plus the channel's delivery fee (SMS priced as an SMS
+  to that country; WhatsApp US only; email base fee only); voice is not published as data and is
+  unpriced. The base fee is reserved with the verification; the check itself costs nothing more.
+- Sends are billed on creation (Twilio charges undelivered messages too).
+- WhatsApp messaging and numbers that cannot be placed in a country are unpriced.
