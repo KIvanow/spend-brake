@@ -56,6 +56,21 @@ export interface PriceCtx {
   trustFreeTier: boolean;
 }
 
+export interface ClassifyOptions {
+  /**
+   * Whether the provider billing session this request belongs to (see `billingSession`) was
+   * already started by an earlier billed request. Unknown counts as not started, which prices the
+   * request as the session's first.
+   */
+  billingSessionStarted?: boolean;
+}
+
+/** A provider-side billing session, such as a legacy Places autocomplete session token. */
+export interface BillingSession {
+  token: string;
+  ttlSec: number;
+}
+
 export interface Upstream {
   /** Route prefix on the proxy, e.g. `/google-maps`. */
   prefix: string;
@@ -67,7 +82,11 @@ export interface ProviderAdapter {
   /** The only origins the proxy may forward to for this provider (SSRF allow-list). */
   upstreams: readonly Upstream[];
   match(req: IncomingReq): boolean;
-  classify(req: IncomingReq): Classified;
+  classify(req: IncomingReq, opts?: ClassifyOptions): Classified;
+  /** The billing session a request opens or continues, if its price depends on that. */
+  billingSession(req: IncomingReq): BillingSession | null;
+  /** Whether `actual()` needs the response body; otherwise the proxy streams it untouched. */
+  needsBody(c: PricedClassified): boolean;
   worstCase(c: PricedClassified, ctx: PriceCtx): bigint;
   actual(c: PricedClassified, res: UpstreamRes, ctx: PriceCtx): bigint;
   injectCredential(req: OutgoingReq, secret: string): void;

@@ -56,7 +56,22 @@ function localTime(at: Date, timeZone: string): LocalTime {
 
 const pad = (n: number, w = 2) => String(n).padStart(w, '0');
 
+// Formatting a date in a time zone is the most expensive step on the hot path, and the answer
+// only changes at local midnight, so it is memoized per zone and minute (zone offsets are whole
+// minutes).
+const windowMemo = new Map<string, [Window, Window]>();
+
 export function windowsFor(now: Date, timeZone: string): [Window, Window] {
+  const memoKey = `${timeZone}|${Math.floor(now.getTime() / 60_000)}`;
+  const hit = windowMemo.get(memoKey);
+  if (hit) return hit;
+  const result = computeWindows(now, timeZone);
+  if (windowMemo.size >= 1_000) windowMemo.clear();
+  windowMemo.set(memoKey, result);
+  return result;
+}
+
+function computeWindows(now: Date, timeZone: string): [Window, Window] {
   const t = localTime(now, timeZone);
   return [
     { kind: 'd', id: `d:${t.year}${pad(t.month)}${pad(t.day)}`, ttlSec: DAY_WINDOW_TTL_SEC },

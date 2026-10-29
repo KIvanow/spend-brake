@@ -2,7 +2,9 @@ import { type Catalog, parseCatalog, readDataFile } from '../catalog.js';
 import { normalizedHash } from '../hash.js';
 import { priceItems, isPriced } from '../pricing.js';
 import type {
+  BillingSession,
   Classified,
+  ClassifyOptions,
   IncomingReq,
   LineItem,
   OutgoingReq,
@@ -37,6 +39,10 @@ export const GOOGLE_MAPS_UPSTREAMS = [
   { prefix: '/google-places', origin: PLACES },
   { prefix: '/google-routes', origin: ROUTES },
 ] as const;
+
+// Autocomplete session tokens are short-lived; a session seen again after this counts as new,
+// which can only overcharge.
+const SESSION_TTL_SEC = 600;
 
 // Never part of the loop-detection hash: credentials and per-session tokens.
 const VOLATILE = ['key', 'signature', 'sessiontoken', 'sessionToken'];
@@ -104,7 +110,7 @@ export class GoogleMapsAdapter implements ProviderAdapter {
     return this.upstreams.some((u) => u.origin === req.origin);
   }
 
-  classify(req: IncomingReq): Classified {
+  classify(req: IncomingReq, opts: ClassifyOptions = {}): Classified {
     const hash = normalizedHash({
       method: req.method,
       origin: req.origin,
@@ -114,7 +120,7 @@ export class GoogleMapsAdapter implements ProviderAdapter {
       fieldMask: fieldMask(req),
       volatile: VOLATILE,
     });
-    const r = this.route(req);
+    const r = this.route(req, opts);
     if ('unpriced' in r) {
       return { priced: false, provider: this.id, reason: r.unpriced, normalizedHash: hash };
     }
@@ -135,7 +141,7 @@ export class GoogleMapsAdapter implements ProviderAdapter {
     };
   }
 
-  private route(req: IncomingReq): Route {
+  private route(req: IncomingReq, opts: ClassifyOptions): Route {
     const method = req.method.toUpperCase();
     const { origin, path, query: q } = req;
 
@@ -201,11 +207,19 @@ export class GoogleMapsAdapter implements ProviderAdapter {
       });
       switch (place) {
         case 'autocomplete':
-          return base(
-            q.has('sessiontoken')
-              ? 'legacy.places.autocomplete_session'
-              : 'legacy.places.autocomplete',
-          );
+          if (!q.has('sessiontoken')) return base('legacy.places.autocomplete');
+          // Billed once per session: the first request carries the session price, the rest are
+          // free. A session closed by Place Details is free here too, but we cannot know that up
+          // front, so the first request keeps the abandoned-session price.
+          return {
+            route: 'legacy.places.autocomplete',
+            items: [
+              {
+                sku: 'legacy.places.autocomplete_session',
+                units: opts.billingSessionStarted ? 0n : 1n,
+              },
+            ],
+          };
         case 'queryautocomplete':
           return base('legacy.places.query_autocomplete');
         case 'findplacefromtext': {
@@ -229,6 +243,24 @@ export class GoogleMapsAdapter implements ProviderAdapter {
     }
 
     return { unpriced: `no catalog entry for ${method} ${origin}${path}` };
+  }
+
+  billingSession(req: IncomingReq): BillingSession | null {
+    const token = req.query.get('sessiontoken');
+    if (req.origin !== MAPS || !token || !req.path.startsWith('/maps/api/place/autocomplete/')) {
+      return null;
+    }
+    return { token, ttlSec: SESSION_TTL_SEC };
+  }
+
+  needsBody(c: PricedClassified): boolean {
+    // Legacy APIs report errors in a JSON status; matrices may settle on returned elements.
+    if (c.route === 'legacy.places.photo') return false;
+    return (
+      c.route.startsWith('legacy.') ||
+      c.route === 'geocoding' ||
+      c.route === 'routes.compute_route_matrix'
+    );
   }
 
   worstCase(c: PricedClassified, ctx: PriceCtx): bigint {

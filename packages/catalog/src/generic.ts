@@ -109,6 +109,14 @@ export class GenericAdapter implements ProviderAdapter {
     };
   }
 
+  billingSession(): null {
+    return null;
+  }
+
+  needsBody(): boolean {
+    return false;
+  }
+
   worstCase(c: PricedClassified): bigint {
     return c.items.reduce((sum, item) => {
       const route = this.routes.find((r) => r.sku === item.sku);

@@ -70,6 +70,19 @@ export function keys(orgId: string) {
     /** Hash of alert marks (50, 80, 100, soft) already fired for a scope in a window. */
     alerted: (scope: string, window: string) => `${p}:alerted:${scope}:${window}`,
     res: (reqId: string) => `${p}:res:${reqId}`,
+    /** Open while a key's loop circuit is tripped. */
+    circuit: (keyId: string) => `${p}:circuit:key:${part(keyId, 'key id')}`,
+    /** Identical-request counter for one key. */
+    loop: (keyId: string, hash: string) =>
+      `${p}:loop:${part(keyId, 'key id')}:${part(hash, 'hash')}`,
+    /** Requests per minute for a key or session scope label. */
+    rate: (scope: string) => `${p}:rate:${scope}`,
+    /** Units of one SKU billed in a month window, for volume bands and free allowances. */
+    units: (sku: string, window: string) => `${p}:units:${part(sku, 'sku')}:${window}`,
+    /** Marks a provider billing session (e.g. an autocomplete session token) as started. */
+    billingSession: (provider: string, tokenHash: string) =>
+      `${p}:bsess:${part(provider, 'provider')}:${part(tokenHash, 'hash')}`,
+    events: () => `${p}:events`,
     resexp: () => `${p}:resexp`,
     kill: () => `${p}:kill`,
   };

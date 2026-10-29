@@ -1,0 +1,241 @@
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { BudgetEngine, type LoopCheck, type ReserveRequest } from '../src/engine.js';
+import type { Scope } from '../src/keys.js';
+import { type TestValkey, newOrg, newReq, startValkey } from './valkey.js';
+
+const TZ = 'UTC';
+const NOW = new Date('2026-10-29T12:00:00Z');
+const keyScope: Scope = { kind: 'key', id: 'k1' };
+const sess: Scope = { kind: 'sess', id: 's1' };
+
+let valkey: TestValkey;
+let engine: BudgetEngine;
+
+beforeAll(async () => {
+  valkey = await startValkey();
+  engine = new BudgetEngine(valkey.client);
+});
+
+afterAll(async () => {
+  await valkey.stop();
+});
+
+function req(orgId: string, amount: bigint, extra: Partial<ReserveRequest> = {}): ReserveRequest {
+  return {
+    orgId,
+    reqId: newReq(),
+    amount,
+    scopes: [{ kind: 'org' }, keyScope],
+    killTargets: [{ kind: 'org' }],
+    timeZone: TZ,
+    now: NOW,
+    ...extra,
+  };
+}
+
+const loop = (hash: string, extra: Partial<LoopCheck> = {}): LoopCheck => ({
+  keyId: 'k1',
+  hash,
+  rateScope: keyScope,
+  identical: 3,
+  windowSec: 60,
+  perMinute: 1000,
+  cooldownSec: 600,
+  ...extra,
+});
+
+describe('loop detection', () => {
+  it('trips the circuit after too many identical requests and blocks everything on the key', async () => {
+    const org = newOrg();
+    for (let i = 0; i < 3; i++) {
+      expect((await engine.reserve(req(org, 1n, { loop: loop('h1') }))).outcome).toBe('ok');
+    }
+    expect(await engine.reserve(req(org, 1n, { loop: loop('h1') }))).toEqual({
+      outcome: 'loop_detected',
+      retryAfterSec: 600,
+      tripped: true,
+    });
+    // Different requests on the same key are blocked too until the cooldown ends.
+    const after = await engine.reserve(req(org, 1n, { loop: loop('h2') }));
+    expect(after).toMatchObject({ outcome: 'loop_detected', tripped: false });
+    if (after.outcome === 'loop_detected') expect(after.retryAfterSec).toBeGreaterThan(590);
+    // Nothing was reserved by blocked requests.
+    const [day] = await engine.status(org, [keyScope], TZ, NOW);
+    expect(day!.held).toBe(3n);
+
+    await engine.resetCircuit(org, 'k1');
+    expect((await engine.reserve(req(org, 1n, { loop: loop('h2') }))).outcome).toBe('ok');
+  });
+
+  it('trips on the per-minute rate of a session', async () => {
+    const org = newOrg();
+    const check = (i: number) => loop(`h${i}`, { rateScope: sess, perMinute: 5 });
+    for (let i = 0; i < 5; i++) {
+      expect((await engine.reserve(req(org, 1n, { loop: check(i) }))).outcome).toBe('ok');
+    }
+    expect((await engine.reserve(req(org, 1n, { loop: check(99) }))).outcome).toBe('loop_detected');
+  });
+
+  it('checks the kill set before the loop counters', async () => {
+    const org = newOrg();
+    await engine.kill(org, { kind: 'org' });
+    for (let i = 0; i < 10; i++) {
+      expect((await engine.reserve(req(org, 1n, { loop: loop('h') }))).outcome).toBe('killed');
+    }
+    await engine.unkill(org, { kind: 'org' });
+    expect((await engine.reserve(req(org, 1n, { loop: loop('h') }))).outcome).toBe('ok');
+  });
+});
+
+describe('cap templates', () => {
+  it('creates a session cap on first use and enforces it', async () => {
+    const org = newOrg();
+    const r = (amount: bigint) =>
+      engine.reserve(
+        req(org, amount, {
+          scopes: [{ kind: 'org' }, keyScope, sess],
+          capTemplates: [{ scope: sess, kind: 'm', hard: 5n }],
+        }),
+      );
+    expect((await r(3n)).outcome).toBe('ok');
+    expect(await engine.getCap(org, sess, 'm')).toEqual({ hard: 5n, soft: null, version: 1 });
+    expect(await r(3n)).toMatchObject({ outcome: 'budget_exceeded', scope: 'sess:s1', cap: 5n });
+    expect(await valkey.client.ttl(`bk:{o:${org}}:cap:sess:s1:m`)).toBeGreaterThan(0);
+  });
+
+  it('never overrides an existing cap', async () => {
+    const org = newOrg();
+    await engine.setCap(org, sess, 'm', { hard: 100n, soft: null });
+    const res = await engine.reserve(
+      req(org, 50n, {
+        scopes: [sess],
+        capTemplates: [{ scope: sess, kind: 'm', hard: 5n }],
+      }),
+    );
+    expect(res.outcome).toBe('ok');
+    expect((await engine.getCap(org, sess, 'm'))?.hard).toBe(100n);
+  });
+});
+
+describe('remaining', () => {
+  it('reports the smallest headroom left across capped scopes', async () => {
+    const org = newOrg();
+    await engine.setCap(org, keyScope, 'd', { hard: 100n, soft: null });
+    await engine.setCap(org, { kind: 'org' }, 'm', { hard: 50n, soft: null });
+    expect(await engine.reserve(req(org, 10n))).toMatchObject({ outcome: 'ok', remaining: 40n });
+    const uncapped = newOrg();
+    expect(await engine.reserve(req(uncapped, 10n))).toMatchObject({ remaining: null });
+  });
+});
+
+describe('monthly units', () => {
+  it('counts billed units per SKU in the month window', async () => {
+    const org = newOrg();
+    await engine.addUnits(org, [{ sku: 'geocoding', units: 3n }], TZ, NOW);
+    await engine.addUnits(
+      org,
+      [
+        { sku: 'geocoding', units: 2n },
+        { sku: 'x', units: 0n },
+      ],
+      TZ,
+      NOW,
+    );
+    const units = await engine.monthlyUnits(org, ['geocoding', 'x'], TZ, NOW);
+    expect(units).toEqual(
+      new Map([
+        ['geocoding', 5n],
+        ['x', 0n],
+      ]),
+    );
+    const nextMonth = await engine.monthlyUnits(
+      org,
+      ['geocoding'],
+      TZ,
+      new Date('2026-11-01T00:00:01Z'),
+    );
+    expect(nextMonth.get('geocoding')).toBe(0n);
+    expect(await valkey.client.ttl(`bk:{o:${org}}:units:geocoding:m:202610`)).toBeGreaterThan(0);
+  });
+});
+
+describe('billing sessions and events', () => {
+  it('reports only the first request of a billing session', async () => {
+    const org = newOrg();
+    expect(await engine.startBillingSession(org, 'google-maps', 'abc', 300)).toBe(true);
+    expect(await engine.startBillingSession(org, 'google-maps', 'abc', 300)).toBe(false);
+    expect(await engine.startBillingSession(org, 'google-maps', 'def', 300)).toBe(true);
+  });
+
+  it('appends events to the org stream', async () => {
+    const org = newOrg();
+    await engine.emit(org, { type: 'usage', reqId: 'r1', costMicros: '5000' });
+    const entries = await valkey.client.xrange(`bk:{o:${org}}:events`, '-', '+');
+    expect(entries).toHaveLength(1);
+    expect(entries[0]![1]).toEqual(['type', 'usage', 'reqId', 'r1', 'costMicros', '5000']);
+  });
+});
+
+describe('one-round-trip settle', () => {
+  const fields = async (org: string) =>
+    (await valkey.client.xrange(`bk:{o:${org}}:events`, '-', '+')).map(([, f]) => {
+      const o: Record<string, string> = {};
+      for (let i = 0; i < f.length; i += 2) o[f[i]!] = f[i + 1]!;
+      return o;
+    });
+
+  it('commits, counts units and appends the event atomically', async () => {
+    const org = newOrg();
+    const r = req(org, 10n);
+    const res = await engine.reserve(r);
+    if (res.outcome !== 'ok') throw new Error(res.outcome);
+    const c = await engine.settle(org, r.reqId, 7n, res.handle, {
+      timeZone: TZ,
+      now: NOW,
+      units: [{ sku: 'geocoding', units: 2n }],
+      event: { type: 'usage', reqId: r.reqId },
+    });
+    expect(c).toEqual({ outcome: 'committed', reserved: 10n, actual: 7n, underpriced: false });
+    const [day] = await engine.status(org, [keyScope], TZ, NOW);
+    expect(day).toMatchObject({ spent: 7n, held: 0n });
+    expect((await engine.monthlyUnits(org, ['geocoding'], TZ, NOW)).get('geocoding')).toBe(2n);
+    expect(await fields(org)).toEqual([{ type: 'usage', reqId: r.reqId }]);
+    expect(await valkey.client.zcard(`bk:{o:${org}}:resexp`)).toBe(0);
+  });
+
+  it('flags underpriced and late settles, and never double-commits', async () => {
+    const org = newOrg();
+    const r = req(org, 10n);
+    const res = await engine.reserve(r);
+    if (res.outcome !== 'ok') throw new Error(res.outcome);
+    const opts = { timeZone: TZ, now: NOW, event: { type: 'usage' } };
+    expect(await engine.settle(org, r.reqId, 12n, res.handle, opts)).toMatchObject({
+      underpriced: true,
+    });
+    expect(await engine.settle(org, r.reqId, 12n, res.handle, opts)).toEqual({
+      outcome: 'already_settled',
+    });
+    const [day] = await engine.status(org, [keyScope], TZ, NOW);
+    expect(day).toMatchObject({ spent: 12n, held: 0n });
+    expect(await fields(org)).toEqual([
+      { type: 'usage', underpriced: '1' },
+      { type: 'usage', late: '1' },
+    ]);
+  });
+
+  it('refunds with actual 0 and counts no units', async () => {
+    const org = newOrg();
+    const r = req(org, 10n);
+    const res = await engine.reserve(r);
+    if (res.outcome !== 'ok') throw new Error(res.outcome);
+    await engine.settle(org, r.reqId, 0n, res.handle, {
+      timeZone: TZ,
+      now: NOW,
+      units: [{ sku: 'geocoding', units: 1n }],
+    });
+    const [day] = await engine.status(org, [keyScope], TZ, NOW);
+    expect(day).toMatchObject({ spent: 0n, held: 0n });
+    expect((await engine.monthlyUnits(org, ['geocoding'], TZ, NOW)).get('geocoding')).toBe(0n);
+    expect(await fields(org)).toEqual([]);
+  });
+});

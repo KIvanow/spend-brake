@@ -38,7 +38,7 @@ Pricing rules, all built to never undercharge:
   elements; it only settles higher if the response holds more elements than that.
 - **Legacy Places:** base SKU plus Contact and Atmosphere data SKUs from `fields`. Text and Nearby
   Search take no field list, so both data SKUs always apply. Autocomplete with a session token
-  prices at the per-session SKU.
+  charges the per-session SKU on the token's first request and nothing after it.
 - **Billing:** only 2xx responses are billed. Legacy APIs answering `REQUEST_DENIED`,
   `INVALID_REQUEST`, `OVER_QUERY_LIMIT` or `OVER_DAILY_LIMIT` are not billed; other statuses
   (`ZERO_RESULTS`, `NOT_FOUND`, ...) are.
@@ -54,6 +54,10 @@ Pricing rules, all built to never undercharge:
   proxy can answer `402 unpriced_route`; `worstCase`/`actual` only take priced requests.
 - One request can bill several SKUs (`items`), as legacy Places data SKUs do.
 - `billedOnStatus(status, classified?)` is route-aware: photo endpoints bill their 302 redirect.
+- `needsBody(c)` says whether `actual()` needs the response body (legacy JSON statuses, matrices);
+  otherwise the proxy streams the response untouched.
+- `billingSession(req)` and `classify(req, { billingSessionStarted })` price provider billing
+  sessions once: a legacy autocomplete session token is charged on its first request only.
 - Prices keep Google's own unit (USD per 1,000 events, as strings) with volume bands shared per
   file; `source` and `verifiedAt` are recorded per file, with Google's SKU ID on every price.
 

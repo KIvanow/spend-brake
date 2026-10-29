@@ -9,15 +9,26 @@ All money is integer micro-dollars (`bigint` in TypeScript, integers below 2^53 
 
 Every key for an org carries the hash tag `{o:<orgId>}`, so every script works on Valkey Cluster.
 
-| Key                                   | Type         | Meaning                                        |
-| ------------------------------------- | ------------ | ---------------------------------------------- |
-| `bk:{o:ORG}:spent:<scope>:<window>`   | string int   | Committed micros                               |
-| `bk:{o:ORG}:held:<scope>:<window>`    | string int   | Reserved, not yet settled                      |
-| `bk:{o:ORG}:cap:<scope>:<d\|m>`       | hash         | `hard`, `soft`, `version`                      |
-| `bk:{o:ORG}:alerted:<scope>:<window>` | hash         | Marks already fired: `50`, `80`, `100`, `soft` |
-| `bk:{o:ORG}:res:<reqId>`              | hash, no TTL | `amount`, `n`, and `h<i>`/`s<i>` key pairs     |
-| `bk:{o:ORG}:resexp`                   | zset         | reqId by expiry (ms), for the sweeper          |
-| `bk:{o:ORG}:kill`                     | set          | `org`, `key:<id>`, `prov:<name>`, `sess:<id>`  |
+| Key                                   | Type          | Meaning                                        |
+| ------------------------------------- | ------------- | ---------------------------------------------- |
+| `bk:{o:ORG}:spent:<scope>:<window>`   | string int    | Committed micros                               |
+| `bk:{o:ORG}:held:<scope>:<window>`    | string int    | Reserved, not yet settled                      |
+| `bk:{o:ORG}:cap:<scope>:<d\|m>`       | hash          | `hard`, `soft`, `version`                      |
+| `bk:{o:ORG}:alerted:<scope>:<window>` | hash          | Marks already fired: `50`, `80`, `100`, `soft` |
+| `bk:{o:ORG}:res:<reqId>`              | hash, no TTL  | `amount`, `n`, and `h<i>`/`s<i>` key pairs     |
+| `bk:{o:ORG}:resexp`                   | zset          | reqId by expiry (ms), for the sweeper          |
+| `bk:{o:ORG}:kill`                     | set           | `org`, `key:<id>`, `prov:<name>`, `sess:<id>`  |
+| `bk:{o:ORG}:circuit:key:<id>`         | string, TTL   | Loop circuit open until it expires             |
+| `bk:{o:ORG}:loop:<keyId>:<hash>`      | int, TTL      | Identical requests in the loop window          |
+| `bk:{o:ORG}:rate:<scope>`             | int, TTL 60 s | Requests per minute on a session (or key)      |
+| `bk:{o:ORG}:units:<sku>:m:YYYYMM`     | int           | Billed units, for volume bands / free tier     |
+| `bk:{o:ORG}:bsess:<prov>:<tokenHash>` | string, TTL   | Provider billing session already started       |
+| `bk:{o:ORG}:events`                   | stream        | Usage and block events for the worker          |
+| `bk:{o:ORG}:org`                      | string (JSON) | Org config (time zone, providers, loop policy) |
+| `bk:vk:<sha256(token)>`               | string (JSON) | Virtual key record                             |
+
+`bk:vk:*` is the one key outside an org hash tag: keys are looked up before the org is known. It
+is a single-key read and never used inside a Lua script.
 
 `<scope>` is `org`, `key:<id>`, `sku:<provider>:<sku>`, `env:<name>`, `sess:<id>` or `agent:<id>`.
 `<window>` is `d:YYYYMMDD` or `m:YYYYMM` in the org's time zone. Window keys expire after 40 days
@@ -36,6 +47,13 @@ Differences from the design doc, agreed during Phase 1 review:
   that no longer fits means the cap is reached for practical purposes.
 - A denial reports `used` (committed plus held), not just committed spend.
 - Reserving with a `reqId` that is still reserved throws instead of double-counting.
+
+## Reserve, then settle
+
+`reserve` also runs the loop check (kill set first, then the circuit, then the identical-request
+and per-minute counters) and can create a scope's cap from a template on first use (session
+budgets). It returns the smallest headroom left and a handle; `settle` takes that handle and, in
+one call, commits the actual cost, counts billed units and appends the usage event.
 
 ## Usage
 

@@ -107,14 +107,45 @@ describe('google-maps adapter', () => {
     expect(c.priced && adapter.worstCase(c, ctx())).toBe(0n);
   });
 
-  it('prices legacy autocomplete with a session token at the per-session SKU', () => {
-    const c = adapter.classify(
-      req(
-        'GET',
-        'https://maps.googleapis.com/maps/api/place/autocomplete/json?input=pi&sessiontoken=abc',
-      ),
+  it('prices a legacy autocomplete session once, on its first request', () => {
+    const r = req(
+      'GET',
+      'https://maps.googleapis.com/maps/api/place/autocomplete/json?input=pi&sessiontoken=abc',
     );
-    expect(c.priced && c.items[0]!.sku).toBe('legacy.places.autocomplete_session');
+    expect(adapter.billingSession(r)).toEqual({ token: 'abc', ttlSec: 600 });
+    const first = adapter.classify(r);
+    const later = adapter.classify(r, { billingSessionStarted: true });
+    if (!first.priced || !later.priced) throw new Error();
+    expect(first.items).toEqual([{ sku: 'legacy.places.autocomplete_session', units: 1n }]);
+    expect(adapter.worstCase(first, ctx())).toBe(17_000n);
+    expect(adapter.worstCase(later, ctx())).toBe(0n);
+    // Without a token every request is billed on its own.
+    const noToken = req(
+      'GET',
+      'https://maps.googleapis.com/maps/api/place/autocomplete/json?input=pi',
+    );
+    expect(adapter.billingSession(noToken)).toBeNull();
+    const c = adapter.classify(noToken);
+    expect(c.priced && adapter.worstCase(c, ctx())).toBe(2_830n);
+  });
+
+  it('asks for the response body only where the price depends on it', () => {
+    const needs = (method: string, url: string, body?: unknown) => {
+      const c = adapter.classify(req(method, url, { body, headers: { 'X-Goog-FieldMask': 'id' } }));
+      if (!c.priced) throw new Error(c.reason);
+      return adapter.needsBody(c);
+    };
+    expect(needs('GET', 'https://maps.googleapis.com/maps/api/geocode/json?address=x')).toBe(true);
+    expect(needs('GET', 'https://maps.googleapis.com/maps/api/place/photo?photo_reference=x')).toBe(
+      false,
+    );
+    expect(needs('GET', 'https://places.googleapis.com/v1/places/ChIJ1')).toBe(false);
+    expect(
+      needs('POST', 'https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix', {
+        origins: [],
+        destinations: [],
+      }),
+    ).toBe(true);
   });
 
   it('injects the real key in the place each API expects and drops the client key', () => {

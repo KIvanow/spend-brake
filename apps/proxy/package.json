@@ -7,11 +7,22 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "dev": "tsx watch src/main.ts",
-    "start": "node dist/main.js",
+    "start": "node --max-semi-space-size=64 dist/main.js",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "seed": "tsx src/seed.ts",
+    "bench:upstream": "tsx bench/mock-upstream.ts"
   },
   "dependencies": {
-    "fastify": "^5.12.5"
+    "@spend-brake/budget": "workspace:^",
+    "@spend-brake/catalog": "workspace:^",
+    "@spend-brake/shared": "workspace:^",
+    "fastify": "^5.12.5",
+    "ioredis": "^6.0.0",
+    "undici": "^8.12.3",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "testcontainers": "^12.2.1"
   }
 }

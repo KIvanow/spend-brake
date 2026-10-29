@@ -68,9 +68,31 @@ importers:
 
   apps/proxy:
     dependencies:
+      '@spend-brake/budget':
+        specifier: workspace:^
+        version: link:../../packages/budget
+      '@spend-brake/catalog':
+        specifier: workspace:^
+        version: link:../../packages/catalog
+      '@spend-brake/shared':
+        specifier: workspace:^
+        version: link:../../packages/shared
       fastify:
         specifier: ^5.12.5
         version: 5.12.5
+      ioredis:
+        specifier: ^6.0.0
+        version: 6.0.0
+      undici:
+        specifier: ^8.12.3
+        version: 8.12.3
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+    devDependencies:
+      testcontainers:
+        specifier: ^12.2.1
+        version: 12.2.1
 
   apps/web:
     dependencies:
@@ -101,6 +123,9 @@ importers:
       ioredis:
         specifier: ^6.0.0
         version: 6.0.0
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       fast-check:
         specifier: ^4.9.0
