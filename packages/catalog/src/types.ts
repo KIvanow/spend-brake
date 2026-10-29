@@ -68,12 +68,18 @@ export interface ClassifyOptions {
    * request as the session's first.
    */
   billingSessionStarted?: boolean;
+  /** Billed requests already counted in that session (0 when not started or unknown). */
+  billingSessionCalls?: number;
 }
 
 /** A provider-side billing session, such as a legacy Places autocomplete session token. */
 export interface BillingSession {
   token: string;
   ttlSec: number;
+  /** The session expires `ttlSec` after its latest request rather than its first. */
+  sliding?: boolean;
+  /** This request closes the session (the next one with the same token opens a new one). */
+  ends?: boolean;
 }
 
 export interface Upstream {

@@ -1,4 +1,10 @@
-import { estimateMigration, loadAlternatives } from '@spend-brake/catalog';
+import {
+  estimateMigration,
+  loadAlternatives,
+  loadHereCatalog,
+  loadMapboxCatalog,
+  loadPayAsYouGo,
+} from '@spend-brake/catalog';
 import { and, eq, gte, sql, usageEvents } from '@spend-brake/db';
 import { z } from 'zod';
 import type { Ctx } from '../common.js';
@@ -6,6 +12,13 @@ import type { Router } from '../route.js';
 import { orgTimeZone } from './budget.js';
 
 const alternatives = loadAlternatives();
+const payg = {
+  providers: loadPayAsYouGo(),
+  catalogs: new Map([
+    ['mapbox', loadMapboxCatalog()],
+    ['here', loadHereCatalog()],
+  ]),
+};
 
 export function estimateRoutes(r: Router, ctx: Ctx): void {
   r.add({
@@ -14,7 +27,7 @@ export function estimateRoutes(r: Router, ctx: Ctx): void {
     role: 'viewer',
     tag: 'Spend',
     summary:
-      'Price the last N days of usage on OSM-based providers (Geoapify, Stadia Maps, Open Places API)',
+      'Price the last N days of Google Maps usage on Geoapify, Stadia Maps, Open Places API, Mapbox and HERE',
     body: z.object({ days: z.number().int().min(1).max(90).default(30) }),
     response: z.object({}).passthrough(),
     handler: async ({ auth, body }) => {
@@ -36,6 +49,7 @@ export function estimateRoutes(r: Router, ctx: Ctx): void {
           and(
             eq(usageEvents.orgId, auth.orgId),
             eq(usageEvents.type, 'usage'),
+            eq(usageEvents.provider, 'google-maps'),
             gte(usageEvents.ts, since),
             sql`${usageEvents.status} between 200 and 399`,
             sql`${usageEvents.sku} is not null`,
@@ -52,6 +66,7 @@ export function estimateRoutes(r: Router, ctx: Ctx): void {
         })),
         alternatives,
         body.days,
+        payg,
       );
     },
   });

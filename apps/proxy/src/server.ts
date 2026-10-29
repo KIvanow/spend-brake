@@ -82,6 +82,9 @@ const SESSION_ID = /^[A-Za-z0-9_.-]{1,128}$/;
 const DEFAULT_COUNTRIES = ['US', 'CA'];
 const CONFIG_STALE_MS = 10 * 60_000;
 const DEFAULT_SKU = 'unpriced';
+// Where a provider's own key goes, so a virtual key can take its place: Google `key`, Mapbox
+// `access_token`, HERE `apiKey`.
+const DROP_IN_PARAMS = ['key', 'access_token', 'apiKey'];
 
 interface Route {
   adapter: ProviderAdapter;
@@ -243,8 +246,13 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
     const header = request.headers['x-brake-key'];
     if (typeof header === 'string' && header) return header;
     // Drop-in mode: the virtual key sits where the provider's own key would.
-    const param = query.get('key');
-    if (param && isVirtualKey(param)) return param;
+    for (const name of DROP_IN_PARAMS) {
+      const param = query.get(name);
+      if (param && isVirtualKey(param)) return param;
+    }
+    // HERE clients send OAuth tokens as a bearer token.
+    const bearer = /^Bearer (\S+)$/i.exec(request.headers.authorization ?? '')?.[1];
+    if (bearer && isVirtualKey(bearer)) return bearer;
     const goog = request.headers['x-goog-api-key'];
     if (typeof goog === 'string' && isVirtualKey(goog)) return goog;
     return null;
@@ -348,6 +356,7 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
       );
     }
     query.delete('key');
+    for (const name of DROP_IN_PARAMS) if (isVirtualKey(query.get(name) ?? '')) query.delete(name);
 
     // 2. Classify and price.
     const rawBody = Buffer.isBuffer(request.body) ? request.body : undefined;
@@ -372,10 +381,14 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
     // more requests inside it than it holds. Only the actual cost uses it (fresh counts below).
     let ctx: PriceCtx = { monthlyUnits: new Map(), trustFreeTier: false };
     try {
-      const started =
-        billingSessionHash !== null &&
-        (await engine.isBillingSessionStarted(org.id, adapter.id, billingSessionHash));
-      const c = adapter.classify(incoming, { billingSessionStarted: started });
+      const calls =
+        billingSessionHash === null
+          ? 0
+          : await engine.billingSessionCalls(org.id, adapter.id, billingSessionHash);
+      const c = adapter.classify(incoming, {
+        billingSessionStarted: calls > 0,
+        billingSessionCalls: calls,
+      });
       if (c.priced) {
         ctx = {
           monthlyUnits: await monthlyUnits(org, [...new Set(c.items.map((i) => i.sku))], at),
@@ -712,12 +725,20 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
                 new Date(at.getTime() + 120_000),
               );
             }
-            if (billed && billingSessionHash && billingSession) {
-              await engine.startBillingSession(
+            // Every accepted request counts toward the session, including the free ones (later
+            // keystrokes, the request that closes it).
+            if (
+              billingSessionHash &&
+              billingSession &&
+              priced.classified &&
+              adapter.billedOnStatus(status, priced.classified)
+            ) {
+              await engine.recordBillingSessionCall(
                 org.id,
                 adapter.id,
                 billingSessionHash,
                 billingSession.ttlSec,
+                { sliding: billingSession.sliding ?? false, end: billingSession.ends ?? false },
               );
             }
           } catch (err) {

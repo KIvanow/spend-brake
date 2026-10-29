@@ -32,11 +32,18 @@ The request path. Every proxied call goes through these steps:
 
 ## Routes
 
-| Prefix           | Upstream                        |
-| ---------------- | ------------------------------- |
-| `/google-maps`   | `https://maps.googleapis.com`   |
-| `/google-places` | `https://places.googleapis.com` |
-| `/google-routes` | `https://routes.googleapis.com` |
+| Prefix                                                                                           | Upstream                                                                            |
+| ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| `/google-maps`                                                                                   | `https://maps.googleapis.com`                                                       |
+| `/google-places`                                                                                 | `https://places.googleapis.com`                                                     |
+| `/google-routes`                                                                                 | `https://routes.googleapis.com`                                                     |
+| `/twilio`, `/twilio-verify`                                                                      | `https://api.twilio.com`, `https://verify.twilio.com`                               |
+| `/mapbox`                                                                                        | `https://api.mapbox.com`                                                            |
+| `/here-geocode`, `/here-revgeocode`, `/here-discover`, `/here-autosuggest`, `/here-autocomplete` | `https://{geocode,revgeocode,discover,autosuggest,autocomplete}.search.hereapi.com` |
+| `/here-router`, `/here-matrix`                                                                   | `https://router.hereapi.com`, `https://matrix.router.hereapi.com`                   |
+
+In drop-in mode the virtual key goes where the provider's own key would: `key` or
+`X-Goog-Api-Key` (Google), `access_token` (Mapbox), `apiKey` or `Authorization: Bearer` (HERE).
 
 Generic providers add their own prefix (`BRAKE_GENERIC_PROVIDERS`).
 

@@ -183,19 +183,20 @@ describe('POST /v1/estimates/migration', () => {
       ts: new Date(now - daysAgo * 86_400_000),
       streamId: `${i}-0`,
       type: 'usage',
+      provider: 'google-maps',
       sku,
       costMicros: cost,
       status,
       data: { units: '1' },
     });
-    await env.db
-      .insert(usageEvents)
-      .values([
-        ...Array.from({ length: 40 }, (_, i) => ev(i, 'geocoding', 5000n)),
-        ev(100, 'places.text_search.pro', 32_000n),
-        ev(101, 'geocoding', 0n, 400),
-        ev(102, 'geocoding', 5000n, 200, 45),
-      ]);
+    await env.db.insert(usageEvents).values([
+      ...Array.from({ length: 40 }, (_, i) => ev(i, 'geocoding', 5000n)),
+      ev(100, 'places.text_search.pro', 32_000n),
+      ev(101, 'geocoding', 0n, 400),
+      ev(102, 'geocoding', 5000n, 200, 45),
+      // Other providers' usage is not Google spend to migrate.
+      { ...ev(103, 'twilio.sms.US', 14_500n, 201), provider: 'twilio' },
+    ]);
     const res = await env.app.inject({
       method: 'POST',
       url: '/v1/estimates/migration',
@@ -206,7 +207,12 @@ describe('POST /v1/estimates/migration', () => {
     const body = res.json<{
       googleCostMicros: number;
       requests: number;
-      alternatives: { provider: string; plan: string; uncovered: { sku: string }[] }[];
+      alternatives: {
+        provider: string;
+        plan: string;
+        monthlyCostMicros: number;
+        uncovered: { sku: string }[];
+      }[];
     }>();
     expect(body.googleCostMicros).toBe(40 * 5000 + 32_000);
     expect(body.requests).toBe(41);
@@ -215,9 +221,16 @@ describe('POST /v1/estimates/migration', () => {
     expect(op.uncovered.map((u) => u.sku)).toEqual(['geocoding']);
     expect(body.alternatives.map((a) => a.provider).sort()).toEqual([
       'geoapify',
+      'here',
+      'mapbox',
       'openplacesapi',
       'stadia',
     ]);
+    // 40 geocodes and one text search, a month's worth, at list price without free tiers.
+    const mapbox = body.alternatives.find((a) => a.provider === 'mapbox')!;
+    expect(mapbox).toMatchObject({ plan: 'Pay as you go', monthlyCostMicros: 40 * 750 + 1700 });
+    const here = body.alternatives.find((a) => a.provider === 'here')!;
+    expect(here.monthlyCostMicros).toBe(40 * 880 + 2920);
   });
 });
 

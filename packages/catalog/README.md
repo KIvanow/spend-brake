@@ -5,10 +5,13 @@ prices live in data files that cite their source and verification date.
 
 ## Data
 
-| File                                  | Source                                                                              |
-| ------------------------------------- | ----------------------------------------------------------------------------------- |
-| `data/google-maps/catalog.yaml`       | https://developers.google.com/maps/billing-and-pricing/pricing (updated 2026-10-28) |
-| `data/google-maps/places-fields.yaml` | https://developers.google.com/maps/documentation/places/web-service/data-fields     |
+| File                                            | Source                                                                                           |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `data/google-maps/catalog.yaml`                 | https://developers.google.com/maps/billing-and-pricing/pricing (updated 2026-10-28)              |
+| `data/google-maps/places-fields.yaml`           | https://developers.google.com/maps/documentation/places/web-service/data-fields                  |
+| `data/mapbox/catalog.yaml`                      | https://www.mapbox.com/pricing (verified 2026-10-30)                                             |
+| `data/here/catalog.yaml`                        | https://www.here.com/get-started/pricing, each service's "Pricing details" (verified 2026-10-30) |
+| `data/migration/alternatives.yaml`, `payg.yaml` | Plans and SKU mappings for the migration estimator                                               |
 
 Both were verified on 2026-10-29. Prices are copied as USD per 1,000 events, exactly as on the
 page, with Google's SKU ID next to each. A SKU whose price is not verified has `per1000: null`;
@@ -93,3 +96,50 @@ the credential is `<AccountSid>:<AuthToken>` (or an API key pair), injected as B
   worst case and queues the message SID; the worker reads the message's final `price` from Twilio
   and adjusts spend by the difference (`TwilioAdapter.settledPrice`, carrier fees included).
 - WhatsApp messaging and numbers that cannot be placed in a country are unpriced.
+
+## Mapbox
+
+Prefix `/mapbox` (`https://api.mapbox.com`); the token is injected as `access_token`. Prices are
+tiered per month (`data/mapbox/catalog.yaml`); the free tier is ignored unless the org trusts it.
+
+| Route                                                                             | Billed as                                                                         |
+| --------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `GET /search/geocode/v6/forward`, `/reverse`, `GET /geocoding/v5/mapbox.places/…` | Temporary geocoding; `permanent=true` (or `mapbox.places-permanent`) is permanent |
+| `POST /search/geocode/v6/batch`, `mapbox.places-permanent/a;b;c.json`             | One request per query in the batch                                                |
+| `/directions/v5/mapbox/{profile}/…`                                               | One request                                                                       |
+| `GET /directions-matrix/v1/mapbox/{profile}/…`                                    | Sources x destinations elements                                                   |
+| `GET /search/searchbox/v1/suggest`, `/retrieve/{id}`                              | Per session (below)                                                               |
+| `GET /search/searchbox/v1/forward`, `/category/{id}`, `/reverse`                  | One request                                                                       |
+| `GET /styles/v1/{user}/{style}/static/…`                                          | Static Images, one request                                                        |
+
+Search Box sessions follow Mapbox's rules: the first `/suggest` with a `session_token` opens a
+billed session, later `/suggest` calls in it are free, `/retrieve` closes it, and the 51st
+`/suggest` or a pause of 180 s opens a new one. The page lists "introductory preview" and
+"standard" Search Box prices without saying which applies; the higher (standard) ones are used.
+Tiles, styles, fonts, GL and the other APIs (Isochrone, Optimization, Map Matching) are unpriced.
+
+## HERE
+
+Prefixes `/here-geocode`, `/here-revgeocode`, `/here-discover`, `/here-autosuggest`,
+`/here-autocomplete`, `/here-router` and `/here-matrix`. The credential is an API key (sent as
+`apiKey`) or `Bearer <token>` (sent as the Authorization header; HERE OAuth tokens expire after
+24 hours, so a stored token has to be rotated by hand).
+
+| Route                                                 | Billed as                                                                                                                    |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `/v1/geocode`, `/v1/revgeocode`                       | Geocode and Reverse Geocode                                                                                                  |
+| `/v1/discover`, `/v1/autosuggest`, `/v1/autocomplete` | Discover / Search, Autosuggest, Autocomplete                                                                                 |
+| `/v8/routes` car, pedestrian, bicycle                 | Routing ($0.88) with `departureTime=any` or `traffic[mode]=disabled`, otherwise time-aware routing ($2.92), as HERE bills it |
+| `/v8/routes` truck                                    | Routing Truck                                                                                                                |
+| `POST /v8/matrix`                                     | Transactions: origins x destinations when either is below 5, else 5 x the larger                                             |
+| `GET /v8/matrix/{id}`, `/status`                      | Free (polling an asynchronous matrix)                                                                                        |
+
+Other transport modes, EV routing, toll costs and Lookup/Browse are unpriced until their price
+lists are transcribed. HERE renders prices client-side, so the worker's price drift check cannot
+watch the page; re-verify by hand.
+
+## Migration estimator
+
+`estimateMigration` prices the Google ledger on the OSM providers in `alternatives.yaml` (plans
+and credits) and, side by side, on Mapbox and HERE through their own catalogs
+(`payg.yaml` maps Google SKUs to theirs). Free allowances are not applied unless asked.

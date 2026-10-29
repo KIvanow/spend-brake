@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { BudgetEngine, type LoopCheck, type ReserveRequest } from '../src/engine.js';
-import type { Scope } from '../src/keys.js';
+import { type Scope, keys as orgKeys } from '../src/keys.js';
 import { type TestValkey, newOrg, newReq, startValkey } from './valkey.js';
 
 const TZ = 'UTC';
@@ -371,5 +371,27 @@ describe('pending settlements', () => {
     ]);
     expect([a, b].sort()).toEqual([false, true]);
     expect(await engine.duePending(org, new Date(NOW.getTime() + 999_000))).toEqual([]);
+  });
+});
+
+describe('billing session calls', () => {
+  it('counts calls, keeps a fixed or sliding TTL and ends on request', async () => {
+    const org = newOrg();
+    expect(await engine.billingSessionCalls(org, 'mapbox', 'h1')).toBe(0);
+    await engine.recordBillingSessionCall(org, 'mapbox', 'h1', 180, { sliding: true });
+    await engine.recordBillingSessionCall(org, 'mapbox', 'h1', 180, { sliding: true });
+    expect(await engine.billingSessionCalls(org, 'mapbox', 'h1')).toBe(2);
+    expect(await engine.isBillingSessionStarted(org, 'mapbox', 'h1')).toBe(true);
+    await engine.recordBillingSessionCall(org, 'mapbox', 'h1', 180, { end: true });
+    expect(await engine.billingSessionCalls(org, 'mapbox', 'h1')).toBe(0);
+
+    const key = orgKeys(org).billingSession('google-maps', 'h2');
+    await engine.recordBillingSessionCall(org, 'google-maps', 'h2', 600);
+    await valkey.client.expire(key, 5);
+    await engine.recordBillingSessionCall(org, 'google-maps', 'h2', 600);
+    // Fixed: the second call does not extend the first call's TTL.
+    expect(await valkey.client.ttl(key)).toBeLessThanOrEqual(5);
+    await engine.recordBillingSessionCall(org, 'google-maps', 'h2', 600, { sliding: true });
+    expect(await valkey.client.ttl(key)).toBeGreaterThan(500);
   });
 });

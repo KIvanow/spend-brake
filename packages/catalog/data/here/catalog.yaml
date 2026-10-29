@@ -1,0 +1,63 @@
+# HERE Base Plan prices (pay-as-you-grow), transcribed from each service's "Pricing details" on
+# the pricing page (USD selected). USD per 1,000 transactions; bands are monthly transactions.
+# "1 Transaction is counted for every Request" unless noted. HERE calls these "indicative
+# estimates"; contracts may differ. The free allowance is `freeMonthly`; above the last listed
+# band HERE says "contact us" and the last listed price is kept.
+provider: here
+version: 2026-10-30
+source: https://www.here.com/get-started/pricing
+sourceUpdated: 2026-10-30
+verifiedAt: 2026-10-30
+currency: USD
+billingTimeZone: UTC
+
+bands:
+  # 30,001-5,000,000 / 5,000,001-10,000,000 / 10,000,001+
+  large: [5000000, 10000000, null]
+  # 5,001-200,000 (or 2,501-200,000) / 200,001-1,000,000 / 1,000,001+
+  small: [200000, 1000000, null]
+
+skus:
+  here.geocode:
+    name: Geocode and Reverse Geocode
+    band: large
+    freeMonthly: 30000
+    per1000: ['0.88', '0.70', '0.70']
+  here.autocomplete:
+    name: Autocomplete
+    band: large
+    freeMonthly: 30000
+    per1000: ['0.88', '0.70', '0.70']
+  here.discover:
+    name: Discover / Search
+    band: small
+    freeMonthly: 5000
+    per1000: ['2.92', '2.33', '2.33']
+  here.autosuggest:
+    name: Autosuggest
+    band: small
+    freeMonthly: 5000
+    per1000: ['2.92', '2.33', '2.33']
+  # Car, bicycle and pedestrian routes are billed at this price only with `departureTime=any` or
+  # `traffic[mode]=disabled`; otherwise HERE bills them as time-aware routing.
+  here.routing.basic:
+    name: Routing Car, Bicycle, Pedestrian (without time-aware information)
+    band: large
+    freeMonthly: 30000
+    per1000: ['0.88', '0.70', '0.70']
+  here.routing.time_aware:
+    name: Time aware routing
+    band: small
+    freeMonthly: 5000
+    per1000: ['2.92', '2.33', '2.33']
+  here.routing.truck:
+    name: Routing Truck
+    band: small
+    freeMonthly: 5000
+    per1000: ['2.92', '2.33', '2.33']
+  # Transactions: origins x destinations when either is below 5, else 5 x the larger of the two.
+  here.matrix:
+    name: Matrix Routing (per transaction)
+    band: small
+    freeMonthly: 2500
+    per1000: ['5.83', '4.66', '4.66']

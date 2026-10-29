@@ -7,9 +7,10 @@ const usd = z.string().regex(/^\d+(\.\d{1,6})?$/);
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
 const skuSchema = z.union([
-  z.strictObject({ googleSku: z.string(), name: z.string(), free: z.literal(true) }),
+  z.strictObject({ googleSku: z.string().optional(), name: z.string(), free: z.literal(true) }),
   z.strictObject({
-    googleSku: z.string(),
+    /** Google's SKU id (billing export); other providers have none. */
+    googleSku: z.string().optional(),
     name: z.string(),
     band: z.string(),
     freeMonthly: z.number().int().nonnegative(),
@@ -49,7 +50,7 @@ export function parseCatalog(yamlText: string): Catalog {
       skus.set(id, {
         id,
         name: s.name,
-        googleSku: s.googleSku,
+        ...(s.googleSku ? { googleSku: s.googleSku } : {}),
         free: true,
         freeMonthly: 0n,
         bands: [],
@@ -66,7 +67,7 @@ export function parseCatalog(yamlText: string): Catalog {
     skus.set(id, {
       id,
       name: s.name,
-      googleSku: s.googleSku,
+      ...(s.googleSku ? { googleSku: s.googleSku } : {}),
       free: false,
       freeMonthly: BigInt(s.freeMonthly),
       bands: bands.map((b) => (b === null ? null : BigInt(b))),

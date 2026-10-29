@@ -612,6 +612,34 @@ export class BudgetEngine {
     return res === 'OK';
   }
 
+  /** Billed requests seen in a provider billing session (0 when none or expired). */
+  async billingSessionCalls(orgId: string, provider: string, tokenHash: string): Promise<number> {
+    const v = await this.client.get(orgKeys(orgId).billingSession(provider, tokenHash));
+    return v === null ? 0 : Number(v);
+  }
+
+  /**
+   * Count a billed request in a billing session. The TTL runs from the first request, or from
+   * the latest one when `sliding`; `end` closes the session so the next request opens a new one.
+   */
+  async recordBillingSessionCall(
+    orgId: string,
+    provider: string,
+    tokenHash: string,
+    ttlSec: number,
+    opts: { sliding?: boolean; end?: boolean } = {},
+  ): Promise<void> {
+    const key = orgKeys(orgId).billingSession(provider, tokenHash);
+    if (opts.end) {
+      await this.client.del(key);
+      return;
+    }
+    const tx = this.client.multi().incr(key);
+    if (opts.sliding) tx.expire(key, ttlSec);
+    else tx.expire(key, ttlSec, 'NX');
+    await tx.exec();
+  }
+
   async isBillingSessionStarted(
     orgId: string,
     provider: string,

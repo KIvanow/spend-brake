@@ -3,8 +3,9 @@
 Hard dollar caps, enforced in real time, for every paid API your apps, test suites and AI agents
 call. Spend Brake is a self-hosted egress proxy: swap one base URL and one key, and every request
 is priced before it leaves, checked against your caps in one atomic step, and refused with a
-clear `402` once a cap would be crossed. v1 covers Google Maps Platform (Places, Geocoding,
-Routes); any other API can be priced per request with the generic adapter.
+clear `402` once a cap would be crossed. Built in: Google Maps Platform (Places, Geocoding,
+Routes), Twilio Messaging and Verify, Mapbox and HERE; any other API can be priced per request
+with the generic adapter.
 
 You keep your provider account and your own key. The real key never leaves Spend Brake; clients
 only ever hold revocable virtual keys.
@@ -148,8 +149,9 @@ key opts into a small fail-open allowance.
 | [packages/db](packages/db/README.md)           | Postgres schema and migrations                                                                              |
 | packages/shared                                | Envelope encryption, signing, redaction, telemetry                                                          |
 
-**Migration estimate:** `brake estimate` (or the dashboard) prices your last 30 days on Geoapify,
-Stadia Maps and Open Places API, and shows what would stay on Google.
+**Migration estimate:** `brake estimate` (or the dashboard) prices your last 30 days of Google
+usage on Geoapify, Stadia Maps, Open Places API, Mapbox and HERE side by side, and shows what
+would stay on Google.
 
 **Reconciliation:** connect the Google Cloud Billing export (`brake reconcile set --table
 project.dataset.table --service-account reader.json`) and the worker compares the ledger with

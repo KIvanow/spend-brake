@@ -3359,7 +3359,7 @@
     },
     "/v1/estimates/migration": {
       "post": {
-        "summary": "Price the last N days of usage on OSM-based providers (Geoapify, Stadia Maps, Open Places API) (viewer)",
+        "summary": "Price the last N days of Google Maps usage on Geoapify, Stadia Maps, Open Places API, Mapbox and HERE (viewer)",
         "tags": [
           "Spend"
         ],

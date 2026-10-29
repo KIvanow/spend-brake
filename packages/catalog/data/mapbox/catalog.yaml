@@ -1,0 +1,63 @@
+# Mapbox web service prices (pay-as-you-go), transcribed from the pricing page. USD per 1,000
+# billable events; bands are monthly event counts. Mapbox's free tier is the first band on its
+# page ("Up to 100,000: Free"); here it is `freeMonthly` and the band starts at the first paid
+# price, so with free allowances ignored (the default) the free tier is priced like the first
+# paid tier. Above the last listed band Mapbox says "contact sales"; the last listed price is
+# kept there (a contract can only lower it).
+provider: mapbox
+version: 2026-10-30
+source: https://www.mapbox.com/pricing
+skuSource: https://docs.mapbox.com/api/search/search-box/
+sourceUpdated: 2026-10-30
+verifiedAt: 2026-10-30
+currency: USD
+billingTimeZone: UTC
+
+bands:
+  # 100,001-500,000 / 500,001-1,000,000 / 1,000,001-5,000,000 / 5,000,000+
+  standard: [500000, 1000000, 5000000, null]
+  # Permanent geocoding: 1-500,000 / 500,001+
+  permanent: [500000, null]
+  # Search Box sessions, standard pricing: 2,501-100,000 / -200,000 / -500,000 / -1,000,000 / more
+  sessions: [100000, 200000, 500000, 1000000, null]
+  # Search Box requests, standard pricing: 25,001-100,000 / -500,000 / -1,000,000 / more
+  search_requests: [100000, 500000, 1000000, null]
+
+skus:
+  mapbox.geocoding.temporary:
+    name: Temporary Geocoding API (per request; each search in a batch is one request)
+    band: standard
+    freeMonthly: 100000
+    per1000: ['0.75', '0.60', '0.45', '0.45']
+  mapbox.geocoding.permanent:
+    name: Permanent Geocoding API (per request; each search in a batch is one request)
+    band: permanent
+    freeMonthly: 0
+    per1000: ['5.00', '4.00']
+  mapbox.directions:
+    name: Directions API (per request)
+    band: standard
+    freeMonthly: 100000
+    per1000: ['2.00', '1.60', '1.20', '1.20']
+  mapbox.matrix:
+    name: Matrix API (per element)
+    band: standard
+    freeMonthly: 100000
+    per1000: ['2.00', '1.60', '1.20', '1.20']
+  mapbox.static_images:
+    name: Static Images API (per request)
+    band: standard
+    freeMonthly: 50000
+    per1000: ['1.00', '0.80', '0.60', '0.60']
+  # The page lists "Introductory preview pricing" and "Standard pricing" for Search Box without
+  # saying which applies; the higher (standard) prices are used so caps never undercharge.
+  mapbox.searchbox.session:
+    name: Search Box API session (/suggest and /retrieve)
+    band: sessions
+    freeMonthly: 2500
+    per1000: ['11.50', '10.00', '8.40', '6.60', '6.60']
+  mapbox.searchbox.request:
+    name: Search Box API request (/forward, /category, /reverse)
+    band: search_requests
+    freeMonthly: 25000
+    per1000: ['1.70', '1.50', '1.25', '1.25']

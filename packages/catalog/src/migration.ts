@@ -1,7 +1,7 @@
 import { parse } from 'yaml';
 import { z } from 'zod';
-import { readDataFile } from './catalog.js';
-import { parseUsd } from './pricing.js';
+import { type Catalog, readDataFile } from './catalog.js';
+import { parseUsd, priceUnits } from './pricing.js';
 
 const usd = z.string().regex(/^\d+(\.\d{1,6})?$/);
 
@@ -37,6 +37,30 @@ export type Alternatives = z.output<typeof fileSchema>;
 
 export function loadAlternatives(): Alternatives {
   return fileSchema.parse(parse(readDataFile('migration/alternatives.yaml')));
+}
+
+const paygSchema = z.strictObject({
+  verifiedAt: z.string(),
+  providers: z.record(
+    z.string(),
+    z.strictObject({
+      name: z.string(),
+      map: z.record(
+        z.string(),
+        z.strictObject({
+          sku: z.string(),
+          per: z.enum(['unit', 'request']).optional(),
+          note: z.string().optional(),
+        }),
+      ),
+    }),
+  ),
+});
+
+export type PayAsYouGo = z.output<typeof paygSchema>;
+
+export function loadPayAsYouGo(): PayAsYouGo {
+  return paygSchema.parse(parse(readDataFile('migration/payg.yaml')));
 }
 
 /** Billed usage of one SKU on one day (from the ledger). */
@@ -78,6 +102,75 @@ export interface Estimate {
   notes: string[];
 }
 
+/**
+ * Price the same usage on pay-as-you-go providers with their own tiered catalogs: a month of
+ * mapped units per SKU through the volume bands. Free allowances are ignored unless
+ * `includeFreeTier`, as on the proxy.
+ */
+export function estimatePayAsYouGo(
+  rows: readonly UsageRow[],
+  payg: PayAsYouGo,
+  catalogs: ReadonlyMap<string, Catalog>,
+  periodDays = 30,
+  includeFreeTier = false,
+): Estimate[] {
+  const monthly = (v: number) => Math.ceil((v * 30) / periodDays);
+  return Object.entries(payg.providers).flatMap(([id, p]): Estimate[] => {
+    const catalog = catalogs.get(id);
+    if (!catalog) return [];
+    const units = new Map<string, number>();
+    const uncovered = new Map<string, Uncovered>();
+    const notes = new Set<string>();
+    let covered = 0n;
+    for (const r of rows) {
+      const m = p.map[r.sku] ?? p.map[endpointOf(r.sku)];
+      if (!m || !catalog.skus.has(m.sku)) {
+        const u = uncovered.get(r.sku) ?? { sku: r.sku, requests: 0, googleCostMicros: 0 };
+        u.requests += r.requests;
+        u.googleCostMicros += Number(r.costMicros);
+        uncovered.set(r.sku, u);
+        continue;
+      }
+      units.set(m.sku, (units.get(m.sku) ?? 0) + (m.per === 'request' ? r.requests : r.units));
+      covered += r.costMicros;
+      if (m.note) notes.add(`${endpointOf(r.sku)}: ${m.note}`);
+    }
+    let cost = 0n;
+    let total = 0;
+    let compared = 0;
+    for (const [sku, n] of units) {
+      const month = monthly(n);
+      total += n;
+      compared += month;
+      cost += priceUnits(catalog.skus.get(sku)!, BigInt(month), {
+        monthlyUnits: new Map(),
+        trustFreeTier: includeFreeTier,
+      });
+    }
+    notes.add(includeFreeTier ? 'free monthly allowances applied' : 'free allowances not applied');
+    const uncoveredList = [...uncovered.values()].sort(
+      (a, b) => b.googleCostMicros - a.googleCostMicros,
+    );
+    const uncoveredCost = monthly(uncoveredList.reduce((a, u) => a + u.googleCostMicros, 0));
+    return [
+      {
+        provider: id,
+        name: p.name,
+        source: catalog.source,
+        plan: 'Pay as you go',
+        monthlyCostMicros: Number(cost),
+        credits: total,
+        creditsCompared: compared,
+        coveredGoogleCostMicros: Number(covered),
+        uncovered: uncoveredList,
+        uncoveredGoogleCostMicros: uncoveredCost,
+        totalMicros: Number(cost) + uncoveredCost,
+        notes: [...notes],
+      },
+    ];
+  });
+}
+
 export interface MigrationEstimate {
   periodDays: number;
   /** Google spend over the whole period. */
@@ -99,6 +192,11 @@ export function estimateMigration(
   rows: readonly UsageRow[],
   alts: Alternatives,
   periodDays = 30,
+  payg?: {
+    providers: PayAsYouGo;
+    catalogs: ReadonlyMap<string, Catalog>;
+    includeFreeTier?: boolean;
+  },
 ): MigrationEstimate {
   const bySku = new Map<string, { requests: number; units: number; cost: bigint }>();
   for (const r of rows) {
@@ -186,7 +284,18 @@ export function estimateMigration(
         costMicros: Number(s.cost),
       }))
       .sort((a, b) => b.costMicros - a.costMicros),
-    alternatives,
+    alternatives: payg
+      ? [
+          ...alternatives,
+          ...estimatePayAsYouGo(
+            rows,
+            payg.providers,
+            payg.catalogs,
+            periodDays,
+            payg.includeFreeTier,
+          ),
+        ]
+      : alternatives,
     verifiedAt: alts.verifiedAt,
   };
 }

@@ -1,0 +1,69 @@
+# Pay-as-you-go providers for the migration estimator: the same ledger priced with each
+# provider's own catalog (data/<provider>/catalog.yaml, sources and dates there). `map` takes a
+# full Google SKU first, then the SKU without its tier. `per: request` counts ledger requests
+# (sessions bill later keystrokes at 0 units on Google but per request elsewhere); the default
+# counts units (matrix elements, sessions). Unmapped SKUs stay on Google.
+verifiedAt: 2026-10-30
+
+providers:
+  mapbox:
+    name: Mapbox
+    map:
+      geocoding: { sku: mapbox.geocoding.temporary, note: 'temporary geocoding (no storage)' }
+      places.autocomplete:
+        {
+          sku: mapbox.searchbox.session,
+          per: request,
+          note: 'each request as one session (upper bound)',
+        }
+      legacy.places.autocomplete:
+        {
+          sku: mapbox.searchbox.session,
+          per: request,
+          note: 'each request as one session (upper bound)',
+        }
+      legacy.places.query_autocomplete:
+        {
+          sku: mapbox.searchbox.session,
+          per: request,
+          note: 'each request as one session (upper bound)',
+        }
+      legacy.places.autocomplete_session: { sku: mapbox.searchbox.session }
+      places.text_search: { sku: mapbox.searchbox.request, note: 'Search Box /forward' }
+      legacy.places.text_search: { sku: mapbox.searchbox.request, note: 'Search Box /forward' }
+      legacy.places.find_place: { sku: mapbox.searchbox.request, note: 'Search Box /forward' }
+      places.nearby_search: { sku: mapbox.searchbox.request, note: 'Search Box /category' }
+      legacy.places.nearby_search: { sku: mapbox.searchbox.request, note: 'Search Box /category' }
+      routes.compute_routes: { sku: mapbox.directions }
+      legacy.directions: { sku: mapbox.directions }
+      legacy.directions_advanced: { sku: mapbox.directions }
+      routes.compute_route_matrix: { sku: mapbox.matrix }
+      legacy.distance_matrix: { sku: mapbox.matrix }
+      legacy.distance_matrix_advanced: { sku: mapbox.matrix }
+
+  here:
+    name: HERE
+    map:
+      geocoding: { sku: here.geocode }
+      places.autocomplete: { sku: here.autosuggest, per: request }
+      legacy.places.autocomplete: { sku: here.autosuggest, per: request }
+      legacy.places.query_autocomplete: { sku: here.autosuggest, per: request }
+      legacy.places.autocomplete_session:
+        { sku: here.autosuggest, per: request, note: 'no sessions: every keystroke is a request' }
+      places.text_search: { sku: here.discover }
+      legacy.places.text_search: { sku: here.discover }
+      legacy.places.find_place: { sku: here.discover }
+      places.nearby_search: { sku: here.discover }
+      legacy.places.nearby_search: { sku: here.discover }
+      routes.compute_routes.essentials:
+        { sku: here.routing.basic, note: 'routes without traffic: departureTime=any' }
+      legacy.directions:
+        { sku: here.routing.basic, note: 'routes without traffic: departureTime=any' }
+      routes.compute_routes: { sku: here.routing.time_aware, note: 'traffic-aware routes' }
+      legacy.directions_advanced: { sku: here.routing.time_aware, note: 'traffic-aware routes' }
+      routes.compute_route_matrix:
+        { sku: here.matrix, note: 'elements as transactions; HERE bills fewer from 5x5 up' }
+      legacy.distance_matrix:
+        { sku: here.matrix, note: 'elements as transactions; HERE bills fewer from 5x5 up' }
+      legacy.distance_matrix_advanced:
+        { sku: here.matrix, note: 'elements as transactions; HERE bills fewer from 5x5 up' }

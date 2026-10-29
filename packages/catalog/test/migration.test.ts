@@ -4,7 +4,10 @@ import {
   endpointOf,
   estimateMigration,
   loadAlternatives,
+  loadPayAsYouGo,
 } from '../src/migration.js';
+import { loadHereCatalog } from '../src/here/adapter.js';
+import { loadMapboxCatalog } from '../src/mapbox/adapter.js';
 
 const alts = loadAlternatives();
 const row = (
@@ -115,5 +118,52 @@ describe('estimateMigration', () => {
     // Stadia's free plan would fit, but it does not allow commercial use.
     expect(alt(r, 'stadia')).toMatchObject({ plan: 'Starter', monthlyCostMicros: 20_000_000 });
     expect(alt(r, 'stadia').notes).toContain('Free plan: commercial use not allowed');
+  });
+});
+
+describe('pay-as-you-go estimates (Mapbox, HERE)', () => {
+  const payg = {
+    providers: loadPayAsYouGo(),
+    catalogs: new Map([
+      ['mapbox', loadMapboxCatalog()],
+      ['here', loadHereCatalog()],
+    ]),
+  };
+
+  it('prices the same ledger through each catalog side by side with Google', () => {
+    const rows = [
+      row('geocoding', '2026-10-01', 200_000, 200_000, 1_000_000_000n),
+      // One session of five keystrokes: Google bills the first request (1 unit).
+      row('legacy.places.autocomplete_session', '2026-10-01', 5, 1, 17_000n),
+      row('places.details.pro', '2026-10-01', 10, 10, 170_000n),
+    ];
+    const r = estimateMigration(rows, alts, 30, payg);
+    expect(alt(r, 'mapbox')).toMatchObject({
+      plan: 'Pay as you go',
+      // 200,000 x $0.75/1000 + one session at $11.50/1000.
+      monthlyCostMicros: 150_011_500,
+      uncoveredGoogleCostMicros: 170_000,
+      totalMicros: 150_181_500,
+      source: 'https://www.mapbox.com/pricing',
+    });
+    expect(alt(r, 'mapbox').notes).toContain('free allowances not applied');
+    // HERE: 200,000 x $0.88/1000 + five autosuggest requests at $2.92/1000.
+    expect(alt(r, 'here')).toMatchObject({ monthlyCostMicros: 176_014_600 });
+    expect(alt(r, 'here').uncovered.map((u) => u.sku)).toEqual(['places.details.pro']);
+    expect(alt(r, 'geoapify')).toBeDefined();
+  });
+
+  it('applies free allowances when asked and maps route tiers', () => {
+    const rows = [
+      row('geocoding', '2026-10-01', 200_000),
+      row('routes.compute_routes.essentials', '2026-10-01', 1000),
+      row('routes.compute_routes.pro', '2026-10-01', 1000),
+    ];
+    const free = estimateMigration(rows, alts, 30, { ...payg, includeFreeTier: true });
+    // Mapbox: 100,000 free geocodes, directions inside the 100,000 free.
+    expect(alt(free, 'mapbox').monthlyCostMicros).toBe(75_000_000);
+    const paid = estimateMigration(rows, alts, 30, payg);
+    // HERE: 200,000 x 0.88 + 1,000 basic routes x 0.88 + 1,000 time-aware x 2.92.
+    expect(alt(paid, 'here').monthlyCostMicros).toBe(176_000_000 + 880_000 + 2_920_000);
   });
 });

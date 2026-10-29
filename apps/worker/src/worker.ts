@@ -1,5 +1,5 @@
 import { BudgetEngine, Registry } from '@spend-brake/budget';
-import { loadGoogleMapsCatalog, loadPlacesFields } from '@spend-brake/catalog';
+import { loadGoogleMapsCatalog, loadMapboxCatalog, loadPlacesFields } from '@spend-brake/catalog';
 import { type Db, ensureUsagePartitions, orgs, reconciliationConfigs } from '@spend-brake/db';
 import {
   type Envelope,
@@ -59,8 +59,9 @@ export interface WorkerDeps {
   now?: () => Date;
 }
 
+// HERE's prices load client-side (no tables in the page), so its page cannot be checked here.
 export function catalogSourceUrls(): string[] {
-  return [loadGoogleMapsCatalog().source, loadPlacesFields().source];
+  return [loadGoogleMapsCatalog().source, loadPlacesFields().source, loadMapboxCatalog().source];
 }
 
 export class Worker {
