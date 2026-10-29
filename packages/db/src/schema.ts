@@ -1,6 +1,7 @@
 import {
   bigint,
   bigserial,
+  boolean,
   index,
   jsonb,
   pgTable,
@@ -140,3 +141,42 @@ export const catalogChecks = pgTable('catalog_checks', {
   checkedAt: timestamp('checked_at', { withTimezone: true }).notNull().defaultNow(),
   changedAt: timestamp('changed_at', { withTimezone: true }),
 });
+
+/** Outgoing alert webhooks. The URL (Slack/Teams URLs are credentials) and the signing secret are envelope-encrypted. */
+export const webhooks = pgTable(
+  'webhooks',
+  {
+    id: text('id').primaryKey(),
+    orgId: text('org_id')
+      .notNull()
+      .references(() => orgs.id),
+    name: text('name').notNull(),
+    preset: text('preset', { enum: ['raw', 'slack', 'discord', 'teams'] }).notNull(),
+    urlEnvelope: jsonb('url_envelope').notNull(),
+    /** Scheme and host only, for display. */
+    urlHint: text('url_hint').notNull(),
+    secretEnvelope: jsonb('secret_envelope').notNull(),
+    /** Alert types to send; empty means all. */
+    events: text('events').array().notNull().default([]),
+    createdAt: created(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  },
+  (t) => [index('webhooks_org').on(t.orgId)],
+);
+
+export const webhookDeliveries = pgTable(
+  'webhook_deliveries',
+  {
+    id: bigserial('id', { mode: 'bigint' }).primaryKey(),
+    orgId: text('org_id').notNull(),
+    webhookId: text('webhook_id').notNull(),
+    alertId: text('alert_id').notNull(),
+    type: text('type').notNull(),
+    attempt: bigint('attempt', { mode: 'number' }).notNull(),
+    ok: boolean('ok').notNull(),
+    httpStatus: bigint('http_status', { mode: 'number' }),
+    error: text('error'),
+    at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('webhook_deliveries_hook_at').on(t.webhookId, t.at)],
+);

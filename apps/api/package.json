@@ -26,5 +26,15 @@
   },
   "devDependencies": {
     "testcontainers": "^12.2.1"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/server.d.ts",
+      "default": "./dist/server.js"
+    },
+    "./bootstrap": {
+      "types": "./dist/bootstrap.d.ts",
+      "default": "./dist/bootstrap.js"
+    }
   }
 }

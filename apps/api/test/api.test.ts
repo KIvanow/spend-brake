@@ -99,6 +99,13 @@ describe('RBAC', () => {
     ['PUT', '/v1/caps/org', 'admin', { day: { hard: 1000 } }],
     ['POST', '/v1/kill', 'admin', { target: 'sess:rbac' }],
     ['POST', '/v1/unkill', 'admin', { target: 'sess:rbac' }],
+    ['GET', '/v1/webhooks', 'viewer', undefined],
+    [
+      'POST',
+      '/v1/webhooks',
+      'admin',
+      { name: 'w', url: 'https://hooks.example.com/x', preset: 'slack' },
+    ],
     ['GET', '/v1/tokens', 'owner', undefined],
     ['POST', '/v1/tokens', 'owner', { name: 't', role: 'viewer' }],
     ['PUT', '/v1/org', 'owner', { name: 'renamed' }],
@@ -499,6 +506,9 @@ describe('OpenAPI', () => {
       'GET /v1/spend',
       'GET /v1/events',
       'GET /v1/status',
+      'POST /v1/webhooks',
+      'GET /v1/webhooks/{id}/deliveries',
+      'POST /v1/actions/execute',
     ]) {
       expect(ops).toContain(op);
     }

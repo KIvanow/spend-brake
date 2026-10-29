@@ -3,3 +3,5 @@ export const MICROS_PER_USD = 1_000_000n;
 
 export * from './redact.js';
 export * from './envelope.js';
+export * from './signing.js';
+export * from './alerts.js';

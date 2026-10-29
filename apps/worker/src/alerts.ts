@@ -1,15 +1,9 @@
+import { ALERT_QUEUE, type AlertType, QUEUE_PREFIX } from '@spend-brake/shared';
 import { Queue } from 'bullmq';
 import type { Redis } from 'ioredis';
 import type { Metrics } from './metrics.js';
 
-export type AlertType =
-  | 'threshold'
-  | 'blocked'
-  | 'loop'
-  | 'catalog_underpriced'
-  | 'upstream_key_error'
-  | 'reservations_expired'
-  | 'catalog_drift';
+export type { AlertType };
 
 export interface Alert {
   type: AlertType;
@@ -19,9 +13,8 @@ export interface Alert {
   data: Record<string, unknown>;
 }
 
-export const ALERT_QUEUE = 'alerts';
-/** Hash-tagged prefix so every BullMQ key lands in one slot on Valkey Cluster. */
-export const ALERT_PREFIX = '{brake-alerts}';
+export { ALERT_QUEUE };
+export const ALERT_PREFIX = QUEUE_PREFIX;
 
 /** Queues alert jobs for the notifier (Phase 5). Dedupe keys outlive the longest window (1 h). */
 export class AlertQueue {

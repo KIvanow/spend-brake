@@ -39,7 +39,13 @@
             "type": "string"
           }
         },
-        "required": ["id", "provider", "name", "hint", "createdAt"]
+        "required": [
+          "id",
+          "provider",
+          "name",
+          "hint",
+          "createdAt"
+        ]
       },
       "Error": {
         "type": "object",
@@ -55,7 +61,10 @@
             "items": {}
           }
         },
-        "required": ["error", "message"]
+        "required": [
+          "error",
+          "message"
+        ]
       },
       "VirtualKey": {
         "type": "object",
@@ -71,20 +80,34 @@
           },
           "status": {
             "type": "string",
-            "enum": ["active", "revoked"]
+            "enum": [
+              "active",
+              "revoked"
+            ]
           },
           "createdAt": {
             "type": "string"
           },
           "expiresAt": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "config": {
             "type": "object",
             "additionalProperties": {}
           }
         },
-        "required": ["id", "name", "prefix", "status", "createdAt", "expiresAt", "config"]
+        "required": [
+          "id",
+          "name",
+          "prefix",
+          "status",
+          "createdAt",
+          "expiresAt",
+          "config"
+        ]
       },
       "CreateKey": {
         "type": "object",
@@ -102,18 +125,27 @@
             }
           },
           "skus": {
-            "type": ["array", "null"],
+            "type": [
+              "array",
+              "null"
+            ],
             "items": {
               "type": "string",
               "minLength": 1
             }
           },
           "env": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "pattern": "^[A-Za-z0-9_.-]{1,128}$"
           },
           "agentId": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "pattern": "^[A-Za-z0-9_.-]{1,128}$"
           },
           "sessionCapMicros": {
@@ -134,7 +166,10 @@
             "example": 5000000
           },
           "loop": {
-            "type": ["object", "null"],
+            "type": [
+              "object",
+              "null"
+            ],
             "properties": {
               "identical": {
                 "type": "integer",
@@ -153,7 +188,12 @@
                 "exclusiveMinimum": 0
               }
             },
-            "required": ["identical", "windowSec", "perMinute", "cooldownSec"]
+            "required": [
+              "identical",
+              "windowSec",
+              "perMinute",
+              "cooldownSec"
+            ]
           },
           "failOpenMicros": {
             "anyOf": [
@@ -173,21 +213,30 @@
             "example": 5000000
           },
           "allowedIps": {
-            "type": ["array", "null"],
+            "type": [
+              "array",
+              "null"
+            ],
             "items": {
               "type": "string",
               "minLength": 1
             }
           },
           "expiresAt": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "format": "date-time"
           },
           "canMintSessions": {
             "type": "boolean"
           }
         },
-        "required": ["name", "credentials"]
+        "required": [
+          "name",
+          "credentials"
+        ]
       },
       "UpdateKey": {
         "type": "object",
@@ -205,18 +254,27 @@
             }
           },
           "skus": {
-            "type": ["array", "null"],
+            "type": [
+              "array",
+              "null"
+            ],
             "items": {
               "type": "string",
               "minLength": 1
             }
           },
           "env": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "pattern": "^[A-Za-z0-9_.-]{1,128}$"
           },
           "agentId": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "pattern": "^[A-Za-z0-9_.-]{1,128}$"
           },
           "sessionCapMicros": {
@@ -237,7 +295,10 @@
             "example": 5000000
           },
           "loop": {
-            "type": ["object", "null"],
+            "type": [
+              "object",
+              "null"
+            ],
             "properties": {
               "identical": {
                 "type": "integer",
@@ -256,7 +317,12 @@
                 "exclusiveMinimum": 0
               }
             },
-            "required": ["identical", "windowSec", "perMinute", "cooldownSec"]
+            "required": [
+              "identical",
+              "windowSec",
+              "perMinute",
+              "cooldownSec"
+            ]
           },
           "failOpenMicros": {
             "anyOf": [
@@ -276,14 +342,20 @@
             "example": 5000000
           },
           "allowedIps": {
-            "type": ["array", "null"],
+            "type": [
+              "array",
+              "null"
+            ],
             "items": {
               "type": "string",
               "minLength": 1
             }
           },
           "expiresAt": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "format": "date-time"
           },
           "canMintSessions": {
@@ -299,19 +371,34 @@
           },
           "kind": {
             "type": "string",
-            "enum": ["d", "m"]
+            "enum": [
+              "d",
+              "m"
+            ]
           },
           "hard": {
-            "type": ["number", "null"]
+            "type": [
+              "number",
+              "null"
+            ]
           },
           "soft": {
-            "type": ["number", "null"]
+            "type": [
+              "number",
+              "null"
+            ]
           },
           "version": {
             "type": "number"
           }
         },
-        "required": ["scope", "kind", "hard", "soft", "version"]
+        "required": [
+          "scope",
+          "kind",
+          "hard",
+          "soft",
+          "version"
+        ]
       },
       "KillSet": {
         "type": "object",
@@ -323,7 +410,9 @@
             }
           }
         },
-        "required": ["killed"]
+        "required": [
+          "killed"
+        ]
       },
       "ApiToken": {
         "type": "object",
@@ -336,19 +425,36 @@
           },
           "role": {
             "type": "string",
-            "enum": ["viewer", "admin", "owner"]
+            "enum": [
+              "viewer",
+              "admin",
+              "owner"
+            ]
           },
           "createdAt": {
             "type": "string"
           },
           "expiresAt": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "lastUsedAt": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
-        "required": ["id", "name", "role", "createdAt", "expiresAt", "lastUsedAt"]
+        "required": [
+          "id",
+          "name",
+          "role",
+          "createdAt",
+          "expiresAt",
+          "lastUsedAt"
+        ]
       },
       "Org": {
         "type": "object",
@@ -367,7 +473,52 @@
             "additionalProperties": {}
           }
         },
-        "required": ["id", "name", "timeZone", "settings"]
+        "required": [
+          "id",
+          "name",
+          "timeZone",
+          "settings"
+        ]
+      },
+      "Webhook": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "preset": {
+            "type": "string",
+            "enum": [
+              "raw",
+              "slack",
+              "discord",
+              "teams"
+            ]
+          },
+          "urlHint": {
+            "type": "string"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "createdAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "preset",
+          "urlHint",
+          "events",
+          "createdAt"
+        ]
       }
     },
     "parameters": {}
@@ -376,7 +527,9 @@
     "/v1/providers/credentials": {
       "post": {
         "summary": "Add an encrypted provider key (admin)",
-        "tags": ["Providers"],
+        "tags": [
+          "Providers"
+        ],
         "security": [
           {
             "bearer": []
@@ -404,7 +557,11 @@
                     "description": "Never returned or logged"
                   }
                 },
-                "required": ["provider", "name", "secret"]
+                "required": [
+                  "provider",
+                  "name",
+                  "secret"
+                ]
               }
             }
           }
@@ -454,7 +611,9 @@
       },
       "get": {
         "summary": "List provider keys (no secrets) (viewer)",
-        "tags": ["Providers"],
+        "tags": [
+          "Providers"
+        ],
         "security": [
           {
             "bearer": []
@@ -475,7 +634,9 @@
                       }
                     }
                   },
-                  "required": ["items"]
+                  "required": [
+                    "items"
+                  ]
                 }
               }
             }
@@ -516,7 +677,9 @@
     "/v1/providers/credentials/{id}": {
       "delete": {
         "summary": "Delete a provider key (admin)",
-        "tags": ["Providers"],
+        "tags": [
+          "Providers"
+        ],
         "security": [
           {
             "bearer": []
@@ -546,10 +709,15 @@
                     },
                     "deleted": {
                       "type": "boolean",
-                      "enum": [true]
+                      "enum": [
+                        true
+                      ]
                     }
                   },
-                  "required": ["id", "deleted"]
+                  "required": [
+                    "id",
+                    "deleted"
+                  ]
                 }
               }
             }
@@ -590,7 +758,9 @@
     "/v1/keys": {
       "post": {
         "summary": "Create a virtual key (the token is shown once) (admin)",
-        "tags": ["Keys"],
+        "tags": [
+          "Keys"
+        ],
         "security": [
           {
             "bearer": []
@@ -622,7 +792,9 @@
                           "type": "string"
                         }
                       },
-                      "required": ["token"]
+                      "required": [
+                        "token"
+                      ]
                     }
                   ]
                 }
@@ -663,7 +835,9 @@
       },
       "get": {
         "summary": "List virtual keys (viewer)",
-        "tags": ["Keys"],
+        "tags": [
+          "Keys"
+        ],
         "security": [
           {
             "bearer": []
@@ -684,7 +858,9 @@
                       }
                     }
                   },
-                  "required": ["items"]
+                  "required": [
+                    "items"
+                  ]
                 }
               }
             }
@@ -725,7 +901,9 @@
     "/v1/keys/{id}": {
       "get": {
         "summary": "Get a virtual key (viewer)",
-        "tags": ["Keys"],
+        "tags": [
+          "Keys"
+        ],
         "security": [
           {
             "bearer": []
@@ -787,7 +965,9 @@
       },
       "patch": {
         "summary": "Update a virtual key (admin)",
-        "tags": ["Keys"],
+        "tags": [
+          "Keys"
+        ],
         "security": [
           {
             "bearer": []
@@ -858,7 +1038,9 @@
       },
       "delete": {
         "summary": "Revoke a virtual key (admin)",
-        "tags": ["Keys"],
+        "tags": [
+          "Keys"
+        ],
         "security": [
           {
             "bearer": []
@@ -922,7 +1104,9 @@
     "/v1/caps/{scope}": {
       "put": {
         "summary": "Set hard / soft caps for a scope, per day and/or month (null removes a limit) (admin)",
-        "tags": ["Caps"],
+        "tags": [
+          "Caps"
+        ],
         "security": [
           {
             "bearer": []
@@ -983,7 +1167,9 @@
                         "example": 5000000
                       }
                     },
-                    "required": ["hard"]
+                    "required": [
+                      "hard"
+                    ]
                   },
                   "month": {
                     "type": "object",
@@ -1023,7 +1209,9 @@
                         "example": 5000000
                       }
                     },
-                    "required": ["hard"]
+                    "required": [
+                      "hard"
+                    ]
                   }
                 }
               }
@@ -1045,7 +1233,9 @@
                       }
                     }
                   },
-                  "required": ["items"]
+                  "required": [
+                    "items"
+                  ]
                 }
               }
             }
@@ -1084,7 +1274,9 @@
       },
       "delete": {
         "summary": "Remove the caps of a scope (admin)",
-        "tags": ["Caps"],
+        "tags": [
+          "Caps"
+        ],
         "security": [
           {
             "bearer": []
@@ -1103,7 +1295,10 @@
           {
             "schema": {
               "type": "string",
-              "enum": ["d", "m"]
+              "enum": [
+                "d",
+                "m"
+              ]
             },
             "required": false,
             "name": "kind",
@@ -1125,11 +1320,17 @@
                       "type": "array",
                       "items": {
                         "type": "string",
-                        "enum": ["d", "m"]
+                        "enum": [
+                          "d",
+                          "m"
+                        ]
                       }
                     }
                   },
-                  "required": ["scope", "deleted"]
+                  "required": [
+                    "scope",
+                    "deleted"
+                  ]
                 }
               }
             }
@@ -1170,7 +1371,9 @@
     "/v1/caps": {
       "get": {
         "summary": "List caps (viewer)",
-        "tags": ["Caps"],
+        "tags": [
+          "Caps"
+        ],
         "security": [
           {
             "bearer": []
@@ -1191,7 +1394,9 @@
                       }
                     }
                   },
-                  "required": ["items"]
+                  "required": [
+                    "items"
+                  ]
                 }
               }
             }
@@ -1232,7 +1437,9 @@
     "/v1/kill": {
       "post": {
         "summary": "Stop all spend for an org, provider, key or session (immediate) (admin)",
-        "tags": ["Kill switch"],
+        "tags": [
+          "Kill switch"
+        ],
         "security": [
           {
             "bearer": []
@@ -1253,7 +1460,9 @@
                     "maxLength": 500
                   }
                 },
-                "required": ["target"]
+                "required": [
+                  "target"
+                ]
               }
             }
           }
@@ -1305,7 +1514,9 @@
     "/v1/unkill": {
       "post": {
         "summary": "Lift a kill (admin)",
-        "tags": ["Kill switch"],
+        "tags": [
+          "Kill switch"
+        ],
         "security": [
           {
             "bearer": []
@@ -1326,7 +1537,9 @@
                     "maxLength": 500
                   }
                 },
-                "required": ["target"]
+                "required": [
+                  "target"
+                ]
               }
             }
           }
@@ -1378,7 +1591,9 @@
     "/v1/status": {
       "get": {
         "summary": "Live remaining budget per scope (from Valkey) (viewer)",
-        "tags": ["Spend"],
+        "tags": [
+          "Spend"
+        ],
         "security": [
           {
             "bearer": []
@@ -1440,13 +1655,22 @@
                             "type": "number"
                           },
                           "hard": {
-                            "type": ["number", "null"]
+                            "type": [
+                              "number",
+                              "null"
+                            ]
                           },
                           "soft": {
-                            "type": ["number", "null"]
+                            "type": [
+                              "number",
+                              "null"
+                            ]
                           },
                           "remaining": {
-                            "type": ["number", "null"]
+                            "type": [
+                              "number",
+                              "null"
+                            ]
                           }
                         },
                         "required": [
@@ -1461,7 +1685,10 @@
                       }
                     }
                   },
-                  "required": ["killed", "scopes"]
+                  "required": [
+                    "killed",
+                    "scopes"
+                  ]
                 }
               }
             }
@@ -1502,7 +1729,9 @@
     "/v1/spend": {
       "get": {
         "summary": "Spend from the ledger, grouped by key, SKU, day, ... (viewer)",
-        "tags": ["Spend"],
+        "tags": [
+          "Spend"
+        ],
         "security": [
           {
             "bearer": []
@@ -1565,7 +1794,9 @@
                       }
                     }
                   },
-                  "required": ["items"]
+                  "required": [
+                    "items"
+                  ]
                 }
               }
             }
@@ -1606,7 +1837,9 @@
     "/v1/events": {
       "get": {
         "summary": "Usage events (newest first), or the audit log with source=audit (viewer)",
-        "tags": ["Events"],
+        "tags": [
+          "Events"
+        ],
         "security": [
           {
             "bearer": []
@@ -1616,7 +1849,10 @@
           {
             "schema": {
               "type": "string",
-              "enum": ["usage", "audit"],
+              "enum": [
+                "usage",
+                "audit"
+              ],
               "default": "usage"
             },
             "required": false,
@@ -1678,10 +1914,16 @@
                       }
                     },
                     "nextCursor": {
-                      "type": ["string", "null"]
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     }
                   },
-                  "required": ["items", "nextCursor"]
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ]
                 }
               }
             }
@@ -1722,7 +1964,9 @@
     "/v1/tokens": {
       "post": {
         "summary": "Create an admin API token (shown once) (owner)",
-        "tags": ["Admin"],
+        "tags": [
+          "Admin"
+        ],
         "security": [
           {
             "bearer": []
@@ -1741,14 +1985,21 @@
                   },
                   "role": {
                     "type": "string",
-                    "enum": ["viewer", "admin", "owner"]
+                    "enum": [
+                      "viewer",
+                      "admin",
+                      "owner"
+                    ]
                   },
                   "expiresAt": {
                     "type": "string",
                     "format": "date-time"
                   }
                 },
-                "required": ["name", "role"]
+                "required": [
+                  "name",
+                  "role"
+                ]
               }
             }
           }
@@ -1770,7 +2021,9 @@
                           "type": "string"
                         }
                       },
-                      "required": ["token"]
+                      "required": [
+                        "token"
+                      ]
                     }
                   ]
                 }
@@ -1811,7 +2064,9 @@
       },
       "get": {
         "summary": "List admin API tokens (owner)",
-        "tags": ["Admin"],
+        "tags": [
+          "Admin"
+        ],
         "security": [
           {
             "bearer": []
@@ -1832,7 +2087,9 @@
                       }
                     }
                   },
-                  "required": ["items"]
+                  "required": [
+                    "items"
+                  ]
                 }
               }
             }
@@ -1873,7 +2130,9 @@
     "/v1/tokens/{id}": {
       "delete": {
         "summary": "Revoke an admin API token (owner)",
-        "tags": ["Admin"],
+        "tags": [
+          "Admin"
+        ],
         "security": [
           {
             "bearer": []
@@ -1937,7 +2196,9 @@
     "/v1/org": {
       "get": {
         "summary": "Get org settings (viewer)",
-        "tags": ["Admin"],
+        "tags": [
+          "Admin"
+        ],
         "security": [
           {
             "bearer": []
@@ -1988,7 +2249,9 @@
       },
       "put": {
         "summary": "Update org settings (time zone, provider pricing policy, loop policy) (owner)",
-        "tags": ["Admin"],
+        "tags": [
+          "Admin"
+        ],
         "security": [
           {
             "bearer": []
@@ -2019,7 +2282,10 @@
                         },
                         "unpricedPolicy": {
                           "type": "string",
-                          "enum": ["deny", "allow-with-default-price"],
+                          "enum": [
+                            "deny",
+                            "allow-with-default-price"
+                          ],
                           "default": "deny"
                         },
                         "defaultPriceMicros": {
@@ -2038,6 +2304,16 @@
                         }
                       }
                     }
+                  },
+                  "alertEmail": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "email"
+                  },
+                  "requireLoginForRaise": {
+                    "type": "boolean"
                   },
                   "loop": {
                     "type": "object",
@@ -2059,7 +2335,12 @@
                         "exclusiveMinimum": 0
                       }
                     },
-                    "required": ["identical", "windowSec", "perMinute", "cooldownSec"]
+                    "required": [
+                      "identical",
+                      "windowSec",
+                      "perMinute",
+                      "cooldownSec"
+                    ]
                   }
                 }
               }
@@ -2099,6 +2380,470 @@
           },
           "403": {
             "description": "Role too low",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/webhooks": {
+      "post": {
+        "summary": "Add an alert webhook (the signing secret is shown once) (admin)",
+        "tags": [
+          "Alerts"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "url": {
+                    "type": "string",
+                    "maxLength": 2048,
+                    "format": "uri"
+                  },
+                  "preset": {
+                    "type": "string",
+                    "enum": [
+                      "raw",
+                      "slack",
+                      "discord",
+                      "teams"
+                    ],
+                    "default": "raw"
+                  },
+                  "events": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "threshold",
+                        "blocked",
+                        "loop",
+                        "catalog_underpriced",
+                        "upstream_key_error",
+                        "reservations_expired"
+                      ]
+                    },
+                    "default": []
+                  },
+                  "secret": {
+                    "type": "string",
+                    "minLength": 16,
+                    "maxLength": 200
+                  }
+                },
+                "required": [
+                  "name",
+                  "url"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Webhook"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "secret": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "secret"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role too low",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "List alert webhooks (viewer)",
+        "tags": [
+          "Alerts"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Webhook"
+                      }
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role too low",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/webhooks/{id}": {
+      "delete": {
+        "summary": "Delete an alert webhook (admin)",
+        "tags": [
+          "Alerts"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.-]{1,128}$"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Webhook"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role too low",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/webhooks/{id}/deliveries": {
+      "get": {
+        "summary": "Delivery log of a webhook (newest first) (viewer)",
+        "tags": [
+          "Alerts"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.-]{1,128}$"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "alertId": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          },
+                          "attempt": {
+                            "type": "number"
+                          },
+                          "ok": {
+                            "type": "boolean"
+                          },
+                          "httpStatus": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "at": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "alertId",
+                          "type",
+                          "attempt",
+                          "ok",
+                          "httpStatus",
+                          "error",
+                          "at"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role too low",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/actions/execute": {
+      "post": {
+        "summary": "Run an alert action link (kill, raise, mute, reset circuit); the token is the credential",
+        "tags": [
+          "Alerts"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "minLength": 10,
+                    "maxLength": 4096
+                  },
+                  "amount": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  }
+                },
+                "required": [
+                  "token"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Done",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "action": {
+                      "type": "string"
+                    },
+                    "target": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "action",
+                    "target"
+                  ],
+                  "additionalProperties": {}
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Link already used",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Link expired",
             "content": {
               "application/json": {
                 "schema": {

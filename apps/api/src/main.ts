@@ -21,6 +21,7 @@ const app = await buildApi({
   logger: redactingLoggerOptions(env.LOG_LEVEL),
   rateLimitPerMinute: env.RATE_LIMIT_PER_MINUTE,
   trustProxy: env.TRUST_PROXY,
+  ...(env.BRAKE_ACTION_SECRET ? { actionSecret: env.BRAKE_ACTION_SECRET } : {}),
 });
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {

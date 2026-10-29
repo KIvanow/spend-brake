@@ -6,11 +6,13 @@ import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastif
 import { Authenticator } from './auth.js';
 import type { Ctx } from './common.js';
 import { ApiError, Router } from './route.js';
+import { actionRoutes } from './routes/actions.js';
 import { adminRoutes } from './routes/admin.js';
 import { budgetRoutes } from './routes/budget.js';
 import { credentialRoutes } from './routes/credentials.js';
 import { keyRoutes } from './routes/keys.js';
 import { ledgerRoutes } from './routes/ledger.js';
+import { webhookRoutes } from './routes/webhooks.js';
 
 export interface ApiDeps {
   db: Db;
@@ -23,6 +25,8 @@ export interface ApiDeps {
   now?: () => Date;
   /** How long a token lookup is cached; revocation takes effect after this. */
   authCacheMs?: number;
+  /** HMAC secret for alert action links (shared with the notifier). */
+  actionSecret?: string;
 }
 
 export function apiContext(deps: ApiDeps): Ctx {
@@ -96,6 +100,8 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   budgetRoutes(router, ctx);
   ledgerRoutes(router, ctx);
   adminRoutes(router, ctx);
+  webhookRoutes(router, ctx);
+  actionRoutes(app, router, ctx, deps.actionSecret);
 
   const spec = router.document();
   app.get('/v1/openapi.json', { config: { rateLimit: false } }, () => spec);

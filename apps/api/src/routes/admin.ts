@@ -137,6 +137,10 @@ export function adminRoutes(r: Router, ctx: Ctx): void {
       name: z.string().min(1).max(200).optional(),
       timeZone: z.string().refine(validTimeZone, 'Unknown time zone.').optional(),
       providers: z.record(id, providerSettings).optional(),
+      /** Where alerts go when no webhook is configured. */
+      alertEmail: z.email().nullable().optional(),
+      /** Raise links from alerts are refused; caps can only be raised from the dashboard. */
+      requireLoginForRaise: z.boolean().optional(),
       loop: z
         .object({
           identical: z.number().int().positive(),
@@ -153,6 +157,10 @@ export function adminRoutes(r: Router, ctx: Ctx): void {
         ...(org.settings as Record<string, unknown>),
         ...(body.providers ? { providers: body.providers } : {}),
         ...(body.loop ? { loop: body.loop } : {}),
+        ...(body.alertEmail !== undefined ? { alertEmail: body.alertEmail } : {}),
+        ...(body.requireLoginForRaise !== undefined
+          ? { requireLoginForRaise: body.requireLoginForRaise }
+          : {}),
       };
       const timeZone = body.timeZone ?? org.timeZone;
       await syncOrg(ctx, auth.orgId, timeZone, settings);
@@ -182,7 +190,7 @@ export async function syncOrg(
   });
 }
 
-async function loadOrg(ctx: Ctx, orgId: string) {
+export async function loadOrg(ctx: Ctx, orgId: string) {
   const [org] = await ctx.db.select().from(orgs).where(eq(orgs.id, orgId)).limit(1);
   if (!org) throw notFound('Org');
   return org;

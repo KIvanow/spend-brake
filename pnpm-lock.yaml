@@ -90,9 +90,46 @@ importers:
 
   apps/notifier:
     dependencies:
+      '@spend-brake/budget':
+        specifier: workspace:^
+        version: link:../../packages/budget
+      '@spend-brake/db':
+        specifier: workspace:^
+        version: link:../../packages/db
+      '@spend-brake/shared':
+        specifier: workspace:^
+        version: link:../../packages/shared
+      bullmq:
+        specifier: ^6.5.1
+        version: 6.5.1(ioredis@6.0.0)(pg@8.23.0)
       fastify:
         specifier: ^5.12.5
         version: 5.12.5
+      ioredis:
+        specifier: ^6.0.0
+        version: 6.0.0
+      nodemailer:
+        specifier: ^10.3.1
+        version: 10.3.1
+      pino:
+        specifier: ^10.3.1
+        version: 10.3.1
+      undici:
+        specifier: ^8.12.3
+        version: 8.12.3
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@spend-brake/api':
+        specifier: workspace:^
+        version: link:../api
+      '@types/nodemailer':
+        specifier: ^8.0.2
+        version: 8.0.2
+      testcontainers:
+        specifier: ^12.2.1
+        version: 12.2.1
 
   apps/proxy:
     dependencies:
@@ -1117,6 +1154,9 @@ packages:
   '@types/node@26.2.0':
     resolution: {integrity: sha512-5IviulTZeRNp2vAJ514cc/HUlY5nZ9fCbq9DMyC52BrhFZACo3nI0R7qBxhQmo/d27NFe96ur/b7Wwxklda+kg==}
 
+  '@types/nodemailer@8.0.2':
+    resolution: {integrity: sha512-c7M5ox8p0nEOfbJ2E9Qcmt8/QCu/VzsiAhzBiZbvky2PhKZDHpKB3sQHBM5MEZNkCfBOaS6S9//AGPRTNB7IaA==}
+
   '@types/pg@8.23.1':
     resolution: {integrity: sha512-fKVHpikPdg4GKks3JuLEhvwSyvwzF23hnabPy6DD8ljVbC7+6J5dQzdv4arV6jqq57djnMgs1HKBxX4P8aBI3A==}
 
@@ -2064,6 +2104,10 @@ packages:
   node-gyp-build-optional-packages@5.2.2:
     resolution: {integrity: sha512-s+w+rBWnpTMwSFbaE0UXsRlg7hU4FjekKU4eyAih5T8nJuNZT1nNsskXpxmeqSK9UzkBl6UgRlnKc8hz8IEqOw==}
     hasBin: true
+
+  nodemailer@10.3.1:
+    resolution: {integrity: sha512-uF0AFsJC07Y1vdW7p580DKAnh7rAO+4UPSSB3mDCPNDufoiaOebV6JmrzpxB14OjEEEiBsNdYoM2Y+fN8M7BBA==}
+    engines: {node: '>=20.0.0'}
 
   normalize-path@3.0.0:
     resolution: {integrity: sha512-6eZs5Ls3WtCisHWp9S2GUy8dqkpGi4BVSz3GaqiE6ezub0512ESztXUwUB6C6IKbQkY2Pnb/mD4WYojCRwcwLA==}
@@ -3348,6 +3392,10 @@ snapshots:
     dependencies:
       undici-types: 8.3.0
 
+  '@types/nodemailer@8.0.2':
+    dependencies:
+      '@types/node': 26.2.0
+
   '@types/pg@8.23.1':
     dependencies:
       '@types/node': 26.2.0
@@ -4281,6 +4329,8 @@ snapshots:
     dependencies:
       detect-libc: 2.1.2
     optional: true
+
+  nodemailer@10.3.1: {}
 
   normalize-path@3.0.0: {}
 
