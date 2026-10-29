@@ -167,6 +167,49 @@ describe('dashboard', () => {
     });
   });
 
+  it('opens the page named in the URL hash and lists webhook deliveries', async () => {
+    routes['GET /v1/webhooks'] = () => [
+      200,
+      {
+        items: [
+          {
+            id: 'wh1',
+            name: 'ops',
+            preset: 'slack',
+            urlHint: 'https://hooks.slack.com',
+            events: [],
+            createdAt: '',
+          },
+        ],
+      },
+    ];
+    routes['GET /v1/webhooks/wh1/deliveries'] = () => [
+      200,
+      {
+        items: [
+          {
+            alertId: 'a1',
+            type: 'loop',
+            attempt: 2,
+            ok: false,
+            httpStatus: 500,
+            error: 'HTTP 500',
+            at: '2026-10-29T10:00:00Z',
+          },
+        ],
+      },
+    ];
+    window.location.hash = '#/webhooks';
+    const user = userEvent.setup();
+    sessionStorage.setItem('brake.adminToken', 'sbt_good');
+    render(<App client={client()} />);
+    expect(await screen.findByRole('heading', { name: 'Alert webhooks' })).toBeTruthy();
+    await user.click(await screen.findByRole('button', { name: 'Delivery log' }));
+    expect(await screen.findByText('failed')).toBeTruthy();
+    expect(screen.getByText('https://hooks.slack.com')).toBeTruthy();
+    window.location.hash = '';
+  });
+
   it('charts spend and totals the period', async () => {
     const user = await signIn();
     await user.click(screen.getByRole('button', { name: 'Spend' }));

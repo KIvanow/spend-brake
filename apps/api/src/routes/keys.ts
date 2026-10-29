@@ -1,5 +1,5 @@
 import { type KeyRecord, generateVirtualKey, hashVirtualKey } from '@spend-brake/budget';
-import { providerCredentials, virtualKeys } from '@spend-brake/db';
+import { providerCredentials, sql, virtualKeys } from '@spend-brake/db';
 import { and, eq, inArray, isNull } from '@spend-brake/db';
 import { z } from 'zod';
 import { type Ctx, audit, id, micros } from '../common.js';
@@ -104,6 +104,52 @@ export function keyRoutes(r: Router, ctx: Ctx): void {
     }
   }
 
+  /**
+   * Session keys are copies of their parent: when the parent is revoked they are revoked, and
+   * when its bindings change (credentials, SKUs, IPs, environment, loop policy, expiry) they
+   * follow, so a session never has more reach than the key that minted it.
+   */
+  async function syncChildren(parentId: string, parent: KeyRecord): Promise<number> {
+    const rows = await ctx.db
+      .select()
+      .from(virtualKeys)
+      .where(
+        and(
+          eq(virtualKeys.orgId, parent.orgId),
+          eq(virtualKeys.status, 'active'),
+          sql`${virtualKeys.config}->>'parentKeyId' = ${parentId}`,
+        ),
+      );
+    for (const child of rows) {
+      const c = child.config as KeyRecord;
+      const expiresAt =
+        parent.expiresAt && (!c.expiresAt || Date.parse(parent.expiresAt) < Date.parse(c.expiresAt))
+          ? parent.expiresAt
+          : c.expiresAt;
+      const next: KeyRecord = {
+        ...c,
+        status: parent.status === 'revoked' ? 'revoked' : c.status,
+        credentials: parent.credentials,
+        skus: parent.skus,
+        allowedIps: parent.allowedIps,
+        env: parent.env,
+        loop: parent.loop,
+        expiresAt,
+      };
+      await ctx.registry.putKeyByHash(child.tokenHash, next);
+      await ctx.db
+        .update(virtualKeys)
+        .set({
+          config: next,
+          status: next.status,
+          expiresAt: next.expiresAt ? new Date(next.expiresAt) : null,
+          ...(next.status === 'revoked' ? { revokedAt: ctx.now() } : {}),
+        })
+        .where(eq(virtualKeys.id, child.id));
+    }
+    return rows.length;
+  }
+
   async function load(orgId: string, keyId: string): Promise<Row> {
     const [row] = await ctx.db
       .select()
@@ -197,7 +243,8 @@ export function keyRoutes(r: Router, ctx: Ctx): void {
         })
         .where(and(eq(virtualKeys.id, row.id), eq(virtualKeys.orgId, auth.orgId)))
         .returning();
-      await audit(ctx, auth, 'key.update', row.id, { fields: Object.keys(body) });
+      const children = await syncChildren(row.id, rec);
+      await audit(ctx, auth, 'key.update', row.id, { fields: Object.keys(body), children });
       return view(updated!);
     },
   });
@@ -219,7 +266,8 @@ export function keyRoutes(r: Router, ctx: Ctx): void {
         .set({ status: 'revoked', revokedAt: ctx.now(), config: rec })
         .where(and(eq(virtualKeys.id, row.id), eq(virtualKeys.orgId, auth.orgId)))
         .returning();
-      await audit(ctx, auth, 'key.revoke', row.id);
+      const children = await syncChildren(row.id, rec);
+      await audit(ctx, auth, 'key.revoke', row.id, { children });
       return view(updated!);
     },
   });

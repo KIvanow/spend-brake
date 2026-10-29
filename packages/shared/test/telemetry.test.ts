@@ -33,6 +33,34 @@ describe('span redaction', () => {
     expect(s.events[0]!.attributes).toEqual({ msg: `token ${REDACTED}` });
   });
 
+  it('removes action-link tokens from paths', () => {
+    const s = span({ 'url.path': '/a/eyJ2IjoxfQ.c2ln', 'http.target': '/a/abc.def?x=1' });
+    redactSpan(s);
+    expect(s.attributes).toEqual({
+      'url.path': '/a/[redacted]',
+      'http.target': '/a/[redacted]?x=1',
+    });
+  });
+
+  it('reduces outgoing webhook URLs to their origin when asked', () => {
+    const client = {
+      ...span({
+        'url.full': 'https://hooks.slack.com/services/T0/B0/SECRETPATH',
+        'url.path': '/services/T0/B0/SECRETPATH',
+      }),
+      kind: 2,
+    } as unknown as ReadableSpan;
+    redactSpan(client, { clientUrlsToOrigin: true });
+    expect(client.attributes['url.full']).toBe('https://hooks.slack.com');
+    expect(client.attributes['url.path']).toBe(REDACTED);
+    const server = {
+      ...span({ 'url.full': 'https://x.example/v1/keys' }),
+      kind: 1,
+    } as unknown as ReadableSpan;
+    redactSpan(server, { clientUrlsToOrigin: true });
+    expect(server.attributes['url.full']).toBe('https://x.example/v1/keys');
+  });
+
   it('redacts before handing spans to the real exporter', () => {
     const seen: ReadableSpan[] = [];
     const inner: SpanExporter = {

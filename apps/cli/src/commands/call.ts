@@ -18,7 +18,10 @@ export function callCommand(program: Command, io: Io, done: (code: number) => vo
     .argument('<path>', 'path on the provider, e.g. /maps/api/geocode/json')
     .option('-d, --data <json>', 'JSON body; @file reads a file')
     .option('-q, --query <k=v...>', 'query parameters')
-    .option('-H, --header <k:v...>', 'extra headers (X-Brake-* are ignored by the proxy)')
+    .option(
+      '-H, --header <k:v...>',
+      'extra headers (X-Brake-* headers are dropped; the key comes from BRAKE_KEY)',
+    )
     .option('--pretty', 'human-readable output instead of JSON')
     .action(
       async (

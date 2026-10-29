@@ -62,7 +62,7 @@ describe('alert messages', () => {
     expect(m.actions.at(-1)).toEqual({
       id: 'view',
       label: 'View',
-      url: 'https://app.example.com/caps',
+      url: 'https://app.example.com/#/caps',
     });
   });
 
@@ -73,11 +73,34 @@ describe('alert messages', () => {
     expect(reset.ok && reset.claims).toMatchObject({ act: 'reset', target: 'k9' });
   });
 
+  it('kills the originating key, not the org, for agent and env alerts', () => {
+    const m = buildMessage(
+      'a',
+      {
+        type: 'threshold',
+        orgId: 'o',
+        scope: 'agent:claude',
+        window: 'd:20261029',
+        mark: '80',
+        keyId: 'k9',
+      },
+      links,
+    );
+    expect(m.actions[0]).toMatchObject({ id: 'kill', label: 'Kill key:k9' });
+    const noKey = buildMessage(
+      'a',
+      { type: 'threshold', orgId: 'o', scope: 'env:ci', window: 'd:20261029', mark: '80' },
+      links,
+    );
+    expect(noKey.actions.map((x) => x.id)).not.toContain('kill');
+  });
+
   it('maps scopes to the kill target that stops them', () => {
     expect(killTargetFor('key:k1')).toBe('key:k1');
     expect(killTargetFor('sess:s1')).toBe('sess:s1');
     expect(killTargetFor('sku:google-maps:geocoding')).toBe('prov:google-maps');
-    expect(killTargetFor('env:ci')).toBe('org');
+    expect(killTargetFor('env:ci')).toBeNull();
+    expect(killTargetFor('agent:claude', 'k9')).toBe('key:k9');
     expect(killTargetFor('org')).toBe('org');
   });
 
@@ -147,6 +170,37 @@ describe('SSRF guard', () => {
     'fe80::1',
     '::ffff:10.0.0.1',
   ])('%s is private', (ip) => expect(isPrivateAddress(ip)).toBe(true));
+  it.each([
+    '::ffff:7f00:1',
+    '::ffff:a9fe:a9fe',
+    '0:0:0:0:0:ffff:7f00:1',
+    '::ffff:127.0.0.1',
+    '64:ff9b::a9fe:a9fe',
+    'fec0::1',
+    'ff02::1',
+    '224.0.0.1',
+    'not-an-ip',
+  ])('%s is private (mapped, NAT64, site-local, multicast or not an address)', (ip) => {
+    expect(isPrivateAddress(ip)).toBe(true);
+  });
+
+  it.each(['::ffff:808:808', '::ffff:8.8.8.8'])('%s (mapped public) is public', (ip) => {
+    expect(isPrivateAddress(ip)).toBe(false);
+  });
+
+  it('refuses mapped IPv6 literals in webhook URLs', async () => {
+    const { guardedAgent, postWebhook } = await import('../src/deliver.js');
+    for (const url of [
+      'http://[::ffff:127.0.0.1]:9/x',
+      'http://[::ffff:7f00:1]:9/x',
+      'http://[0:0:0:0:0:ffff:127.0.0.1]:9/x',
+      'http://[::ffff:a9fe:a9fe]/latest',
+    ]) {
+      const r = await postWebhook(url, 's', {}, { dispatcher: guardedAgent(false) });
+      expect(r.error, url).toContain('private address');
+    }
+  });
+
   it.each(['8.8.8.8', '172.32.0.1', '2606:4700::1111'])('%s is public', (ip) => {
     expect(isPrivateAddress(ip)).toBe(false);
   });

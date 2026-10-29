@@ -1,3 +1,4 @@
+import { MAX_MICROS } from '@spend-brake/budget';
 import { caps } from '@spend-brake/db';
 import { type ActionClaims, verifyAction } from '@spend-brake/shared';
 import { z } from 'zod';
@@ -135,6 +136,9 @@ async function execute(
         throw new ApiError(409, 'no_cap', 'This scope has no hard cap to raise.');
       }
       const hard = current.hard + amount!;
+      if (hard > MAX_MICROS) {
+        throw new ApiError(400, 'invalid_request', 'The raised cap would be too large.');
+      }
       const version = await ctx.engine.setCap(c.org, scope, kind, { hard, soft: current.soft });
       const row = {
         orgId: c.org,

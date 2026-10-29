@@ -374,6 +374,25 @@ describe('action links', () => {
     expect(await engine.killed(o.id)).toEqual([]);
   });
 
+  it('a link only ever acts on the org it was issued for', async () => {
+    const a = await org();
+    const b = await org();
+    const t = link(a.id, { act: 'kill', target: 'org' });
+    expect((await pages.inject({ method: 'POST', url: `/a/${t}` })).statusCode).toBe(200);
+    expect(await engine.killed(a.id)).toEqual(['org']);
+    expect(await engine.killed(b.id)).toEqual([]);
+    // Single use is per org and link: a fresh link for b still works.
+    expect(
+      (
+        await pages.inject({
+          method: 'POST',
+          url: `/a/${link(b.id, { act: 'kill', target: 'key:x' })}`,
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect(await engine.killed(b.id)).toEqual(['key:x']);
+  });
+
   it('raises a cap by a fixed or custom amount within the link limit', async () => {
     const o = await org();
     await call(o.owner, 'PUT', '/v1/caps/key:k1', { day: { hard: 10_000_000 } });

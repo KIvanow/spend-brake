@@ -90,7 +90,11 @@ describe('brake init and admin commands', () => {
   let keyId = '';
 
   it('init sets up the org, stores the key encrypted, saves the token 0600 and prints the steps', async () => {
-    const r = await cli().run(
+    // Secrets from the environment, not flags.
+    const r = await cli({
+      BRAKE_SETUP_TOKEN: 'setup-0123456789abcdef',
+      GOOGLE_MAPS_KEY: 'AIza-real-google-key',
+    }).run(
       'init',
       '--api-url',
       apiUrl,
@@ -127,6 +131,13 @@ describe('brake init and admin commands', () => {
     };
     expect(saved).toMatchObject({ apiUrl, orgId: 'acme', proxyUrl: 'https://brake.example.com' });
     expect(saved.adminToken).toMatch(/^sbt_/);
+    // The saved token is an admin token, not the owner token printed once.
+    const owner = /Owner token[^\n]*\n {2}(sbt_[0-9A-Za-z]{32})/.exec(r.out)![1]!;
+    expect(saved.adminToken).not.toBe(owner);
+    const tokens = await fetch(`${apiUrl}/v1/tokens`, {
+      headers: { authorization: `Bearer ${saved.adminToken}` },
+    });
+    expect(tokens.status).toBe(403);
 
     const key = await new Registry(valkey).getKeyByToken(keyToken);
     expect(key).toMatchObject({ orgId: 'acme', canMintSessions: true });

@@ -31,7 +31,12 @@ export async function proxyCall(io: Io, req: ProxyRequest): Promise<ProxyResult>
     );
   const url = new URL(`${cfg.proxyUrl}${req.path}`);
   for (const [k, v] of Object.entries(req.query ?? {})) url.searchParams.set(k, v);
-  const headers: Record<string, string> = { 'x-brake-key': cfg.key, ...(req.headers ?? {}) };
+  // The key and session always come from the environment, never from user-supplied headers.
+  const headers: Record<string, string> = {};
+  for (const [k, v] of Object.entries(req.headers ?? {})) {
+    if (!k.toLowerCase().startsWith('x-brake-')) headers[k] = v;
+  }
+  headers['x-brake-key'] = cfg.key;
   if (cfg.session) headers['x-brake-session'] = cfg.session;
   let body: string | undefined;
   if (req.body !== undefined) {

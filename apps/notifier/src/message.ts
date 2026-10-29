@@ -38,12 +38,16 @@ export const usd = (micros: unknown): string => {
 
 const windowName = (w: unknown) => (String(w).startsWith('d:') ? 'today' : 'this month');
 
-/** Which kill target stops spend for a cap scope. */
-export function killTargetFor(scope: string): string {
+/**
+ * Which kill target stops spend for a cap scope. Agent and environment scopes have no kill
+ * target of their own: the key that crossed the mark is killed rather than the whole org.
+ */
+export function killTargetFor(scope: string, keyId?: unknown): string | null {
   const [kind, a] = scope.split(':');
   if (kind === 'key' || kind === 'sess') return `${kind}:${a}`;
   if (kind === 'sku') return `prov:${a}`;
-  return 'org';
+  if (kind === 'org') return 'org';
+  return typeof keyId === 'string' && keyId ? `key:${keyId}` : null;
 }
 
 export function buildMessage(alertId: string, job: AlertJob, o: LinkOptions): Message {
@@ -93,17 +97,14 @@ export function buildMessage(alertId: string, job: AlertJob, o: LinkOptions): Me
   const scope = String(job.scope ?? 'org');
   switch (job.type) {
     case 'threshold': {
+      const kill = killTargetFor(scope, job.keyId);
       const what = job.mark === 'soft' ? 'Soft limit reached' : `Spend at ${job.mark}% of cap`;
       return {
         ...base,
         title: `${what}: ${scope} (${windowName(job.window)})`,
         text: `Spending for ${scope} ${windowName(job.window)} crossed ${job.mark === 'soft' ? 'its soft limit' : `${job.mark}% of its hard cap`}.`,
         actions: [
-          {
-            id: 'kill',
-            label: `Kill ${killTargetFor(scope)}`,
-            url: link('kill', killTargetFor(scope)),
-          },
+          ...(kill ? [{ id: 'kill', label: `Kill ${kill}`, url: link('kill', kill) }] : []),
           ...raise(scope, job.window),
           { id: 'mute', label: 'Mute 24 h', url: link('mute', scope) },
         ],
@@ -114,7 +115,7 @@ export function buildMessage(alertId: string, job: AlertJob, o: LinkOptions): Me
         ...base,
         title: `Request blocked: cap reached for ${scope} (${windowName(job.window)})`,
         text: `A request needing up to ${usd(job.worstMicros)} was refused because ${scope} reached its hard cap ${windowName(job.window)}.`,
-        actions: [...raise(scope, job.window), ...view('/caps')],
+        actions: [...raise(scope, job.window), ...view('/#/caps')],
       };
     case 'loop':
       return {
@@ -131,21 +132,21 @@ export function buildMessage(alertId: string, job: AlertJob, o: LinkOptions): Me
         ...base,
         title: `Catalog underpriced: ${String(job.route)}`,
         text: `A ${String(job.route)} request cost ${usd(job.costMicros)} but only ${usd(job.worstMicros)} was reserved. The price catalog needs a fix.`,
-        actions: view('/events?type=usage'),
+        actions: view('/#/events'),
       };
     case 'upstream_key_error':
       return {
         ...base,
         title: `${String(job.provider)} rejected the API key (${String(job.status)})`,
         text: `The provider refused the stored credential. Check that the key is valid and allows the APIs you call.`,
-        actions: view('/providers'),
+        actions: view('/#/keys'),
       };
     case 'reservations_expired':
       return {
         ...base,
         title: `${String(job.committed)} requests were never settled`,
         text: 'Their reservations were committed at worst case after 120 s. A proxy instance probably stopped mid-request.',
-        actions: view('/events'),
+        actions: view('/#/events'),
       };
     case 'catalog_drift':
       return {

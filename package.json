@@ -10,8 +10,8 @@
   "scripts": {
     "build": "turbo run build",
     "dev": "pnpm infra:up && turbo run dev",
-    "infra:up": "docker compose -f infra/docker-compose.yml up -d --wait valkey postgres",
-    "infra:down": "docker compose -f infra/docker-compose.yml down",
+    "infra:up": "docker compose -f infra/docker-compose.dev.yml up -d --wait",
+    "infra:down": "docker compose -f infra/docker-compose.dev.yml down",
     "lint": "eslint .",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",

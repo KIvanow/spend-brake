@@ -171,6 +171,8 @@ describe('brake call', () => {
         'lang=en',
         '-H',
         'X-Trace: 1',
+        '-H',
+        'X-Brake-Key: sb_live_spoof',
       ],
       f.io,
     );
@@ -218,6 +220,21 @@ describe('brake session', () => {
           status: 200,
           body: { sessionId: 'sess_abc', keyId: 'key_child', spentMicros: 12_000, heldMicros: 0 },
         };
+
+  it('warns when the command could read a saved admin token', async () => {
+    const { mkdtempSync, mkdirSync, writeFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const home = mkdtempSync(join(tmpdir(), 'brake-warn-'));
+    mkdirSync(join(home, '.config', 'brake'), { recursive: true });
+    writeFileSync(
+      join(home, '.config', 'brake', 'config.json'),
+      JSON.stringify({ adminToken: 'sbt_x' }),
+    );
+    const f = fake({ ...ENV, HOME: home }, api);
+    expect(await run(['session', '--', 'true'], f.io)).toBe(0);
+    expect(f.err[0]).toContain('holds an admin token the command can read');
+  });
 
   it('mints a key, runs the command with it, revokes it and passes the exit code through', async () => {
     const f = fake({ ...ENV, BRAKE_ADMIN_TOKEN: 'sbt_should_not_leak' }, api, 3);

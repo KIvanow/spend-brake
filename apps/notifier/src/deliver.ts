@@ -1,5 +1,5 @@
 import { lookup } from 'node:dns';
-import { isIP } from 'node:net';
+import { BlockList, isIP } from 'node:net';
 import {
   WEBHOOK_SIGNATURE_HEADER,
   WEBHOOK_TIMESTAMP_HEADER,
@@ -8,26 +8,53 @@ import {
 } from '@spend-brake/shared';
 import { Agent, request } from 'undici';
 
-/** Loopback, private, link-local (incl. cloud metadata), CGNAT and unique-local addresses. */
+// Every address a webhook must never reach. IPv4-mapped IPv6 (::ffff:a.b.c.d in any
+// spelling) is unpacked and checked as IPv4 below; NAT64 (64:ff9b::/96) is refused outright.
+// (A ::ffff:0:0/96 rule cannot be used: BlockList would then match every IPv4 address.)
+const PRIVATE = new BlockList();
+for (const [net, bits] of [
+  ['0.0.0.0', 8],
+  ['10.0.0.0', 8],
+  ['100.64.0.0', 10],
+  ['127.0.0.0', 8],
+  ['169.254.0.0', 16],
+  ['172.16.0.0', 12],
+  ['192.0.0.0', 24],
+  ['192.168.0.0', 16],
+  ['198.18.0.0', 15],
+  ['224.0.0.0', 3],
+] as const) {
+  PRIVATE.addSubnet(net, bits, 'ipv4');
+}
+for (const [net, bits] of [
+  ['::', 128],
+  ['::1', 128],
+  ['64:ff9b::', 96],
+  ['fc00::', 7],
+  ['fe80::', 10],
+  ['fec0::', 10],
+  ['ff00::', 8],
+] as const) {
+  PRIVATE.addSubnet(net, bits, 'ipv6');
+}
+
+/** Loopback, private, link-local (incl. cloud metadata), CGNAT, multicast, mapped and NAT64. */
 export function isPrivateAddress(ip: string): boolean {
-  const v4 = ip.startsWith('::ffff:') ? ip.slice(7) : ip;
-  if (isIP(v4) === 4) {
-    const [a, b] = v4.split('.').map(Number) as [number, number];
-    return (
-      a === 0 ||
-      a === 10 ||
-      a === 127 ||
-      (a === 100 && b >= 64 && b <= 127) ||
-      (a === 169 && b === 254) ||
-      (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && b === 168) ||
-      a >= 224
-    );
+  const family = isIP(ip);
+  if (family === 4) return PRIVATE.check(ip, 'ipv4');
+  if (family === 6) {
+    // An IPv4-mapped address is private exactly when its IPv4 part is.
+    const mapped = /^(?:0{0,4}:){0,5}:?ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i.exec(ip);
+    if (mapped) {
+      const hi = parseInt(mapped[1]!, 16);
+      const lo = parseInt(mapped[2]!, 16);
+      return isPrivateAddress(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`);
+    }
+    const dotted = /:((?:\d{1,3}\.){3}\d{1,3})$/.exec(ip);
+    if (dotted && /^(?:0{0,4}:){0,5}:?ffff:/i.test(ip)) return isPrivateAddress(dotted[1]!);
+    return PRIVATE.check(ip, 'ipv6');
   }
-  const x = ip.toLowerCase();
-  return (
-    x === '::' || x === '::1' || x.startsWith('fc') || x.startsWith('fd') || x.startsWith('fe80')
-  );
+  return true; // not an address at all: refuse
 }
 
 export interface WebhookClient {

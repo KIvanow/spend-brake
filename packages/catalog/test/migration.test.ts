@@ -98,6 +98,17 @@ describe('estimateMigration', () => {
     expect(alt(r, 'openplacesapi').notes.join()).toContain('Scale');
   });
 
+  it('compares a month of usage with monthly plans whatever the period', () => {
+    // 90 days with 270,000 searches is 90,000 a month: Startup (100k), not Business.
+    const r = estimateMigration(
+      [row('places.text_search.pro', '2026-08-01', 270_000, 270_000, 900n)],
+      alts,
+      90,
+    );
+    expect(alt(r, 'openplacesapi')).toMatchObject({ plan: 'Startup', creditsCompared: 90_000 });
+    expect(r.monthlyGoogleCostMicros).toBe(300);
+  });
+
   it('costs nothing on free plans for small usage', () => {
     const r = estimateMigration([row('geocoding', '2026-10-01', 100)], alts);
     expect(alt(r, 'geoapify')).toMatchObject({ plan: 'Free', monthlyCostMicros: 0 });

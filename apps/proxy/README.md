@@ -85,7 +85,7 @@ orgs are created with `pnpm --filter @spend-brake/proxy seed` until the admin AP
 ## Load test
 
 ```sh
-pnpm infra:up && pnpm build
+pnpm infra:up && pnpm build                                  # dev Valkey + Postgres
 PORT=9090 pnpm --filter @spend-brake/proxy bench:upstream &      # fast mock Google
 BRAKE_DEV_SECRETS='{"cred-google":"x"}' \
 BRAKE_UPSTREAM_OVERRIDES='{"https://maps.googleapis.com":"http://127.0.0.1:9090"}' \

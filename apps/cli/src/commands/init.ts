@@ -66,11 +66,11 @@ export function initCommand(program: Command, io: Io, done: (code: number) => vo
     .description('Set up a new install: org, Google key, first virtual key, caps')
     .option('--api-url <url>', 'admin API URL')
     .option('--proxy-url <url>', 'proxy URL your apps will call')
-    .option('--setup-token <token>', "the API's BRAKE_SETUP_TOKEN")
+    .option('--setup-token <token>', "the API's BRAKE_SETUP_TOKEN (or env BRAKE_SETUP_TOKEN)")
     .option('--org <id>', 'org id, e.g. acme')
     .option('--name <name>', 'org display name')
     .option('--tz <zone>', 'time zone for daily caps', 'UTC')
-    .option('--google-key <key>', 'the real Google Maps Platform key (stored encrypted)')
+    .option('--google-key <key>', 'the real Google key, stored encrypted (or env GOOGLE_MAPS_KEY)')
     .option('--egress-ip <ip...>', "the proxy's public egress IP(s), for the key restriction")
     .option('--day-cap <usd>', 'org hard cap per day')
     .option('--month-cap <usd>', 'org hard cap per month')
@@ -100,9 +100,18 @@ export function initCommand(program: Command, io: Io, done: (code: number) => vo
         /\/$/,
         '',
       );
-      const setupToken = await ask(o.setupToken, 'Setup token (BRAKE_SETUP_TOKEN)', true);
+      // Secrets come from the environment or a prompt; flags work but land in shell history.
+      const setupToken = await ask(
+        o.setupToken ?? io.env.BRAKE_SETUP_TOKEN,
+        'Setup token (BRAKE_SETUP_TOKEN)',
+        true,
+      );
       const orgId = await ask(o.org, 'Org id');
-      const googleKey = await ask(o.googleKey, 'Google Maps Platform API key', true);
+      const googleKey = await ask(
+        o.googleKey ?? io.env.GOOGLE_MAPS_KEY,
+        'Google Maps Platform API key (GOOGLE_MAPS_KEY)',
+        true,
+      );
       const caps = {
         ...(o.dayCap ? { day: { hard: usdToMicros(o.dayCap).toString() } } : {}),
         ...(o.monthCap ? { month: { hard: usdToMicros(o.monthCap).toString() } } : {}),
@@ -116,13 +125,21 @@ export function initCommand(program: Command, io: Io, done: (code: number) => vo
         { setupToken, orgId, name: o.name ?? orgId, timeZone: o.tz },
         {},
       );
+      const owner: Io = { ...scoped, env: { ...scoped.env, BRAKE_ADMIN_TOKEN: setup.ownerToken } };
+      // Only an admin token is saved on this machine. The owner token (tokens, org settings) is
+      // printed once for a password manager: an agent running as this user can read the saved
+      // file, and must not be able to mint tokens or change the org.
+      const adminToken = await apiCall<{ token: string }>(owner, 'POST', '/v1/tokens', {
+        name: 'brake cli',
+        role: 'admin',
+      });
       const path = saveConfig(io, {
         apiUrl,
         proxyUrl,
-        adminToken: setup.ownerToken,
+        adminToken: adminToken.token,
         orgId: setup.orgId,
       });
-      const admin: Io = { ...scoped, env: { ...scoped.env, BRAKE_ADMIN_TOKEN: setup.ownerToken } };
+      const admin: Io = { ...scoped, env: { ...scoped.env, BRAKE_ADMIN_TOKEN: adminToken.token } };
 
       const cred = await apiCall<{
         id: string;
@@ -145,6 +162,7 @@ export function initCommand(program: Command, io: Io, done: (code: number) => vo
         credentialId: cred.id,
         keyCheck: cred.check ?? null,
         virtualKey: { id: key.id, token: key.token },
+        ownerToken: setup.ownerToken,
         proxyUrl,
       };
       if (o.json) {
@@ -152,7 +170,10 @@ export function initCommand(program: Command, io: Io, done: (code: number) => vo
       } else {
         io.stdout(
           [
-            `Org ${setup.orgId} is ready. Admin token saved to ${path} (mode 0600).`,
+            `Org ${setup.orgId} is ready. An admin token is saved to ${path} (mode 0600).`,
+            '',
+            'Owner token (shown once, not saved; keep it in a password manager):',
+            `  ${setup.ownerToken}`,
             '',
             'Your virtual key (shown once, store it now):',
             `  ${key.token}`,

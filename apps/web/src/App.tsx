@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, useEffect, useState } from 'react';
 import { ApiError, api, getToken, setToken } from './api.js';
 import { Caps } from './pages/Caps.js';
 import { Events } from './pages/Events.js';
@@ -7,10 +7,20 @@ import { Keys } from './pages/Keys.js';
 import { Migration } from './pages/Migration.js';
 import { Overview } from './pages/Overview.js';
 import { Spend } from './pages/Spend.js';
+import { Webhooks } from './pages/Webhooks.js';
 import './styles.css';
 
-const PAGES = { Overview, Spend, Events, Caps, Keys, Migration } as const;
+const PAGES = { Overview, Spend, Events, Caps, Keys, Webhooks, Migration } as const;
 type PageName = keyof typeof PAGES;
+
+// Pages live in the URL hash (#/caps), so links from alerts and bookmarks open the right page.
+const pageFromHash = (): PageName => {
+  const name = window.location.hash.replace(/^#\/?/, '').split(/[?/]/)[0] ?? '';
+  return (
+    (Object.keys(PAGES) as PageName[]).find((p) => p.toLowerCase() === name.toLowerCase()) ??
+    'Overview'
+  );
+};
 
 function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
   const [token, setValue] = useState('');
@@ -57,7 +67,16 @@ function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
 
 export function App({ client = new QueryClient() }: { client?: QueryClient }) {
   const [signedIn, setSignedIn] = useState(() => getToken() !== null);
-  const [page, setPage] = useState<PageName>('Overview');
+  const [page, setPageState] = useState<PageName>(pageFromHash);
+  useEffect(() => {
+    const onHash = () => setPageState(pageFromHash());
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+  const setPage = (p: PageName) => {
+    window.location.hash = `/${p.toLowerCase()}`;
+    setPageState(p);
+  };
   if (!signedIn) return <SignIn onSignedIn={() => setSignedIn(true)} />;
   const Page = PAGES[page];
   return (

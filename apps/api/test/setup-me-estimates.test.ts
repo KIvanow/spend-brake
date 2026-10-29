@@ -220,3 +220,65 @@ describe('POST /v1/estimates/migration', () => {
     ]);
   });
 });
+
+describe('session keys follow their parent', () => {
+  it('are updated with the parent and revoked with it', async () => {
+    const org = await newOrg(env);
+    const call = (
+      method: 'POST' | 'PATCH' | 'DELETE',
+      url: string,
+      payload?: object,
+      headers = bearer(org.admin),
+    ) => env.app.inject({ method, url, headers, ...(payload ? { payload } : {}) });
+    const cred = (
+      await call('POST', '/v1/providers/credentials', {
+        provider: 'acme',
+        name: 'c',
+        secret: 'secret-1',
+      })
+    ).json<{ id: string }>().id;
+    const parent = (
+      await call('POST', '/v1/keys', {
+        name: 'p',
+        credentials: { acme: cred },
+        canMintSessions: true,
+      })
+    ).json<{ id: string; token: string }>();
+    const minted = await env.app.inject({
+      method: 'POST',
+      url: '/v1/sessions',
+      headers: { 'x-brake-key': parent.token },
+      payload: {},
+    });
+    expect(minted.statusCode).toBe(201);
+    const child = minted.json<{ token: string; keyId: string }>();
+    const registry = new Registry(env.valkey);
+
+    expect(
+      (
+        await call('PATCH', `/v1/keys/${parent.id}`, {
+          allowedIps: ['10.1.1.1'],
+          skus: ['geocoding'],
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect(await registry.getKeyByToken(child.token)).toMatchObject({
+      allowedIps: ['10.1.1.1'],
+      skus: ['geocoding'],
+      status: 'active',
+    });
+    // The child's IP allow-list now applies to /v1/me too.
+    expect(
+      (await env.app.inject({ url: '/v1/me', headers: { 'x-brake-key': child.token } })).statusCode,
+    ).toBe(401);
+
+    expect((await call('DELETE', `/v1/keys/${parent.id}`)).statusCode).toBe(200);
+    expect((await registry.getKeyByToken(child.token))?.status).toBe('revoked');
+    const keys = await env.app.inject({ url: '/v1/keys', headers: bearer(org.viewer) });
+    expect(
+      keys
+        .json<{ items: { id: string; status: string }[] }>()
+        .items.find((k) => k.id === child.keyId)?.status,
+    ).toBe('revoked');
+  });
+});

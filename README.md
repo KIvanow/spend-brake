@@ -16,10 +16,12 @@ Requirements: Docker, Node 22+ (for the CLI), a Google Maps Platform key.
 ```sh
 git clone https://github.com/KIvanow/spend-break && cd spend-break
 cp infra/.env.example infra/.env
-# fill in the three secrets, e.g.:
+# fill in the secrets, e.g.:
 sed -i "s|^BRAKE_MASTER_KEY=.*|BRAKE_MASTER_KEY=$(openssl rand -base64 32)|; \
         s|^BRAKE_ACTION_SECRET=.*|BRAKE_ACTION_SECRET=$(openssl rand -base64 32)|; \
-        s|^BRAKE_SETUP_TOKEN=.*|BRAKE_SETUP_TOKEN=$(openssl rand -hex 16)|" infra/.env
+        s|^BRAKE_SETUP_TOKEN=.*|BRAKE_SETUP_TOKEN=$(openssl rand -hex 24)|; \
+        s|^VALKEY_PASSWORD=.*|VALKEY_PASSWORD=$(openssl rand -hex 24)|; \
+        s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$(openssl rand -hex 24)|" infra/.env
 
 docker compose -f infra/docker-compose.yml up -d --build --wait
 ```
@@ -31,10 +33,15 @@ worker, Valkey and Postgres. Then set up your org, store the Google key and get 
 pnpm install && pnpm --filter @spend-brake/cli build      # or: npx @spend-brake/cli
 alias brake="node $PWD/apps/cli/dist/brake.cjs"
 
+# Secrets from the environment (or omit them to be prompted): flags would land in shell history.
+export BRAKE_SETUP_TOKEN="$(grep BRAKE_SETUP_TOKEN infra/.env | cut -d= -f2)"
+read -rs GOOGLE_MAPS_KEY && export GOOGLE_MAPS_KEY
 brake init --api-url http://localhost:8081 --proxy-url http://localhost:8080 \
-  --setup-token "$(grep BRAKE_SETUP_TOKEN infra/.env | cut -d= -f2)" \
-  --org acme --google-key "$GOOGLE_MAPS_KEY" --day-cap 5 --month-cap 50
+  --org acme --day-cap 5 --month-cap 50
 ```
+
+`init` prints the owner token once (keep it in a password manager) and saves an admin token for
+the CLI. Valkey and Postgres are only reachable from the other containers.
 
 `brake init` prints your virtual key once, checks whether the Google key is restricted, and
 prints the exact Google Cloud steps (console and `gcloud`) to restrict the real key to the
@@ -57,8 +64,8 @@ HTTP/1.1 402 Payment Required
  "scope":"org","window":"d:20261029","cap":5000000,"spent":4990000,"resetsAt":"2026-10-30T00:00:00.000Z"}
 ```
 
-Open the dashboard at http://localhost:3000 with the admin token `brake init` saved in
-`~/.config/brake/config.json`.
+Open the dashboard at http://localhost:3000 with the owner token, or the admin token `brake init`
+saved in `~/.config/brake/config.json`.
 
 ## Capping an AI agent
 
@@ -75,6 +82,10 @@ exits. Inside, the agent calls `brake maps geocode "â€¦"`, `brake maps search "â
 `brake call <provider> <method> <path>`; each prints JSON with the cost. When a cap or the loop
 breaker stops a call, `brake` exits 3 or 4 with one line telling the agent to stop and ask you.
 See [apps/cli](apps/cli/README.md).
+
+Run the agent as a different OS user than the one that ran `brake init` (or with
+`XDG_CONFIG_HOME` pointing elsewhere): the agent must not be able to read the saved admin token,
+or it could lift its own caps. `brake session` warns when it can.
 
 ## Google's controls vs Spend Brake
 

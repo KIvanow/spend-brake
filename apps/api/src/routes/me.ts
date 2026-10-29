@@ -47,7 +47,8 @@ export function meRoutes(app: FastifyInstance, router: Router, ctx: Ctx): void {
     if (
       !key ||
       key.status !== 'active' ||
-      (key.expiresAt && Date.parse(key.expiresAt) <= ctx.now().getTime())
+      (key.expiresAt && Date.parse(key.expiresAt) <= ctx.now().getTime()) ||
+      (key.allowedIps !== null && !key.allowedIps.includes(req.ip))
     ) {
       throw new ApiError(401, 'invalid_key', 'Unknown, revoked or expired virtual key.');
     }

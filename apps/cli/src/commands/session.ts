@@ -1,5 +1,15 @@
 import type { Command } from 'commander';
-import { CliError, EXIT, type Io, config, durationSec, microsToUsd, usdToMicros } from '../io.js';
+import {
+  CliError,
+  EXIT,
+  type Io,
+  config,
+  configPath,
+  durationSec,
+  microsToUsd,
+  readSavedConfig,
+  usdToMicros,
+} from '../io.js';
 
 interface Minted {
   sessionId: string;
@@ -78,6 +88,12 @@ export function sessionCommand(
           throw new CliError(
             `could not start a session: ${minted.message ?? `HTTP ${res.status}`}`,
             res.status === 401 ? EXIT.auth : EXIT.error,
+          );
+        }
+
+        if (readSavedConfig(io).adminToken) {
+          io.stderr(
+            `brake: warning: ${configPath(io)} holds an admin token the command can read. Run agents as another user (or with XDG_CONFIG_HOME elsewhere) so they cannot lift their own caps.\n`,
           );
         }
 

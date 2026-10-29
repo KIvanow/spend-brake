@@ -1,31 +1,34 @@
-# Full stack: docker compose -f infra/docker-compose.yml up --build
-# Needs infra/.env (copy infra/.env.example). `pnpm dev` starts only valkey and postgres from here.
+# Full stack: docker compose -f infra/docker-compose.yml up -d --build --wait
+# Needs infra/.env (copy infra/.env.example). Valkey and Postgres are not published to the host:
+# only the services reach them. For local development use docker-compose.dev.yml.
 name: spend-brake
-
-x-app: &app
-  restart: unless-stopped
-  env_file: .env
-  environment: &app-env
-    VALKEY_URL: redis://valkey:6379
-    DATABASE_URL: postgres://brake:${POSTGRES_PASSWORD:-brake}@postgres:5432/brake
-    LOG_LEVEL: info
-  depends_on: &app-deps
-    valkey: { condition: service_healthy }
-    postgres: { condition: service_healthy }
 
 x-health: &health
   interval: 5s
   timeout: 3s
   retries: 30
 
+x-stores: &stores
+  VALKEY_URL: redis://:${VALKEY_PASSWORD:?set VALKEY_PASSWORD in infra/.env}@valkey:6379
+  DATABASE_URL: postgres://brake:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in infra/.env}@postgres:5432/brake
+  LOG_LEVEL: info
+
 services:
   valkey:
     image: valkey/valkey:8
-    # Caps live here: never evict (an evicted spent counter would reset a cap) and persist
-    # across restarts. The API also rebuilds config records from Postgres on start.
-    command: ['valkey-server', '--appendonly', 'yes', '--maxmemory-policy', 'noeviction']
-    ports:
-      - '${BRAKE_VALKEY_PORT:-16379}:6379'
+    restart: unless-stopped
+    # Caps live here: never evict (an evicted spent counter would reset a cap), persist across
+    # restarts, require a password. The API also rebuilds config records from Postgres on start.
+    command:
+      - valkey-server
+      - --appendonly
+      - 'yes'
+      - --maxmemory-policy
+      - noeviction
+      - --requirepass
+      - ${VALKEY_PASSWORD:?set VALKEY_PASSWORD in infra/.env}
+    environment:
+      REDISCLI_AUTH: ${VALKEY_PASSWORD}
     volumes:
       - valkeydata:/data
     healthcheck:
@@ -34,25 +37,31 @@ services:
 
   postgres:
     image: postgres:16
+    restart: unless-stopped
     environment:
       POSTGRES_USER: brake
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-brake}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in infra/.env}
       POSTGRES_DB: brake
-    ports:
-      - '${BRAKE_POSTGRES_PORT:-15432}:5432'
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U brake -d brake']
       <<: *health
 
+  # Each service gets only the secrets it uses.
   api:
-    <<: *app
     build: { context: .., dockerfile: infra/Dockerfile, args: { APP: api } }
+    restart: unless-stopped
     environment:
-      <<: *app-env
+      <<: *stores
       PORT: '8081'
+      BRAKE_MASTER_KEY: ${BRAKE_MASTER_KEY:?set BRAKE_MASTER_KEY in infra/.env}
+      BRAKE_ACTION_SECRET: ${BRAKE_ACTION_SECRET:?set BRAKE_ACTION_SECRET in infra/.env}
+      BRAKE_SETUP_TOKEN: ${BRAKE_SETUP_TOKEN:-}
     ports: ['8081:8081']
+    depends_on:
+      valkey: { condition: service_healthy }
+      postgres: { condition: service_healthy }
     healthcheck:
       test:
         [
@@ -64,14 +73,16 @@ services:
       <<: *health
 
   proxy:
-    <<: *app
     build: { context: .., dockerfile: infra/Dockerfile, args: { APP: proxy } }
+    restart: unless-stopped
     environment:
-      <<: *app-env
+      VALKEY_URL: redis://:${VALKEY_PASSWORD}@valkey:6379
+      LOG_LEVEL: info
       PORT: '8080'
+      BRAKE_MASTER_KEY: ${BRAKE_MASTER_KEY}
     ports: ['8080:8080']
     depends_on:
-      <<: *app-deps
+      valkey: { condition: service_healthy }
       api: { condition: service_healthy }
     healthcheck:
       test:
@@ -84,24 +95,50 @@ services:
       <<: *health
 
   worker:
-    <<: *app
     build: { context: .., dockerfile: infra/Dockerfile, args: { APP: worker } }
+    restart: unless-stopped
+    environment:
+      <<: *stores
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      GITHUB_REPO: ${GITHUB_REPO:-}
     # The API runs migrations first.
     depends_on:
-      <<: *app-deps
       api: { condition: service_healthy }
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://localhost:9464/metrics').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))",
+        ]
+      <<: *health
 
   notifier:
-    <<: *app
     build: { context: .., dockerfile: infra/Dockerfile, args: { APP: notifier } }
+    restart: unless-stopped
     environment:
-      <<: *app-env
+      <<: *stores
       PORT: '8082'
       BRAKE_API_URL: http://api:8081
+      BRAKE_MASTER_KEY: ${BRAKE_MASTER_KEY}
+      BRAKE_ACTION_SECRET: ${BRAKE_ACTION_SECRET}
+      BRAKE_PUBLIC_URL: ${BRAKE_PUBLIC_URL:-http://localhost:8082}
+      BRAKE_DASHBOARD_URL: ${BRAKE_DASHBOARD_URL:-http://localhost:3000}
+      SMTP_URL: ${SMTP_URL:-}
+      OPERATOR_EMAIL: ${OPERATOR_EMAIL:-}
     ports: ['8082:8082']
     depends_on:
-      <<: *app-deps
       api: { condition: service_healthy }
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://localhost:8082/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))",
+        ]
+      <<: *health
 
   web:
     build: { context: .., dockerfile: infra/web.Dockerfile }
@@ -109,6 +146,9 @@ services:
     ports: ['3000:80']
     depends_on:
       api: { condition: service_healthy }
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1/']
+      <<: *health
 
 volumes:
   pgdata:

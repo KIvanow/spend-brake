@@ -80,7 +80,10 @@ export interface Estimate {
 
 export interface MigrationEstimate {
   periodDays: number;
+  /** Google spend over the whole period. */
   googleCostMicros: number;
+  /** The same per 30 days: what the alternatives' monthly totals compare with. */
+  monthlyGoogleCostMicros: number;
   requests: number;
   bySku: { sku: string; requests: number; units: number; costMicros: number }[];
   alternatives: Estimate[];
@@ -128,7 +131,9 @@ export function estimateMigration(
       perDay.set(r.day, (perDay.get(r.day) ?? 0) + c);
       if (map.note) notes.add(`${endpointOf(r.sku)}: ${map.note}`);
     }
-    const compared = p.quota === 'daily' ? Math.max(0, ...perDay.values()) : credits;
+    // Monthly quotas and prices are compared against a month of usage, whatever the period.
+    const monthly = (v: number) => Math.ceil((v * 30) / periodDays);
+    const compared = p.quota === 'daily' ? Math.max(0, ...perDay.values()) : monthly(credits);
 
     let best: { plan: string; cost: bigint } | null = null;
     for (const plan of p.plans) {
@@ -151,7 +156,7 @@ export function estimateMigration(
     const uncoveredList = [...uncovered.values()].sort(
       (a, b) => b.googleCostMicros - a.googleCostMicros,
     );
-    const uncoveredCost = uncoveredList.reduce((a, u) => a + u.googleCostMicros, 0);
+    const uncoveredCost = monthly(uncoveredList.reduce((a, u) => a + u.googleCostMicros, 0));
     return {
       provider: id,
       name: p.name,
@@ -171,6 +176,7 @@ export function estimateMigration(
   return {
     periodDays,
     googleCostMicros: Number(googleCost),
+    monthlyGoogleCostMicros: Math.ceil((Number(googleCost) * 30) / periodDays),
     requests: [...bySku.values()].reduce((a, s) => a + s.requests, 0),
     bySku: [...bySku.entries()]
       .map(([sku, s]) => ({

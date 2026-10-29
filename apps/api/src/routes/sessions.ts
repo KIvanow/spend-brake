@@ -12,6 +12,7 @@ import { atLeast } from '../auth.js';
 import { type Ctx, audit, id, micros, n } from '../common.js';
 import { newId, random62 } from '../ids.js';
 import { ApiError, type Router, errorSchema, notFound } from '../route.js';
+import { orgTimeZone } from './budget.js';
 
 const createBody = z.object({
   /** Required with an admin token; implied when the caller authenticates with the parent key. */
@@ -95,7 +96,8 @@ export function sessionRoutes(
       if (
         !key ||
         key.status !== 'active' ||
-        (key.expiresAt && Date.parse(key.expiresAt) <= ctx.now().getTime())
+        (key.expiresAt && Date.parse(key.expiresAt) <= ctx.now().getTime()) ||
+        (key.allowedIps !== null && !key.allowedIps.includes(req.ip))
       ) {
         throw new ApiError(401, 'unauthorized', 'Unknown, revoked or expired virtual key.');
       }
@@ -232,9 +234,10 @@ export function sessionRoutes(
         .set({ status: 'revoked', revokedAt: ctx.now(), config: revoked })
         .where(eq(virtualKeys.id, row.id));
     }
-    const month = windowsFor(ctx.now(), 'UTC')[1].id;
+    const tz = await orgTimeZone(ctx, c.auth.orgId);
+    const month = windowsFor(ctx.now(), tz)[1].id;
     const [status] = (
-      await ctx.engine.status(c.auth.orgId, [{ kind: 'key', id: row.id }], 'UTC', ctx.now())
+      await ctx.engine.status(c.auth.orgId, [{ kind: 'key', id: row.id }], tz, ctx.now())
     ).filter((s) => s.window === month);
     await audit(ctx, c.auth, 'session.end', row.id, { sessionId: rec.sessionId });
     return {

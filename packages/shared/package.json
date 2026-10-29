@@ -28,6 +28,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/auto-instrumentations-node": "^0.82.0",
     "@opentelemetry/core": "^2.10.0",
     "@opentelemetry/exporter-trace-otlp-http": "^0.300.0",
