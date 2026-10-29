@@ -1,4 +1,4 @@
-import type { BudgetEngine} from '@spend-brake/budget';
+import type { BudgetEngine } from '@spend-brake/budget';
 import { type Registry, parseScopeLabel } from '@spend-brake/budget';
 import { TwilioAdapter } from '@spend-brake/catalog';
 import {
