@@ -55,6 +55,10 @@ and per-minute counters) and can create a scope's cap from a template on first u
 budgets). It returns the smallest headroom left and a handle; `settle` takes that handle and, in
 one call, commits the actual cost, counts billed units and appends the usage event.
 
+Session scopes (`sess:<id>`) keep their window counters for two days only. `recordSpend` adds
+spend that was never reserved (fail-open requests replayed after an outage). The events stream's
+`MAXLEN` (10M) is a memory backstop; the worker trims it as the ledger consumes it.
+
 ## Usage
 
 ```ts

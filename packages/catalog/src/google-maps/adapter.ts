@@ -60,13 +60,17 @@ export function loadPlacesFields(): PlacesFields {
   return parsePlacesFields(readDataFile('google-maps/places-fields.yaml'));
 }
 
+/**
+ * Every field mask the request carries, joined. Google reads one of them, and we cannot be sure
+ * which wins, so pricing takes the highest tier across all of them.
+ */
 function fieldMask(req: IncomingReq): string | undefined {
-  return (
-    req.headers['x-goog-fieldmask'] ??
-    req.query.get('fields') ??
-    req.query.get('$fields') ??
-    undefined
-  );
+  const masks = [
+    req.headers['x-goog-fieldmask'],
+    ...req.query.getAll('fields'),
+    ...req.query.getAll('$fields'),
+  ].filter((m): m is string => typeof m === 'string' && m.trim() !== '');
+  return masks.length === 0 ? undefined : masks.join(',');
 }
 
 const PLACE_DETAILS = /^\/v1\/places\/[^/:]+$/;
@@ -183,6 +187,10 @@ export class GoogleMapsAdapter implements ProviderAdapter {
       }
       if (path === '/distanceMatrix/v2:computeRouteMatrix') {
         const { tier, elements } = computeRouteMatrixTier(req.body);
+        // Unknown size means unknown price: never reserve zero for a billed-per-element call.
+        if (elements === 0n) {
+          return { unpriced: 'route matrix without readable origins and destinations' };
+        }
         return {
           route: 'routes.compute_route_matrix',
           items: [{ sku: `routes.compute_route_matrix.${tier}`, units: elements }],
@@ -198,7 +206,10 @@ export class GoogleMapsAdapter implements ProviderAdapter {
         return { route: 'legacy.directions', items: [{ sku: directionsSku(q), units: 1n }] };
       }
       if (legacy?.[1] === 'distancematrix') {
-        return { route: 'legacy.distance_matrix', items: [distanceMatrixItem(q)] };
+        const item = distanceMatrixItem(q);
+        if (item.units === 0n)
+          return { unpriced: 'distance matrix without origins or destinations' };
+        return { route: 'legacy.distance_matrix', items: [item] };
       }
       const place = LEGACY_PLACE.exec(path)?.[1];
       const base = (sku: string, extra: LineItem[] = []): Route => ({

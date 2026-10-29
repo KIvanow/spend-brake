@@ -78,10 +78,17 @@ export function decodeBody(raw: Buffer, encoding: string | undefined): Buffer {
   }
 }
 
-export function parseJson(buf: Buffer | undefined, contentType: string | undefined): unknown {
-  if (!buf || buf.length === 0 || !(contentType ?? '').includes('json')) return undefined;
+/**
+ * Parse a body as JSON whatever its content type says (providers treat media types
+ * case-insensitively and some clients omit them): a body the classifier cannot see must never
+ * price as smaller than it is. A UTF-8 byte-order mark is skipped.
+ */
+export function parseJson(buf: Buffer | undefined): unknown {
+  if (!buf || buf.length === 0) return undefined;
+  let text = buf.toString('utf8');
+  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
   try {
-    return JSON.parse(buf.toString('utf8')) as unknown;
+    return JSON.parse(text) as unknown;
   } catch {
     return undefined;
   }

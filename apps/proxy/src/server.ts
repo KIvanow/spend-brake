@@ -30,7 +30,8 @@ import Fastify, {
 } from 'fastify';
 import { type Dispatcher, request as undiciRequest } from 'undici';
 import { TtlCache } from './cache.js';
-import { sendError } from './errors.js';
+import { outcomes, sendError } from './errors.js';
+import { ProxyMetrics } from './metrics.js';
 import { decodeBody, outgoingHeaders, parseJson, responseHeaders, upstreamUrl } from './forward.js';
 import { LocalBudget } from './local-budget.js';
 import type { SecretStore } from './secrets.js';
@@ -50,14 +51,22 @@ export interface ProxyDeps {
   /** Largest response body buffered for pricing. */
   maxBufferedBytes?: number;
   now?: () => Date;
+  metrics?: ProxyMetrics;
+  /** How often fail-open spend is retried into Valkey. */
+  replayIntervalMs?: number;
 }
 
 declare module 'fastify' {
   interface FastifyInstance {
     /** Wait for background settlement (commit, units, events) to finish. */
     brakeDrain(): Promise<void>;
+    /** Record fail-open spend in Valkey now; returns how many entries were written. */
+    brakeReplayFailOpen(): Promise<number>;
+    brakeMetrics: ProxyMetrics;
   }
 }
+
+class KeyNotFound extends Error {}
 
 const SESSION_ID = /^[A-Za-z0-9_.-]{1,128}$/;
 const CONFIG_STALE_MS = 10 * 60_000;
@@ -96,7 +105,12 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
   const engine = new BudgetEngine(deps.valkey);
   const registry = new Registry(deps.valkey);
   const configTtl = deps.configTtlMs ?? 5_000;
-  const keyCache = new TtlCache<KeyRecord | null>(configTtl, CONFIG_STALE_MS);
+  const keyCache = new TtlCache<KeyRecord>(configTtl, CONFIG_STALE_MS);
+  // Unknown tokens live in their own small cache so a flood of them cannot evict the real keys
+  // that fail-open depends on during an outage.
+  const missCache = new TtlCache<true>(configTtl, 0, 1_000);
+  const metrics = deps.metrics ?? new ProxyMetrics();
+  const labels = new WeakMap<FastifyRequest, { provider: string; sku: string }>();
   const orgCache = new TtlCache<OrgRecord | null>(configTtl, CONFIG_STALE_MS);
   // Unit counts only grow, so a stale count can only select a pricier volume band.
   const unitsCache = new TtlCache<bigint>(configTtl, 0);
@@ -125,9 +139,51 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
     done(null, payload);
   });
 
+  app.addHook('onResponse', (request, _reply, done) => {
+    if (request.url !== '/healthz') {
+      const l = labels.get(request) ?? { provider: '', sku: '' };
+      metrics.requests.inc({ ...l, outcome: outcomes.get(request) ?? 'ok' });
+    }
+    done();
+  });
+
+  // Fail-open spend is recorded once Valkey answers again, so the ledger, alerts and the next
+  // windows see it.
+  async function replayFailOpen(): Promise<number> {
+    let n = 0;
+    while (local.journal.length > 0) {
+      const e = local.journal[0]!;
+      try {
+        await engine.recordSpend({
+          orgId: e.orgId,
+          amount: e.amount,
+          scopes: e.scopes,
+          timeZone: e.timeZone,
+          at: e.at,
+          units: e.units,
+          event: e.event,
+        });
+      } catch {
+        break;
+      }
+      local.journal.shift();
+      metrics.failOpenReplayed.inc();
+      n++;
+    }
+    return n;
+  }
+  const replayTimer = setInterval(() => {
+    if (local.journal.length > 0) track(replayFailOpen());
+  }, deps.replayIntervalMs ?? 5_000);
+  replayTimer.unref();
+
   app.addHook('onClose', async () => {
+    clearInterval(replayTimer);
     await Promise.allSettled([...pending]);
   });
+
+  app.decorate('brakeReplayFailOpen', replayFailOpen);
+  app.decorate('brakeMetrics', metrics);
 
   app.decorate('brakeDrain', async () => {
     while (pending.size > 0) await Promise.allSettled([...pending]);
@@ -184,9 +240,25 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
   }
 
   async function authenticate(token: string): Promise<Auth | null> {
-    const k = await keyCache.get(token, () => registry.getKeyByToken(token));
+    if (missCache.peek(token)) return null;
+    let k: { value: KeyRecord; stale: boolean };
+    try {
+      k = await keyCache.get(
+        token,
+        async () => {
+          const found = await registry.getKeyByToken(token);
+          if (!found) throw new KeyNotFound();
+          return found;
+        },
+        (err) => !(err instanceof KeyNotFound),
+      );
+    } catch (err) {
+      if (!(err instanceof KeyNotFound)) throw err;
+      keyCache.delete(token);
+      missCache.set(token, true);
+      return null;
+    }
     const key = k.value;
-    if (!key) return null;
     const o = await orgCache.get(key.orgId, () => registry.getOrg(key.orgId));
     const org = o.value ?? {
       id: key.orgId,
@@ -224,6 +296,7 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
       return sendError(reply, 'unknown_route', 'No provider is configured for this path.');
     const { route, path, query } = found;
     const { adapter, upstream } = route;
+    labels.set(request, { provider: adapter.id, sku: '' });
 
     // 1. Authenticate.
     const token = virtualKeyFrom(request, query);
@@ -253,6 +326,15 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
     if (session !== undefined && (typeof session !== 'string' || !SESSION_ID.test(session))) {
       return sendError(reply, 'invalid_request', 'Invalid X-Brake-Session.');
     }
+    // Sessions are client-named scopes; only keys with a session budget may open them, so a
+    // client cannot create unbounded per-session counters.
+    if (session !== undefined && key.sessionCapMicros === null) {
+      return sendError(
+        reply,
+        'invalid_request',
+        'This key has no session budget; drop X-Brake-Session.',
+      );
+    }
     query.delete('key');
 
     // 2. Classify and price.
@@ -263,7 +345,7 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
       path,
       query,
       headers: request.headers as Record<string, string | undefined>,
-      body: parseJson(rawBody, request.headers['content-type']),
+      body: parseJson(rawBody),
     };
     const providerCfg = org.providers[adapter.id] ?? {
       trustFreeTier: false,
@@ -274,7 +356,9 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
       ? createHash('sha256').update(billingSession.token).digest('hex').slice(0, 32)
       : null;
     let priced: Priced;
-    let ctx: PriceCtx = { monthlyUnits: new Map(), trustFreeTier: providerCfg.trustFreeTier };
+    // The worst case never applies the free allowance: concurrent or cached counts could put
+    // more requests inside it than it holds. Only the actual cost uses it (fresh counts below).
+    let ctx: PriceCtx = { monthlyUnits: new Map(), trustFreeTier: false };
     try {
       const started =
         billingSessionHash !== null &&
@@ -283,7 +367,7 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
       if (c.priced) {
         ctx = {
           monthlyUnits: await monthlyUnits(org, [...new Set(c.items.map((i) => i.sku))], at),
-          trustFreeTier: providerCfg.trustFreeTier,
+          trustFreeTier: false,
         };
         priced = {
           classified: c,
@@ -331,6 +415,7 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
         route: c.route,
       };
     }
+    labels.set(request, { provider: adapter.id, sku: priced.items[0]?.sku ?? '' });
     if (key.skus && !priced.items.every((i) => key.skus!.includes(i.sku))) {
       return sendError(reply, 'sku_not_allowed', 'Key may not call this SKU.', {
         skus: priced.items.map((i) => i.sku),
@@ -365,6 +450,7 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
     let handle: ReservationHandle | null = null;
     let failOpenDay: string | null = null;
     try {
+      const reserveStart = performance.now();
       const r = await engine.reserve({
         orgId: org.id,
         reqId,
@@ -378,9 +464,12 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
           ...(key.loop ?? org.loop),
           keyId: key.id,
           hash: priced.hash,
-          rateScope: sessionScope ?? { kind: 'key', id: key.id },
+          // The per-minute rule is per session (design doc); without one only identical
+          // requests count.
+          ...(sessionScope ? { rateScope: sessionScope } : {}),
         },
       });
+      metrics.reserveLatency.observe(performance.now() - reserveStart);
       const base = {
         reqId,
         keyId: key.id,
@@ -410,6 +499,7 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
             { retryAfter: r.retryAfterSec },
           );
         case 'budget_exceeded':
+          reply.header('x-brake-remaining-micros', String(r.cap > r.used ? r.cap - r.used : 0n));
           emit(org.id, {
             type: 'blocked',
             reason: 'budget_exceeded',
@@ -441,12 +531,22 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
         return sendError(reply, 'budget_unavailable', 'Budget store unavailable; request blocked.');
       }
       failOpenDay = at.toISOString().slice(0, 10);
-      if (!local.tryReserve(key.id, failOpenDay, priced.worst, BigInt(key.failOpenMicros))) {
+      const allowance = BigInt(key.failOpenMicros);
+      if (!local.tryReserve(key.id, failOpenDay, priced.worst, allowance)) {
+        const nextDay = new Date(`${failOpenDay}T00:00:00Z`);
+        nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+        reply.header('x-brake-remaining-micros', '0');
         return sendError(
           reply,
           'budget_exceeded',
           'Budget store unavailable and the fail-open allowance is used up.',
-          { scope: `key:${key.id}`, window: `d:${failOpenDay.replaceAll('-', '')}` },
+          {
+            scope: `key:${key.id}`,
+            window: `d:${failOpenDay.replaceAll('-', '')}`,
+            cap: Number(allowance),
+            spent: Number(local.used(key.id, failOpenDay)),
+            resetsAt: nextDay.toISOString(),
+          },
         );
       }
       reply.header('x-brake-fail-open', '1');
@@ -454,11 +554,16 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
 
     // Settle in the background so the response is not held up. One script commits, counts units
     // and appends the usage event; if it fails, the sweeper commits the reservation at worst case.
-    const settle = (actual: bigint, status: number, upstreamMs: number, error?: string) => {
-      if (failOpenDay) {
-        local.settle(key.id, failOpenDay, priced.worst, actual);
-        return;
-      }
+    // `billed`: the provider charges for this request at list price, so its units count toward
+    // volume bands and the free allowance even when our price for it is zero.
+    const settle = (
+      actual: bigint,
+      billed: boolean,
+      status: number,
+      upstreamMs: number,
+      error?: string,
+    ) => {
+      metrics.cost.inc({ provider: adapter.id }, Number(actual));
       const event = compact({
         type: 'usage',
         reqId,
@@ -476,19 +581,37 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
         session,
         env: key.env ?? undefined,
         agentId: key.agentId ?? undefined,
-        crossings: crossings.length ? JSON.stringify(crossings) : undefined,
+        // Marks were set at reserve; only announce them for spend that actually happened.
+        crossings: billed && crossings.length ? JSON.stringify(crossings) : undefined,
+        failOpen: failOpenDay ? '1' : undefined,
         error,
       });
+      if (failOpenDay) {
+        local.settle(key.id, failOpenDay, priced.worst, actual);
+        if (billed || actual > 0n) {
+          local.journal.push({
+            orgId: org.id,
+            scopes,
+            amount: actual,
+            timeZone: org.timeZone,
+            at,
+            units: billed ? priced.items : [],
+            event,
+          });
+        }
+        return;
+      }
       track(
         (async () => {
           try {
             await engine.settle(org.id, reqId, actual, handle!, {
+              billed,
               timeZone: org.timeZone,
               now: at,
               units: priced.items,
               event,
             });
-            if (actual > 0n && billingSessionHash && billingSession) {
+            if (billed && billingSessionHash && billingSession) {
               await engine.startBillingSession(
                 org.id,
                 adapter.id,
@@ -518,7 +641,7 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
     try {
       secret = await deps.secrets.get(org.id, adapter.id, credentialId);
     } catch {
-      settle(0n, 0, 0, 'credential_unavailable');
+      settle(0n, false, 0, 0, 'credential_unavailable');
       return sendError(reply, 'upstream_unavailable', 'Provider credential is not available.');
     }
     const headers = outgoingHeaders(request.headers);
@@ -546,29 +669,52 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
       );
       const upstreamMs = performance.now() - upstreamStart;
       if (neverSent) {
-        settle(0n, 0, upstreamMs, 'upstream_unreachable');
+        settle(0n, false, 0, upstreamMs, 'upstream_unreachable');
         costHeaders(0n);
         return sendError(reply, 'upstream_unavailable', 'Provider unreachable; nothing billed.');
       }
       // The provider may have received and billed it.
       const actual = adapter.timeoutBilled ? priced.worst : 0n;
-      settle(actual, 0, upstreamMs, code ?? 'upstream_error');
+      metrics.upstreamLatency.observe({ provider: adapter.id }, upstreamMs);
+      settle(actual, adapter.timeoutBilled, 0, upstreamMs, code ?? 'upstream_error');
       costHeaders(actual);
       return sendError(reply, 'upstream_timeout', 'Provider did not answer in time.');
     }
     const upstreamMs = performance.now() - upstreamStart;
+    metrics.upstreamLatency.observe({ provider: adapter.id }, upstreamMs);
     const resHeaders = res.headers as Record<string, string | undefined>;
 
-    // 6. Settle from the response, then 7. emit (inside settle).
-    const actualOf = (body?: unknown): bigint => {
+    // 6. Settle from the response, then 7. emit (inside settle). The list price decides whether
+    // the provider billed; a trusted free allowance then prices it from fresh (uncached) counts.
+    const actualOf = async (body?: unknown): Promise<{ actual: bigint; billed: boolean }> => {
       if (!priced.classified) {
-        return res.statusCode >= 200 && res.statusCode < 300 ? priced.worst : 0n;
+        const ok = res.statusCode >= 200 && res.statusCode < 300;
+        return { actual: ok ? priced.worst : 0n, billed: ok };
       }
-      return adapter.actual(
-        priced.classified,
-        { status: res.statusCode, headers: resHeaders, ...(body !== undefined ? { body } : {}) },
-        ctx,
-      );
+      const upstreamRes = {
+        status: res.statusCode,
+        headers: resHeaders,
+        ...(body !== undefined ? { body } : {}),
+      };
+      const list = adapter.actual(priced.classified, upstreamRes, ctx);
+      if (list === 0n || !providerCfg.trustFreeTier || failOpenDay) {
+        return { actual: list, billed: list > 0n };
+      }
+      try {
+        const fresh = await engine.monthlyUnits(
+          org.id,
+          [...new Set(priced.items.map((i) => i.sku))],
+          org.timeZone,
+          at,
+        );
+        const free = adapter.actual(priced.classified, upstreamRes, {
+          monthlyUnits: fresh,
+          trustFreeTier: true,
+        });
+        return { actual: free, billed: true };
+      } catch {
+        return { actual: list, billed: true };
+      }
     };
 
     const passHeaders = responseHeaders(res.headers);
@@ -578,29 +724,26 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
       try {
         raw = await readLimited(res.body, maxBuffered);
       } catch (err) {
-        const actual = actualOf();
-        settle(actual, res.statusCode, upstreamMs, (err as Error).message);
+        const { actual, billed } = await actualOf();
+        settle(actual, billed, res.statusCode, upstreamMs, (err as Error).message);
         costHeaders(actual);
         return sendError(reply, 'upstream_unavailable', 'Provider response failed mid-way.');
       }
       let body: unknown;
       try {
-        body = parseJson(
-          decodeBody(raw, resHeaders['content-encoding']),
-          resHeaders['content-type'],
-        );
+        body = parseJson(decodeBody(raw, resHeaders['content-encoding']));
       } catch {
         body = undefined;
       }
-      const actual = actualOf(body);
-      settle(actual, res.statusCode, upstreamMs);
+      const { actual, billed } = await actualOf(body);
+      settle(actual, billed, res.statusCode, upstreamMs);
       reply.code(res.statusCode).headers(passHeaders);
       costHeaders(actual);
       return reply.send(raw);
     }
 
-    const actual = actualOf();
-    settle(actual, res.statusCode, upstreamMs);
+    const { actual, billed } = await actualOf();
+    settle(actual, billed, res.statusCode, upstreamMs);
     reply.code(res.statusCode).headers(passHeaders);
     costHeaders(actual);
     return reply.send(res.body);

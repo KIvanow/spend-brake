@@ -67,6 +67,18 @@ describe('loop detection', () => {
     expect((await engine.reserve(req(org, 1n, { loop: loop('h2') }))).outcome).toBe('ok');
   });
 
+  it('applies the per-minute rule only to sessions', async () => {
+    const org = newOrg();
+    const noSession = (i: number) => {
+      const check = loop(`n${i}`, { perMinute: 2 });
+      delete check.rateScope;
+      return check;
+    };
+    for (let i = 0; i < 10; i++) {
+      expect((await engine.reserve(req(org, 1n, { loop: noSession(i) }))).outcome).toBe('ok');
+    }
+  });
+
   it('trips on the per-minute rate of a session', async () => {
     const org = newOrg();
     const check = (i: number) => loop(`h${i}`, { rateScope: sess, perMinute: 5 });
@@ -114,6 +126,36 @@ describe('cap templates', () => {
     );
     expect(res.outcome).toBe('ok');
     expect((await engine.getCap(org, sess, 'm'))?.hard).toBe(100n);
+  });
+});
+
+describe('session scopes', () => {
+  it('expire their counters after two days instead of the window TTL', async () => {
+    const org = newOrg();
+    await engine.reserve(req(org, 1n, { scopes: [sess, keyScope] }));
+    const ttl = (k: string) => valkey.client.ttl(`bk:{o:${org}}:${k}`);
+    expect(await ttl('held:sess:s1:m:202610')).toBeLessThanOrEqual(2 * 86400);
+    expect(await ttl('held:sess:s1:d:20261029')).toBeLessThanOrEqual(2 * 86400);
+    expect(await ttl('held:key:k1:m:202610')).toBeGreaterThan(300 * 86400);
+  });
+});
+
+describe('recorded spend', () => {
+  it('adds unreserved spend, units and an event in one call', async () => {
+    const org = newOrg();
+    await engine.recordSpend({
+      orgId: org,
+      amount: 9n,
+      scopes: [{ kind: 'org' }, keyScope],
+      timeZone: TZ,
+      at: NOW,
+      units: [{ sku: 'geocoding', units: 1n }],
+      event: { type: 'usage', failOpen: '1' },
+    });
+    const [day] = await engine.status(org, [keyScope], TZ, NOW);
+    expect(day).toMatchObject({ spent: 9n, held: 0n });
+    expect((await engine.monthlyUnits(org, ['geocoding'], TZ, NOW)).get('geocoding')).toBe(1n);
+    expect(await valkey.client.xlen(`bk:{o:${org}}:events`)).toBe(1);
   });
 });
 
@@ -190,6 +232,7 @@ describe('one-round-trip settle', () => {
     const res = await engine.reserve(r);
     if (res.outcome !== 'ok') throw new Error(res.outcome);
     const c = await engine.settle(org, r.reqId, 7n, res.handle, {
+      billed: true,
       timeZone: TZ,
       now: NOW,
       units: [{ sku: 'geocoding', units: 2n }],
@@ -208,7 +251,7 @@ describe('one-round-trip settle', () => {
     const r = req(org, 10n);
     const res = await engine.reserve(r);
     if (res.outcome !== 'ok') throw new Error(res.outcome);
-    const opts = { timeZone: TZ, now: NOW, event: { type: 'usage' } };
+    const opts = { billed: true, timeZone: TZ, now: NOW, event: { type: 'usage' } };
     expect(await engine.settle(org, r.reqId, 12n, res.handle, opts)).toMatchObject({
       underpriced: true,
     });
@@ -223,12 +266,27 @@ describe('one-round-trip settle', () => {
     ]);
   });
 
+  it('counts units for a billed request priced at zero (trusted free allowance)', async () => {
+    const org = newOrg();
+    const r = req(org, 0n);
+    const res = await engine.reserve(r);
+    if (res.outcome !== 'ok') throw new Error(res.outcome);
+    await engine.settle(org, r.reqId, 0n, res.handle, {
+      billed: true,
+      timeZone: TZ,
+      now: NOW,
+      units: [{ sku: 'geocoding', units: 1n }],
+    });
+    expect((await engine.monthlyUnits(org, ['geocoding'], TZ, NOW)).get('geocoding')).toBe(1n);
+  });
+
   it('refunds with actual 0 and counts no units', async () => {
     const org = newOrg();
     const r = req(org, 10n);
     const res = await engine.reserve(r);
     if (res.outcome !== 'ok') throw new Error(res.outcome);
     await engine.settle(org, r.reqId, 0n, res.handle, {
+      billed: false,
       timeZone: TZ,
       now: NOW,
       units: [{ sku: 'geocoding', units: 1n }],

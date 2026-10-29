@@ -1,4 +1,7 @@
-import type { FastifyReply } from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
+
+/** Outcome label per request for brake_requests_total; set by sendError or the success path. */
+export const outcomes = new WeakMap<FastifyRequest, string>();
 
 export type BrakeError =
   | 'invalid_key'
@@ -39,6 +42,7 @@ export function sendError(
   message: string,
   extra: Record<string, unknown> = {},
 ): FastifyReply {
+  outcomes.set(reply.request, error);
   // A request that reached the provider may already carry its cost; everything else cost nothing.
   if (!reply.hasHeader('x-brake-cost-micros')) reply.header('x-brake-cost-micros', '0');
   return reply

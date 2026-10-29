@@ -97,6 +97,29 @@ describe('google-maps adapter', () => {
     }
   });
 
+  it('leaves a matrix of unknown size unpriced instead of free', () => {
+    for (const body of [undefined, {}, { origins: [], destinations: [{}] }, 'not json']) {
+      const c = adapter.classify(
+        req('POST', 'https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix', { body }),
+      );
+      expect(c.priced, JSON.stringify(body)).toBe(false);
+    }
+    expect(
+      adapter.classify(
+        req('GET', 'https://maps.googleapis.com/maps/api/distancematrix/json?origins=A'),
+      ).priced,
+    ).toBe(false);
+  });
+
+  it('prices at the highest tier across every field mask the request carries', () => {
+    const c = adapter.classify(
+      req('GET', 'https://places.googleapis.com/v1/places/ChIJ1?fields=*', {
+        headers: { 'X-Goog-FieldMask': 'id' },
+      }),
+    );
+    expect(c.priced && c.items[0]!.sku).toBe('places.details.enterprise_atmosphere');
+  });
+
   it('prices the free ID-only routes at zero', () => {
     const c = adapter.classify(
       req(
@@ -142,8 +165,8 @@ describe('google-maps adapter', () => {
     expect(needs('GET', 'https://places.googleapis.com/v1/places/ChIJ1')).toBe(false);
     expect(
       needs('POST', 'https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix', {
-        origins: [],
-        destinations: [],
+        origins: [{ waypoint: { address: 'A' } }],
+        destinations: [{ waypoint: { address: 'B' } }],
       }),
     ).toBe(true);
   });

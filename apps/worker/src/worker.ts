@@ -64,6 +64,7 @@ export class Worker {
 
   async ledgerOnce(): Promise<number> {
     const n = await this.ledger.runOnce(this.orgIds);
+    this.metrics.ledgerLag.set(await this.ledger.lag(this.orgIds));
     this.metrics.lastLoop.set({ loop: 'ledger' }, Date.now() / 1000);
     return n;
   }

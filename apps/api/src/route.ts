@@ -57,6 +57,8 @@ export class Router {
   constructor(
     private readonly app: FastifyInstance,
     private readonly auth: Authenticator,
+    /** Per-token rate limit; false means the token is over it. */
+    private readonly allow: (auth: Auth) => Promise<boolean> = () => Promise.resolve(true),
   ) {
     this.registry.registerComponent('securitySchemes', 'bearer', {
       type: 'http',
@@ -108,6 +110,13 @@ export class Router {
       handler: async (req, reply) => {
         const auth = await this.auth.authenticate(req);
         if (!auth) throw new ApiError(401, 'unauthorized', 'Missing or invalid API token.');
+        if (!(await this.allow(auth))) {
+          throw new ApiError(
+            429,
+            'rate_limited',
+            'Too many requests for this token; retry in a minute.',
+          );
+        }
         if (!atLeast(auth.role, def.role)) {
           throw new ApiError(403, 'forbidden', `This needs the ${def.role} role.`);
         }

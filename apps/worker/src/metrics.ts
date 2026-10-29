@@ -31,6 +31,11 @@ export class Metrics {
     help: 'Catalog source pages that changed since the last check',
     registers: [this.registry],
   });
+  readonly ledgerLag = new Gauge({
+    name: 'brake_ledger_lag_events',
+    help: 'Usage events waiting in Valkey streams for the ledger, over all orgs',
+    registers: [this.registry],
+  });
   readonly lastLoop = new Gauge({
     name: 'brake_worker_last_loop_timestamp_seconds',
     help: 'When each worker loop last finished',

@@ -18,6 +18,8 @@ const envSchema = z.object({
   HOST: z.string().default('0.0.0.0'),
   LOG_LEVEL: z.string().default('info'),
   VALKEY_URL: z.string().default('redis://localhost:16379'),
+  /** Prometheus metrics, on their own port so they are never exposed with the proxy. */
+  METRICS_PORT: z.coerce.number().int().default(9465),
   UPSTREAM_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
   TRUST_PROXY: z.stringbool().default(false),
   /** Dev only: provider credentials as {"<credentialId>": "<secret>"}. Phase 4 replaces this. */

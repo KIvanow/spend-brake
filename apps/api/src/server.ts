@@ -5,7 +5,6 @@ import { type KeyWrapper, redactUrl } from '@spend-brake/shared';
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
 import { Authenticator } from './auth.js';
 import type { Ctx } from './common.js';
-import { sha256 } from './ids.js';
 import { ApiError, Router } from './route.js';
 import { adminRoutes } from './routes/admin.js';
 import { budgetRoutes } from './routes/budget.js';
@@ -26,6 +25,17 @@ export interface ApiDeps {
   authCacheMs?: number;
 }
 
+export function apiContext(deps: ApiDeps): Ctx {
+  return {
+    db: deps.db,
+    valkey: deps.valkey,
+    engine: new BudgetEngine(deps.valkey),
+    registry: new Registry(deps.valkey),
+    wrapper: deps.wrapper,
+    now: deps.now ?? (() => new Date()),
+  };
+}
+
 export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   const now = deps.now ?? (() => new Date());
   const app = Fastify({
@@ -33,25 +43,17 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     trustProxy: deps.trustProxy ?? false,
     bodyLimit: 256 * 1024,
   });
-  const ctx: Ctx = {
-    db: deps.db,
-    valkey: deps.valkey,
-    engine: new BudgetEngine(deps.valkey),
-    registry: new Registry(deps.valkey),
-    wrapper: deps.wrapper,
-    now,
-  };
+  const ctx = apiContext({ ...deps, now });
 
   await app.register(rateLimit, {
-    max: deps.rateLimitPerMinute ?? 600,
+    // Several people may share one IP; the per-token limit is the tighter one.
+    max: (deps.rateLimitPerMinute ?? 600) * 4,
     timeWindow: '1 minute',
     redis: deps.valkey,
     nameSpace: 'bk:rl:api:',
-    // Per token when there is one, so one noisy client cannot starve an org's other tokens.
-    keyGenerator: (req) => {
-      const auth = req.headers.authorization;
-      return auth ? `t:${sha256(auth).slice(0, 32)}` : `ip:${req.ip}`;
-    },
+    // Per client IP before authentication: keying on an unverified header would let each
+    // request pick a fresh bucket. Valid tokens get their own limit after auth (Router).
+    keyGenerator: (req) => `ip:${req.ip}`,
     errorResponseBuilder: (_req, c) => ({
       statusCode: 429,
       error: 'rate_limited',
@@ -78,7 +80,17 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     return reply.code(500).send({ error: 'internal_error', message: 'Internal error.' });
   });
 
-  const router = new Router(app, new Authenticator(deps.db, now, deps.authCacheMs));
+  const perToken = deps.rateLimitPerMinute ?? 600;
+  const router = new Router(
+    app,
+    new Authenticator(deps.db, now, deps.authCacheMs),
+    async (auth) => {
+      const key = `bk:rl:api:tok:${auth.tokenId}:${Math.floor(now().getTime() / 60_000)}`;
+      const n = await deps.valkey.incr(key);
+      if (n === 1) await deps.valkey.expire(key, 120);
+      return n <= perToken;
+    },
+  );
   credentialRoutes(router, ctx);
   keyRoutes(router, ctx);
   budgetRoutes(router, ctx);

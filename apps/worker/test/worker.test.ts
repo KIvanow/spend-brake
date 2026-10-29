@@ -129,19 +129,12 @@ describe('ledger', () => {
     const org = await newOrg();
     await usage(org, { reqId: 'r1', costMicros: '1' });
     await usage(org, { reqId: 'r2', costMicros: '2' });
-    // Consumer A read the entries, wrote them, and died before acking.
-    const a = new LedgerConsumer(db, valkey, 'crashed');
-    await a.runOnce([org]);
-    await valkey.xgroup('SETID', `bk:{o:${org}}:events`, LEDGER_GROUP, '0');
-    await valkey.xreadgroup(
-      'GROUP',
-      LEDGER_GROUP,
-      'crashed',
-      'STREAMS',
-      `bk:{o:${org}}:events`,
-      '>',
+    // Consumer A inserts the rows, then dies before acking.
+    const crashed = new LedgerConsumer(db, valkey, 'crashed', () =>
+      Promise.reject(new Error('crash')),
     );
-    // Consumer B claims them.
+    await expect(crashed.runOnce([org])).rejects.toThrow('crash');
+    // Consumer B claims the pending entries and writes them again; the primary key absorbs it.
     const b = new LedgerConsumer(db, valkey, 'survivor');
     expect(await b.claimStale([org], 0)).toBe(2);
     const rows = await db
@@ -149,6 +142,32 @@ describe('ledger', () => {
       .from(usageEvents)
       .where(sql`org_id = ${org}`);
     expect(rows.map((r) => r.reqId).sort()).toEqual(['r1', 'r2']);
+    const pending = (await valkey.xpending(`bk:{o:${org}}:events`, LEDGER_GROUP)) as [number];
+    expect(pending[0]).toBe(0);
+  });
+
+  it('trims only what the ledger consumed and reports lag', async () => {
+    const org = await newOrg();
+    for (let i = 0; i < 5; i++) await usage(org, { reqId: `t${i}` });
+    expect(await worker.ledger.lag([org])).toBe(5);
+    await worker.ledgerOnce();
+    expect(await valkey.xlen(`bk:{o:${org}}:events`)).toBeLessThanOrEqual(1);
+    expect(await worker.ledger.lag([org])).toBe(0);
+    // New events after the trim are still delivered.
+    await usage(org, { reqId: 't5' });
+    expect(await worker.ledgerOnce()).toBe(1);
+  });
+
+  it('never trims entries another consumer has not acked', async () => {
+    const org = await newOrg();
+    await usage(org, { reqId: 'p1' });
+    await worker.ledgerOnce();
+    await usage(org, { reqId: 'p2' });
+    // Delivered to a consumer that has not acked yet.
+    await valkey.xreadgroup('GROUP', LEDGER_GROUP, 'slow', 'STREAMS', `bk:{o:${org}}:events`, '>');
+    await worker.ledger.trim(org);
+    const left = await valkey.xrange(`bk:{o:${org}}:events`, '-', '+');
+    expect(left.map(([, f]) => f[f.indexOf('reqId') + 1])).toContain('p2');
   });
 
   it('picks up events written before the first run', async () => {

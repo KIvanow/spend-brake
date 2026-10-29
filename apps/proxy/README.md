@@ -16,6 +16,20 @@ The request path. Every proxied call goes through these steps:
    append the usage event in one Lua call. If that fails, the sweeper commits the reservation at
    its worst case.
 
+## Behaviour worth knowing
+
+- **Sessions** (`X-Brake-Session`) are only accepted on keys with a session budget
+  (`sessionCapMicros`); their counters expire after two days.
+- **Loop rule:** more than `identical` identical requests in the window trips the key's circuit;
+  the per-minute rule applies only to sessions.
+- **trustFreeTier:** the reservation is always the list price; the free allowance is applied
+  only to the actual cost, from fresh (uncached) unit counts. Units are counted for every billed
+  request, including free ones, so the allowance runs out when it should.
+- **Request bodies** are parsed as JSON whatever the content type says; a body-priced route whose
+  body cannot be read (a matrix of unknown size) is unpriced and denied.
+- **Fail-open** spend is kept in a local journal and recorded in Valkey (spend, units, usage
+  event) as soon as it answers again.
+
 ## Routes
 
 | Prefix           | Upstream                        |
@@ -46,7 +60,12 @@ scopes); it is omitted when nothing is capped. Fail-open requests add `X-Brake-F
 | 502    | `upstream_unavailable` | Provider unreachable (refunded)                                  |
 | 504    | `upstream_timeout`     | Provider timed out (committed at worst case)                     |
 
-Every error body has a one-line `message` an agent can act on.
+Every error body has a one-line `message` an agent can act on. A 402 `budget_exceeded` also
+carries `X-Brake-Remaining-Micros` (headroom left in the denying scope).
+
+Metrics (`:9465/metrics`): `brake_requests_total{provider,sku,outcome}`,
+`brake_cost_micros_total`, `brake_reserve_latency_ms`, `brake_upstream_latency_ms`,
+`brake_fail_open_replayed_total`.
 
 ## Configuration (env)
 

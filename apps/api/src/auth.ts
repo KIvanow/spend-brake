@@ -43,6 +43,12 @@ export class Authenticator {
         .limit(1);
       if (!row) return null;
       if (row.expiresAt && row.expiresAt <= this.now()) return null;
+      // Recorded when the token is looked up (at most once per cache period), never awaited.
+      void this.db
+        .update(apiTokens)
+        .set({ lastUsedAt: this.now() })
+        .where(eq(apiTokens.id, row.id))
+        .catch(() => undefined);
       return { orgId: row.orgId, tokenId: row.id, role: row.role, actor: `token:${row.id}` };
     });
   }

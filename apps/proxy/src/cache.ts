@@ -18,7 +18,15 @@ export class TtlCache<V> {
     private readonly now: () => number = Date.now,
   ) {}
 
-  async get(key: string, load: () => Promise<V>): Promise<{ value: V; stale: boolean }> {
+  /**
+   * `staleOn` decides which load errors may fall back to a stale value (an outage), as opposed to
+   * errors that mean the value is gone.
+   */
+  async get(
+    key: string,
+    load: () => Promise<V>,
+    staleOn: (err: unknown) => boolean = () => true,
+  ): Promise<{ value: V; stale: boolean }> {
     const t = this.now();
     const hit = this.entries.get(key);
     if (hit && hit.freshUntil > t) {
@@ -31,9 +39,19 @@ export class TtlCache<V> {
       this.set(key, value);
       return { value, stale: false };
     } catch (err) {
-      if (hit && hit.staleUntil > t) return { value: hit.value, stale: true };
+      if (hit && hit.staleUntil > t && staleOn(err)) return { value: hit.value, stale: true };
       throw err;
     }
+  }
+
+  /** A fresh value without loading; undefined when missing or expired. */
+  peek(key: string): V | undefined {
+    const hit = this.entries.get(key);
+    return hit && hit.freshUntil > this.now() ? hit.value : undefined;
+  }
+
+  delete(key: string): void {
+    this.entries.delete(key);
   }
 
   set(key: string, value: V): void {

@@ -3,6 +3,11 @@ name: spend-brake
 services:
   valkey:
     image: valkey/valkey:8
+    # Caps live here: never evict (an evicted spent counter would reset a cap) and persist
+    # across restarts. The API also rebuilds config records from Postgres on start.
+    command: ['valkey-server', '--appendonly', 'yes', '--maxmemory-policy', 'noeviction']
+    volumes:
+      - valkeydata:/data
     ports:
       - '${BRAKE_VALKEY_PORT:-16379}:6379'
     healthcheck:
@@ -29,3 +34,4 @@ services:
 
 volumes:
   pgdata:
+  valkeydata:

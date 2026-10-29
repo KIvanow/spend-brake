@@ -64,6 +64,12 @@ const fieldsOf = (flat: string[]) => {
   return o;
 };
 
+const pairs = (flat: unknown[]): Record<string, unknown> => {
+  const o: Record<string, unknown> = {};
+  for (let i = 0; i < flat.length; i += 2) o[String(flat[i])] = flat[i + 1];
+  return o;
+};
+
 type StreamReply = [string, [string, string[]][]][] | null;
 
 /**
@@ -153,6 +159,41 @@ export class LedgerConsumer {
     await this.db.insert(usageEvents).values(rows).onConflictDoNothing();
     await this.onRows(rows, alerts);
     await this.valkey.xack(this.stream(orgId), LEDGER_GROUP, ...entries.map((e) => e[0]));
+    await this.trim(orgId);
     return rows.length;
+  }
+
+  /**
+   * Drop stream entries the ledger has consumed: everything before the oldest pending entry, or
+   * before the group's last delivered id when nothing is pending. Unconsumed events are never
+   * trimmed here (the producer's MAXLEN is only a memory backstop).
+   */
+  async trim(orgId: string): Promise<void> {
+    const key = this.stream(orgId);
+    const pending = (await this.valkey.xpending(key, LEDGER_GROUP)) as [number, string | null];
+    let minId = pending[0] > 0 ? pending[1] : null;
+    if (!minId) {
+      const groups = (await this.valkey.xinfo('GROUPS', key)) as unknown[][];
+      const g = groups.map(pairs).find((x) => x.name === LEDGER_GROUP);
+      minId = (g?.['last-delivered-id'] as string | undefined) ?? null;
+    }
+    if (minId && minId !== '0-0') await this.valkey.xtrim(key, 'MINID', minId);
+  }
+
+  /** Entries not yet delivered to the ledger, summed over orgs (XINFO GROUPS `lag`). */
+  async lag(orgIds: readonly string[]): Promise<number> {
+    let total = 0;
+    for (const orgId of orgIds) {
+      try {
+        const key = this.stream(orgId);
+        const groups = (await this.valkey.xinfo('GROUPS', key)) as unknown[][];
+        const g = groups.map(pairs).find((x) => x.name === LEDGER_GROUP);
+        // No group yet: nothing has been consumed.
+        total += g ? Number(g.lag ?? 0) : await this.valkey.xlen(key);
+      } catch {
+        // no stream yet
+      }
+    }
+    return total;
   }
 }

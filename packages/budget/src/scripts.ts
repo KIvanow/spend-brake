@@ -49,9 +49,13 @@ if ARGV[4] == '1' then
   end
   local same = redis.call('INCR', KEYS[5])
   redis.call('EXPIRE', KEYS[5], ARGV[6], 'NX')
-  local perMinute = redis.call('INCR', KEYS[6])
-  redis.call('EXPIRE', KEYS[6], 60, 'NX')
-  if same > tonumber(ARGV[5]) or perMinute > tonumber(ARGV[7]) then
+  -- perMinuteMax 0 turns the rate rule off (requests without a session).
+  local perMinute = 0
+  if ARGV[7] ~= '0' then
+    perMinute = redis.call('INCR', KEYS[6])
+    redis.call('EXPIRE', KEYS[6], 60, 'NX')
+  end
+  if same > tonumber(ARGV[5]) or (ARGV[7] ~= '0' and perMinute > tonumber(ARGV[7])) then
     redis.call('SET', KEYS[4], '1', 'EX', ARGV[8])
     return {'LOOP', tonumber(ARGV[8]), 1}
   end
@@ -165,8 +169,9 @@ return {'OK', amount}
  * ARGV: reqId, actual, nPairs, nUnits, unitsTtlSec, unitIncrements..., maxLen, then event
  *       field/value pairs
  *
- * Units are counted whenever actual > 0, even if the sweeper settled first (it never counts
- * them). The event gets `underpriced=1` when actual exceeds the reservation and `late=1` when
+ * The caller passes units only when the provider billed the request (even at a price of zero,
+ * e.g. inside a trusted free allowance), so the counter always advances; they are counted even if
+ * the sweeper settled first (it never counts them). The event gets `underpriced=1` when actual exceeds the reservation and `late=1` when
  * the reservation was already settled.
  */
 export const SETTLE_LUA = `
@@ -187,12 +192,10 @@ if redis.call('EXISTS', KEYS[2]) == 1 then
 end
 redis.call('ZREM', KEYS[1], ARGV[1])
 
-if actual ~= '0' and actual ~= '-1' then
-  for i = 1, nUnits do
-    local key = KEYS[3 + nPairs * 2 + i]
-    redis.call('INCRBY', key, ARGV[5 + i])
-    redis.call('EXPIRE', key, ARGV[5], 'NX')
-  end
+for i = 1, nUnits do
+  local key = KEYS[3 + nPairs * 2 + i]
+  redis.call('INCRBY', key, ARGV[5 + i])
+  redis.call('EXPIRE', key, ARGV[5], 'NX')
 end
 
 local first = 7 + nUnits
@@ -217,6 +220,37 @@ end
 return {'SETTLED'}
 `;
 
+/**
+ * Record spend that was never reserved: fail-open requests made while Valkey was unreachable,
+ * replayed once it answers. Adds to `spent` on every pair, counts units and appends the event.
+ *
+ * KEYS: events, then spent per pair, then one units key per SKU
+ * ARGV: amount, nPairs, nUnits, unitsTtlSec, pairTtlSec..., unitIncrements..., maxLen, then event
+ *       field/value pairs
+ */
+export const RECORD_LUA = `
+local nPairs = tonumber(ARGV[2])
+local nUnits = tonumber(ARGV[3])
+for i = 1, nPairs do
+  redis.call('INCRBY', KEYS[1 + i], ARGV[1])
+  redis.call('EXPIRE', KEYS[1 + i], ARGV[4 + i], 'NX')
+end
+for i = 1, nUnits do
+  local key = KEYS[1 + nPairs + i]
+  redis.call('INCRBY', key, ARGV[4 + nPairs + i])
+  redis.call('EXPIRE', key, ARGV[4], 'NX')
+end
+local first = 6 + nPairs + nUnits
+local fields = {}
+for i = first, #ARGV do
+  fields[#fields + 1] = ARGV[i]
+end
+if #fields > 0 then
+  redis.call('XADD', KEYS[1], 'MAXLEN', '~', ARGV[5 + nPairs + nUnits], '*', unpack(fields))
+end
+return 'OK'
+`;
+
 interface Script {
   source: string;
   sha: string;
@@ -230,6 +264,7 @@ export const scripts = {
   reserve: script(RESERVE_LUA),
   commit: script(COMMIT_LUA),
   settle: script(SETTLE_LUA),
+  record: script(RECORD_LUA),
 };
 
 /** EVALSHA, falling back to EVAL when the script cache is cold (restart, failover, new node). */

@@ -48,6 +48,14 @@ export function credentialRoutes(r: Router, ctx: Ctx): void {
         body.secret,
         credentialContext(auth.orgId, credId),
       );
+      // Valkey first, like every enforcement record: a credential that lists in the API must
+      // also be usable by the proxy.
+      await ctx.registry.putCredential({
+        id: credId,
+        orgId: auth.orgId,
+        provider: body.provider,
+        envelope,
+      });
       const [row] = await ctx.db
         .insert(providerCredentials)
         .values({
@@ -60,12 +68,6 @@ export function credentialRoutes(r: Router, ctx: Ctx): void {
           createdAt: ctx.now(),
         })
         .returning();
-      await ctx.registry.putCredential({
-        id: credId,
-        orgId: auth.orgId,
-        provider: body.provider,
-        envelope,
-      });
       await audit(ctx, auth, 'credential.create', credId, {
         provider: body.provider,
         name: body.name,
@@ -101,6 +103,15 @@ export function credentialRoutes(r: Router, ctx: Ctx): void {
     params: z.object({ id }),
     response: z.object({ id: z.string(), deleted: z.literal(true) }),
     handler: async ({ auth, params }) => {
+      const owned = and(
+        eq(providerCredentials.id, params.id),
+        eq(providerCredentials.orgId, auth.orgId),
+        isNull(providerCredentials.revokedAt),
+      );
+      const [existing] = await ctx.db.select().from(providerCredentials).where(owned).limit(1);
+      if (!existing) throw notFound('Credential');
+      // Stop the proxy from using it before marking it deleted.
+      await ctx.registry.deleteCredential(auth.orgId, existing.id);
       const [row] = await ctx.db
         .update(providerCredentials)
         .set({ revokedAt: ctx.now() })
@@ -113,7 +124,6 @@ export function credentialRoutes(r: Router, ctx: Ctx): void {
         )
         .returning();
       if (!row) throw notFound('Credential');
-      await ctx.registry.deleteCredential(auth.orgId, row.id);
       await audit(ctx, auth, 'credential.delete', row.id);
       return { id: row.id, deleted: true as const };
     },

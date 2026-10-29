@@ -106,8 +106,11 @@ export function ledgerRoutes(r: Router, ctx: Ctx): void {
       if (query.source === 'audit') {
         const where = [eq(auditLog.orgId, auth.orgId)];
         if (query.type) where.push(eq(auditLog.action, query.type));
-        if (query.cursor)
-          where.push(lt(auditLog.id, BigInt(String(cursor.decode(query.cursor)[0]))));
+        if (query.cursor) {
+          const raw = String(cursor.decode(query.cursor)[0]);
+          if (!/^\d{1,19}$/.test(raw)) throw new ApiError(400, 'invalid_request', 'Bad cursor.');
+          where.push(lt(auditLog.id, BigInt(raw)));
+        }
         const rows = await ctx.db
           .select()
           .from(auditLog)
@@ -126,6 +129,9 @@ export function ledgerRoutes(r: Router, ctx: Ctx): void {
       if (query.cursor) {
         const [ts, streamId] = cursor.decode(query.cursor);
         const at = new Date(String(ts));
+        if (Number.isNaN(at.getTime()) || typeof streamId !== 'string') {
+          throw new ApiError(400, 'invalid_request', 'Bad cursor.');
+        }
         where.push(
           or(
             lt(usageEvents.ts, at),

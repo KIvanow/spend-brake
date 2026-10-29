@@ -3,6 +3,7 @@ import { Registry } from '@spend-brake/budget';
 import { keyWrapperFromEnv } from '@spend-brake/shared';
 import { Redis } from 'ioredis';
 import { loadEnv } from './config.js';
+import { ProxyMetrics } from './metrics.js';
 import { CachingSecretStore, EnvelopeSecretStore, StaticSecretStore } from './secrets.js';
 import { buildServer, loggerOptions } from './server.js';
 
@@ -29,7 +30,11 @@ const secrets = wrapper
   ? new EnvelopeSecretStore(new Registry(valkey), wrapper)
   : new StaticSecretStore(env.BRAKE_DEV_SECRETS ?? {});
 
+const metrics = new ProxyMetrics();
+const metricsServer = metrics.serve(env.METRICS_PORT);
+
 const app = buildServer({
+  metrics,
   valkey,
   adapters,
   secrets: new CachingSecretStore(secrets),
@@ -41,6 +46,7 @@ const app = buildServer({
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, () => {
+    metricsServer.close();
     void app
       .close()
       .then(() => valkey.quit())

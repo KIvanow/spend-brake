@@ -67,7 +67,7 @@ async function events(org: string) {
 describe('happy path', () => {
   it('forwards with the real key, prices, settles and emits an event', async () => {
     const org = newOrg();
-    const { token, id } = await newKey(h, org);
+    const { token, id } = await newKey(h, org, { sessionCapMicros: '100000000' });
     await engine.setCap(org, { kind: 'key', id }, 'd', { hard: 1_000_000n, soft: null });
     const body = JSON.stringify({ textQuery: 'pizza in Sofia', pageSize: 5 });
     mock.respond = (_req, reply) => reply.send({ places: [{ id: 'ChIJ1' }] });
@@ -181,6 +181,7 @@ describe('error contract', () => {
       resetsAt: '2026-10-30T00:00:00.000Z',
     });
     expect(mock.seen.length).toBe(before);
+    expect(res.headers['x-brake-remaining-micros']).toBe('18000');
     const blocked = (await events(org)).find((e) => e.type === 'blocked');
     expect(blocked).toMatchObject({ reason: 'budget_exceeded', firstDeny: '1' });
   });
@@ -208,7 +209,7 @@ describe('error contract', () => {
 
   it('403 killed for org, provider, key and session targets', async () => {
     const org = newOrg();
-    const { token, id } = await newKey(h, org);
+    const { token, id } = await newKey(h, org, { sessionCapMicros: '100000000' });
     await engine.kill(org, { kind: 'key', id });
     const res = await textSearch(token);
     expect(res.statusCode).toBe(403);
@@ -247,8 +248,12 @@ describe('error contract', () => {
 
   it('400 for a malformed session id and 404 for unknown prefixes', async () => {
     const org = newOrg();
-    const { token } = await newKey(h, org);
+    const { token } = await newKey(h, org, { sessionCapMicros: '100000000' });
     expect((await textSearch(token, { 'x-brake-session': 'bad id!' })).statusCode).toBe(400);
+    const noSessions = await newKey(h, org);
+    const res400 = await textSearch(noSessions.token, { 'x-brake-session': 'run-1' });
+    expect(res400.statusCode).toBe(400);
+    expect(res400.json()).toMatchObject({ error: 'invalid_request' });
     const res = await h.proxy.inject(`/elsewhere/v1/x?key=${token}`);
     expect(res.statusCode).toBe(404);
     expect(res.json()).toMatchObject({ error: 'unknown_route' });
@@ -421,13 +426,66 @@ describe('budgets', () => {
     expect((await textSearch(token, { 'x-brake-session': 'agent-run-8' })).statusCode).toBe(200);
   });
 
-  it('prices inside the free allowance at zero only with trustFreeTier', async () => {
+  it('reserves full price with trustFreeTier and keeps counting units past the allowance', async () => {
     const org = newOrg();
     await h.registry.putOrg({ id: org, providers: { 'google-maps': { trustFreeTier: true } } });
+    const { token, id } = await newKey(h, org);
+    await engine.setCap(org, { kind: 'key', id }, 'd', { hard: 10_000n, soft: null });
+    // 1 of the 10,000 free Geocoding requests left this month.
+    await h.valkey.set(`bk:{o:${org}}:units:geocoding:m:202610`, '9999');
+    mock.respond = (_req, reply) => reply.send({ results: [], status: 'OK' });
+    const costs: string[] = [];
+    const statuses: number[] = [];
+    for (let i = 0; i < 4; i++) {
+      const res = await h.proxy.inject(
+        `/google-maps/maps/api/geocode/json?address=f${i}&key=${token}`,
+      );
+      statuses.push(res.statusCode);
+      costs.push(String(res.headers['x-brake-cost-micros']));
+      await h.proxy.brakeDrain();
+    }
+    // Free, then list price; the 4th does not fit the 10,000-micro cap.
+    expect(statuses).toEqual([200, 200, 200, 402]);
+    expect(costs.slice(0, 3)).toEqual(['0', '5000', '5000']);
+    expect(await h.valkey.get(`bk:{o:${org}}:units:geocoding:m:202610`)).toBe('10002');
+    expect(await spent(org, `key:${id}`)).toBe(10_000n);
+  });
+
+  it('counts units for billed requests without trustFreeTier', async () => {
+    const org = newOrg();
     const { token } = await newKey(h, org);
     mock.respond = (_req, reply) => reply.send({ results: [], status: 'OK' });
-    const res = await h.proxy.inject(`/google-maps/maps/api/geocode/json?address=a&key=${token}`);
-    expect(res.headers['x-brake-cost-micros']).toBe('0');
+    await h.proxy.inject(`/google-maps/maps/api/geocode/json?address=u1&key=${token}`);
+    mock.respond = (_req, reply) => reply.send({ results: [], status: 'REQUEST_DENIED' });
+    await h.proxy.inject(`/google-maps/maps/api/geocode/json?address=u2&key=${token}`);
+    await h.proxy.brakeDrain();
+    expect(await h.valkey.get(`bk:{o:${org}}:units:geocoding:m:202610`)).toBe('1');
+  });
+
+  it('prices a route matrix whatever the body content type says', async () => {
+    const org = newOrg();
+    const { token, id } = await newKey(h, org);
+    await engine.setCap(org, { kind: 'key', id }, 'd', { hard: 1n, soft: null });
+    const matrix = JSON.stringify({
+      origins: Array.from({ length: 25 }, () => ({ waypoint: { address: 'A' } })),
+      destinations: Array.from({ length: 25 }, () => ({ waypoint: { address: 'B' } })),
+    });
+    const before = mock.seen.length;
+    for (const [type, body] of [
+      ['Application/JSON', matrix],
+      ['text/plain', matrix],
+      ['application/json', `\uFEFF${matrix}`],
+      ['application/json', '{not json'],
+    ] as const) {
+      const res = await h.proxy.inject({
+        method: 'POST',
+        url: '/google-routes/distanceMatrix/v2:computeRouteMatrix',
+        headers: { 'x-brake-key': token, 'content-type': type },
+        payload: body,
+      });
+      expect(res.statusCode, type).toBe(402);
+    }
+    expect(mock.seen.length).toBe(before);
   });
 
   it('emits threshold crossings with the usage event', async () => {
@@ -444,15 +502,40 @@ describe('budgets', () => {
 
 describe('security', () => {
   it('never lets the path pick another host', async () => {
+    const { upstreamUrl } = await import('../src/forward.js');
+    for (const path of [
+      '//evil.example.com/x',
+      '/@evil.example.com/x',
+      '/..//evil.example.com',
+      '/\\evil.example.com/x',
+      '/%2e%2e/x',
+    ]) {
+      expect(upstreamUrl('https://maps.googleapis.com', path, new URLSearchParams()).origin).toBe(
+        'https://maps.googleapis.com',
+      );
+    }
+    expect(() =>
+      upstreamUrl('https://maps.googleapis.com', 'evil.example.com/x', new URLSearchParams()),
+    ).toThrow();
+
+    // Through the proxy, with an org that forwards unpriced routes so the request is sent.
     const org = newOrg();
+    await h.registry.putOrg({
+      id: org,
+      providers: {
+        'google-maps': { unpricedPolicy: 'allow-with-default-price', defaultPriceMicros: '1' },
+      },
+    });
     const { token } = await newKey(h, org);
-    mock.respond = (_req, reply) => reply.send({ results: [], status: 'OK' });
-    for (const path of ['//evil.example.com/x', '/@evil.example.com/maps/api/geocode/json']) {
+    mock.respond = (_req, reply) => reply.send({});
+    for (const path of ['//evil.example.com/x', '/@evil.example.com/x']) {
       const before = mock.seen.length;
       const res = await h.proxy.inject(`/google-maps${path}?key=${token}`);
-      // Either unpriced (402) or sent to the mock as maps.googleapis.com; never elsewhere.
-      expect([402, 200]).toContain(res.statusCode);
-      if (res.statusCode === 200) expect(mock.seen.length).toBe(before + 1);
+      expect(res.statusCode).toBe(200);
+      // The request reached the maps.googleapis.com stand-in, with the path as a path.
+      expect(mock.seen.length).toBe(before + 1);
+      expect(mock.last().url.startsWith(path)).toBe(true);
+      expect(mock.last().headers.host).toBe(new URL(mock.url).host);
     }
   });
 
@@ -510,7 +593,35 @@ describe('Valkey outage', () => {
     expect(o.headers['x-brake-cost-micros']).toBe('32000');
     const o2 = await call(open.token);
     expect(o2.statusCode).toBe(402);
+    expect(o2.json()).toMatchObject({ cap: 40_000, spent: 32_000 });
+    expect(o2.headers['x-brake-remaining-micros']).toBe('0');
+
+    // Valkey is back: the fail-open spend is recorded and shows up in the ledger stream.
+    side.valkey.connect().catch(() => undefined);
+    await new Promise<void>((r) => side.valkey.once('ready', () => r()));
+    expect(await side.proxy.brakeReplayFailOpen()).toBe(1);
+    expect(await h.valkey.get(`bk:{o:${org}}:spent:key:${open.id}:d:20261029`)).toBe('64000');
+    const evs = await events(org);
+    expect(evs.filter((e) => e.failOpen === '1')).toHaveLength(1);
     await side.proxy.close();
+  });
+});
+
+describe('metrics', () => {
+  it('counts requests by outcome and records latencies', async () => {
+    const org = newOrg();
+    const { token } = await newKey(h, org);
+    await engine.kill(org, { kind: 'org' });
+    await textSearch(token);
+    const text = await h.proxy.brakeMetrics.registry.metrics();
+    expect(text).toMatch(
+      /brake_requests_total\{provider="google-maps",sku="places.text_search.pro",outcome="killed"\} \d+/,
+    );
+    expect(text).toMatch(
+      /brake_requests_total\{provider="google-maps",sku="places.text_search.pro",outcome="ok"\} \d+/,
+    );
+    expect(text).toContain('brake_reserve_latency_ms_bucket');
+    expect(text).toContain('brake_upstream_latency_ms_bucket');
   });
 });
 

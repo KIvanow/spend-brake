@@ -50,8 +50,8 @@ export interface LoopCheck extends LoopPolicy {
   keyId: string;
   /** Normalized request hash from the catalog adapter. */
   hash: string;
-  /** Scope whose request rate is limited: the session if there is one, else the key. */
-  rateScope: Scope;
+  /** Session whose request rate is limited (`perMinute`); without one only `identical` applies. */
+  rateScope?: Scope;
 }
 
 export interface CapTemplate {
@@ -66,6 +66,11 @@ export interface ReservationHandle {
 }
 
 export interface SettleOptions {
+  /**
+   * Whether the provider billed the request. Units are counted only then, but always then, even
+   * when the price was zero (inside a trusted free allowance), so the counter keeps advancing.
+   */
+  billed: boolean;
   /** Billed units to count for volume bands when actual > 0. */
   units?: readonly { sku: string; units: bigint }[];
   timeZone: string;
@@ -73,6 +78,32 @@ export interface SettleOptions {
   /** Usage event fields appended to the org's stream in the same call. */
   event?: Record<string, string>;
   eventMaxLen?: number;
+}
+
+/**
+ * Backstop only: the worker trims each stream up to what the ledger consumed. This cap bounds
+ * memory if no worker runs at all.
+ */
+export const EVENT_STREAM_MAX_LEN = 10_000_000;
+
+/**
+ * Session scopes are short-lived and client-named; their counters expire after two days instead
+ * of the window's 40/400 days so abandoned sessions do not pile up.
+ */
+export const SESSION_WINDOW_TTL_SEC = 2 * 24 * 3600;
+
+const windowTtl = (label: string, ttl: number) =>
+  label.startsWith('sess:') ? Math.min(ttl, SESSION_WINDOW_TTL_SEC) : ttl;
+
+export interface RecordSpendRequest {
+  orgId: string;
+  amount: bigint;
+  scopes: Scope[];
+  timeZone: string;
+  /** When the spend happened; picks the day and month windows. */
+  at: Date;
+  units?: readonly { sku: string; units: bigint }[];
+  event?: Record<string, string>;
 }
 
 export const DEFAULT_LOOP_POLICY: LoopPolicy = {
@@ -193,7 +224,7 @@ export class BudgetEngine {
       // Unused placeholders under the same hash tag when there is no loop check.
       loop ? k.circuit(loop.keyId) : k.circuit('_'),
       loop ? k.loop(loop.keyId, loop.hash) : k.loop('_', '_'),
-      loop ? k.rate(scopeLabel(loop.rateScope)) : k.rate('_'),
+      loop?.rateScope ? k.rate(scopeLabel(loop.rateScope)) : k.rate('_'),
     ];
     const pairArgs: (string | number)[] = [];
     const pairs: string[] = [];
@@ -206,7 +237,12 @@ export class BudgetEngine {
           k.cap(label, w.kind),
           k.alerted(label, w.id),
         );
-        pairArgs.push(label, w.id, w.ttlSec, templates.get(`${label}|${w.kind}`) ?? '');
+        pairArgs.push(
+          label,
+          w.id,
+          windowTtl(label, w.ttlSec),
+          templates.get(`${label}|${w.kind}`) ?? '',
+        );
       }
     }
     const args = [
@@ -216,7 +252,7 @@ export class BudgetEngine {
       loop ? 1 : 0,
       loop?.identical ?? 0,
       loop?.windowSec ?? 0,
-      loop?.perMinute ?? 0,
+      loop?.rateScope ? loop.perMinute : 0,
       loop?.cooldownSec ?? 0,
       kill.length,
     ];
@@ -290,7 +326,7 @@ export class BudgetEngine {
     const k = orgKeys(orgId);
     const actualArg = assertMicros(actual, 'actual');
     const month = windowsFor(opts.now ?? new Date(), opts.timeZone)[1];
-    const units = [...(opts.units ?? [])].filter((u) => u.units > 0n);
+    const units = opts.billed ? [...(opts.units ?? [])].filter((u) => u.units > 0n) : [];
     const keyList = [
       k.resexp(),
       k.res(assertReqId(reqId)),
@@ -305,7 +341,7 @@ export class BudgetEngine {
       units.length,
       month.ttlSec,
       ...units.map((u) => u.units.toString()),
-      opts.eventMaxLen ?? 1_000_000,
+      opts.eventMaxLen ?? EVENT_STREAM_MAX_LEN,
       ...Object.entries(opts.event ?? {}).flat(),
     ];
     const reply = (await runScript(this.client, scripts.settle, keyList, args)) as [
@@ -315,6 +351,33 @@ export class BudgetEngine {
     if (reply[0] === 'SETTLED') return { outcome: 'already_settled' };
     const reserved = BigInt(reply[1]!);
     return { outcome: 'committed', reserved, actual, underpriced: actual > reserved };
+  }
+
+  /** Add spend that was never reserved (fail-open requests replayed after an outage). */
+  async recordSpend(r: RecordSpendRequest): Promise<void> {
+    const k = orgKeys(r.orgId);
+    const windows = windowsFor(r.at, r.timeZone);
+    const labels = [...new Set(r.scopes.map(scopeLabel))];
+    const pairs = labels.flatMap((l) =>
+      windows.map((w) => ({ key: k.spent(l, w.id), ttl: windowTtl(l, w.ttlSec) })),
+    );
+    const units = [...(r.units ?? [])].filter((u) => u.units > 0n);
+    const month = windows[1];
+    await runScript(
+      this.client,
+      scripts.record,
+      [k.events(), ...pairs.map((p) => p.key), ...units.map((u) => k.units(u.sku, month.id))],
+      [
+        assertMicros(r.amount, 'amount'),
+        pairs.length,
+        units.length,
+        month.ttlSec,
+        ...pairs.map((p) => p.ttl),
+        ...units.map((u) => u.units.toString()),
+        EVENT_STREAM_MAX_LEN,
+        ...Object.entries(r.event ?? {}).flat(),
+      ],
+    );
   }
 
   /** Commit at the reserved worst case (upstream timeout, expired reservation). */
@@ -437,7 +500,11 @@ export class BudgetEngine {
   }
 
   /** Append a usage event to the org's stream for the worker (ledger, alerts). */
-  async emit(orgId: string, event: Record<string, string>, maxLen = 1_000_000): Promise<string> {
+  async emit(
+    orgId: string,
+    event: Record<string, string>,
+    maxLen = EVENT_STREAM_MAX_LEN,
+  ): Promise<string> {
     const id = await this.client.xadd(
       orgKeys(orgId).events(),
       'MAXLEN',
