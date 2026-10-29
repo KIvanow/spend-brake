@@ -129,4 +129,15 @@ describe('Twilio settlement', () => {
     ).toBe(78_000n);
     expect(() => adapter.settledPrice(ref, { price: '-0.01', price_unit: 'EUR' })).toThrow(/EUR/);
   });
+
+  it('accepts lower-case units, long decimals and unassigned segment counts', () => {
+    const ref = { accountSid: AC, sid, sku: 'twilio.sms.US', units: '2' };
+    // 8 decimals, rounded up past the sixth; 0 segments keeps the 2 counted at send time.
+    expect(
+      adapter.settledPrice(ref, { price: '-0.00830001', price_unit: 'usd', num_segments: '0' }),
+    ).toBe(8_301n + 2n * 6_200n);
+    expect(
+      adapter.settledPrice(ref, { price: '-0.00830000', price_unit: 'usd', num_segments: '1' }),
+    ).toBe(8_300n + 6_200n);
+  });
 });

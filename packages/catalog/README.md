@@ -134,9 +134,13 @@ Prefixes `/here-geocode`, `/here-revgeocode`, `/here-discover`, `/here-autosugge
 | `POST /v8/matrix`                                     | Transactions: origins x destinations when either is below 5, else 5 x the larger                                             |
 | `GET /v8/matrix/{id}`, `/status`                      | Free (polling an asynchronous matrix)                                                                                        |
 
+Repeated parameters take the dearer reading (`permanent=true` anywhere is permanent; a route is
+basic only if every `departureTime` is `any`); conflicting `transportMode` values are unpriced.
+Routes with more than 100 waypoints count 2 transactions, as HERE bills them. A `POST /v8/routes`
+body may only hold `avoid` or `exclude` (HERE merges body and query); anything else is unpriced.
 Other transport modes, EV routing, toll costs and Lookup/Browse are unpriced until their price
-lists are transcribed. HERE renders prices client-side, so the worker's price drift check cannot
-watch the page; re-verify by hand.
+lists are transcribed. Mapbox and HERE render their price tables client-side, so the worker's
+drift check cannot watch those pages; re-verify them by hand.
 
 ## Migration estimator
 

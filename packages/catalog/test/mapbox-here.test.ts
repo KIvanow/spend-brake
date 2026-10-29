@@ -265,3 +265,72 @@ describe('HERE golden prices (no free tier, first paid band)', () => {
     expect(token.headers.authorization).toBe('Bearer eyJ.real');
   });
 });
+
+describe('requests the provider could read differently', () => {
+  const routes = 'https://router.hereapi.com/v8/routes?origin=1,2&destination=3,4';
+
+  it('takes the dearer reading of repeated parameters', () => {
+    expect(
+      price(
+        mapbox,
+        req('GET', `${MB}/search/geocode/v6/forward?q=a&permanent=false&permanent=true`),
+      ),
+    ).toBe(5_000n);
+    expect(
+      price(
+        here,
+        req(
+          'GET',
+          `${routes}&transportMode=car&departureTime=any&departureTime=2026-11-01T10:00:00`,
+        ),
+      ),
+    ).toBe(2_920n);
+    expect(
+      here.classify(
+        req('GET', `${routes}&transportMode=pedestrian&departureTime=any&transportMode=truck`),
+      ).priced,
+    ).toBe(false);
+    // traffic off but a departure time given: still time-aware.
+    expect(
+      price(
+        here,
+        req(
+          'GET',
+          `${routes}&transportMode=car&traffic%5Bmode%5D=disabled&departureTime=2026-11-01T10:00:00`,
+        ),
+      ),
+    ).toBe(2_920n);
+  });
+
+  it('bills routes with more than 100 waypoints as 2 transactions', () => {
+    const via = (n: number) => Array.from({ length: n }, (_, i) => `&via=${i},${i}`).join('');
+    expect(price(here, req('GET', `${routes}&transportMode=car&departureTime=any${via(98)}`))).toBe(
+      880n,
+    );
+    expect(price(here, req('GET', `${routes}&transportMode=car&departureTime=any${via(99)}`))).toBe(
+      1_760n,
+    );
+  });
+
+  it('prices POST routes only when the body holds nothing that changes the price', () => {
+    const post = (body: unknown) =>
+      req('POST', `${routes}&transportMode=car&departureTime=any`, { body });
+    expect(price(here, post({ avoid: { areas: [] } }))).toBe(880n);
+    expect(price(here, post(undefined))).toBe(880n);
+    for (const body of [{ ev: { a: 1 } }, { via: [] }, { departureTime: 'now' }, [], 'x']) {
+      expect(here.classify(post(body)).priced, JSON.stringify(body)).toBe(false);
+    }
+  });
+
+  it('only prices Static Images paths of the documented shape', () => {
+    expect(
+      price(mapbox, req('GET', `${MB}/styles/v1/u/s/static/pin-s+555(1,2)/1,2,10/600x400@2x`)),
+    ).toBe(1_000n);
+    for (const path of [
+      '/styles/v1/u/s/static/a/b/c/d/geocoding',
+      '/styles/v1/u/s/static/1,2,10',
+    ]) {
+      expect(mapbox.classify(req('GET', `${MB}${path}`)).priced, path).toBe(false);
+    }
+  });
+});

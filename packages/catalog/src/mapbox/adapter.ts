@@ -27,6 +27,8 @@ const MAX_BATCH = 1000;
 const MAX_MATRIX_COORDS = 25;
 
 const VOLATILE = ['access_token', 'session_token'];
+// /styles/v1/{user}/{style}/static/[{overlay}/]{position}/{width}x{height}[@2x]
+const STATIC_IMAGE = /^\/styles\/v1\/[^/]+\/[^/]+\/static\/(?:[^/]+\/)?[^/]+\/\d+x\d+(?:@2x)?$/;
 
 export function loadMapboxCatalog(): Catalog {
   return parseCatalog(readDataFile('mapbox/catalog.yaml'));
@@ -36,8 +38,9 @@ type Route = { route: string; items: LineItem[] } | { unpriced: string };
 
 const one = (route: string, sku: string): Route => ({ route, items: [{ sku, units: 1n }] });
 
-function isTrue(v: string | null): boolean {
-  return v !== null && /^(true|1)$/i.test(v);
+// Any `permanent=true`, even next to `permanent=false`: the dearer reading wins.
+function isPermanent(q: URLSearchParams): boolean {
+  return q.getAll('permanent').some((v) => /^(true|1)$/i.test(v.trim()));
 }
 
 /** Indices list (`0;2;3`) or `all` over `n` coordinates; null when malformed. */
@@ -91,14 +94,14 @@ export class MapboxAdapter implements ProviderAdapter {
 
     // Geocoding v6.
     if (get && (path === '/search/geocode/v6/forward' || path === '/search/geocode/v6/reverse')) {
-      return one('mapbox.geocoding', geocodeSku(isTrue(q.get('permanent'))));
+      return one('mapbox.geocoding', geocodeSku(isPermanent(q)));
     }
     if (method === 'POST' && path === '/search/geocode/v6/batch') {
       const n = Array.isArray(req.body) ? req.body.length : 0;
       if (n < 1 || n > MAX_BATCH) return { unpriced: 'batch geocoding needs a JSON array body' };
       return {
         route: 'mapbox.geocoding.batch',
-        items: [{ sku: geocodeSku(isTrue(q.get('permanent'))), units: BigInt(n) }],
+        items: [{ sku: geocodeSku(isPermanent(q)), units: BigInt(n) }],
       };
     }
     // Geocoding v5: the endpoint picks storage; permanent requests may batch queries with `;`.
@@ -171,7 +174,7 @@ export class MapboxAdapter implements ProviderAdapter {
     }
 
     // Static Images (not Static Tiles, which are tiles and out of scope).
-    if (get && /^\/styles\/v1\/[^/]+\/[^/]+\/static\/.+/.test(path)) {
+    if (get && STATIC_IMAGE.test(path)) {
       return one('mapbox.static_images', 'mapbox.static_images');
     }
 

@@ -96,6 +96,15 @@ export function destination(to: string): {
 }
 
 /** Twilio Messaging and Verify. Requests are form-encoded; the real Auth Token is injected. */
+/** Decimal dollars with any number of decimals to micros, rounding up past the sixth. */
+function decimalMicrosUp(value: string): bigint {
+  const m = /^(\d+)(?:\.(\d+))?$/.exec(value.trim());
+  if (!m) throw new Error(`invalid Twilio price ${JSON.stringify(value)}`);
+  const frac = m[2] ?? '';
+  const micros = parseUsd(`${m[1]}.${frac.slice(0, 6).padEnd(6, '0')}`);
+  return /[1-9]/.test(frac.slice(6)) ? micros + 1n : micros;
+}
+
 export class TwilioAdapter implements ProviderAdapter {
   readonly id = TWILIO;
   readonly upstreams = [
@@ -219,13 +228,16 @@ export class TwilioAdapter implements ProviderAdapter {
     resource: { price?: unknown; price_unit?: unknown; num_segments?: unknown },
   ): bigint | null {
     if (typeof resource.price !== 'string' || resource.price === '') return null;
-    if (resource.price_unit !== 'USD')
+    // Twilio documents the unit in lower case (`usd`) and returns it in upper case.
+    if (String(resource.price_unit).toUpperCase() !== 'USD')
       throw new Error(`Twilio price in ${String(resource.price_unit)}; only USD is supported`);
-    const price = parseUsd(resource.price.replace(/^-/, ''));
+    const price = decimalMicrosUp(resource.price.replace(/^-/, ''));
     const sku = ref.sku ?? '';
-    const segments = /^\d+$/.test(String(resource.num_segments))
+    // 0 segments while a Messaging Service has not picked a sender yet: keep the counted ones.
+    const reported = /^\d+$/.test(String(resource.num_segments))
       ? BigInt(String(resource.num_segments))
-      : BigInt(ref.units ?? '1');
+      : 0n;
+    const segments = reported > 0n ? reported : BigInt(ref.units ?? '1');
     let carrier = 0n;
     if (sku === 'twilio.sms.US') carrier = this.carrierFees.sms * segments;
     if (sku === 'twilio.mms.US') carrier = this.carrierFees.mms;

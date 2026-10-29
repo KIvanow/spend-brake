@@ -88,12 +88,23 @@ function deps(now: Date, respond: (url: string) => unknown, seen: string[] = [])
     engine,
     registry,
     wrapper,
+    valkey,
     now: () => now,
     fetch: ((url: string, init: RequestInit) => {
       seen.push(`${url} ${(init.headers as Record<string, string>).authorization}`);
-      return Promise.resolve(Response.json(respond(url)));
+      const body = respond(url);
+      return Promise.resolve(body instanceof Response ? body : Response.json(body));
     }) as typeof fetch,
   };
+}
+
+/** A Twilio credential stored as the API does: same id in Valkey and Postgres. */
+async function addCredential(orgId: string, id: string, secret: string) {
+  const envelope = await encryptSecret(wrapper, secret, credentialContext(orgId, id));
+  await registry.putCredential({ id, orgId, provider: 'twilio', envelope });
+  await db
+    .insert(providerCredentials)
+    .values({ id, orgId, provider: 'twilio', name: id, envelope, hint: secret.slice(-4) });
 }
 
 async function queueSend(orgId: string, reqId: string) {
@@ -270,5 +281,144 @@ describe('reconcileTwilio', () => {
         dedupeId: `reconcile:${orgId}:2026-10-28:twilio.sms`,
       }),
     ]);
+  });
+});
+
+describe('settlement edge cases', () => {
+  it('settles failed messages at zero and flags prices above the worst case', async () => {
+    const failed = await newOrg();
+    await queueSend(failed, 'req-f');
+    const d = deps(new Date(AT.getTime() + 600_000), () => ({ status: 'failed', price: null }));
+    expect((await settleTwilioPending(d, [failed])).settled).toBe(1);
+    expect(await spent(failed)).toBe(0n);
+
+    const dear = await newOrg();
+    await queueSend(dear, 'req-d');
+    const up = deps(new Date(AT.getTime() + 600_000), () => ({
+      price: '-0.02000',
+      price_unit: 'USD',
+      num_segments: '1',
+    }));
+    expect((await settleTwilioPending(up, [dear])).settled).toBe(1);
+    expect(await spent(dear)).toBe(26_200n);
+    const events = await valkey.xrange(`bk:{o:${dear}}:events`, '-', '+');
+    const adj = events.map(([, f]) => f).find((f) => f.includes('adjustment'))!;
+    expect(adj).toEqual(expect.arrayContaining(['underpriced', '1', 'costMicros', '11700']));
+  });
+
+  it('drops records it cannot settle instead of blocking the queue', async () => {
+    const orgId = await newOrg();
+    await engine.addPending(
+      orgId,
+      'req-other',
+      {
+        provider: 'someone-else',
+        credentialId: 'x',
+        scopes: ['org'],
+        at: AT.toISOString(),
+        timeZone: TZ,
+        committedMicros: '1',
+        ref: {},
+        keyId: 'k1',
+      },
+      AT,
+    );
+    await valkey.set(`bk:{o:${orgId}}:pending:req-bad`, '{not json');
+    await valkey.zadd(`bk:{o:${orgId}}:pendingq`, AT.getTime(), 'req-bad');
+    const d = deps(new Date(AT.getTime() + 600_000), () => ({}));
+    expect(await settleTwilioPending(d, [orgId])).toEqual({ settled: 0, deferred: 0, expired: 0 });
+    expect(await engine.duePending(orgId, new Date(AT.getTime() + 600_000))).toEqual([]);
+  });
+});
+
+describe('reconciliation robustness', () => {
+  const usage = (orgId: string) =>
+    db.insert(usageEvents).values({
+      orgId,
+      ts: AT,
+      streamId: '9-0',
+      type: 'usage',
+      provider: 'twilio',
+      sku: 'twilio.sms.US',
+      skus: 'twilio.sms.US',
+      costMicros: 1_000_000n,
+      status: 201,
+    });
+  const records = (url: string) => {
+    const u = new URL(url);
+    if (u.searchParams.get('StartDate') !== '2026-10-28') return { usage_records: [] };
+    if (u.searchParams.get('Category') !== 'sms-outbound') return { usage_records: [] };
+    return { usage_records: [{ price: '1.0', price_unit: 'USD' }] };
+  };
+  const row = async (orgId: string) =>
+    (
+      await db.select().from(reconciliationResults).where(eq(reconciliationResults.orgId, orgId))
+    ).find((r) => r.day === '2026-10-28' && r.family === 'twilio.sms');
+
+  it('counts an account once, reconciles API keys by the account settlement saw, survives a 401', async () => {
+    const ACC2 = `AC${'c'.repeat(32)}`;
+    // Two credentials for one account (a rotation in progress).
+    const rotated = `tw${++n}`;
+    await db.insert(orgs).values({ id: rotated, name: rotated });
+    await addCredential(rotated, `old-${rotated}`, `${ACC2}:old-token`);
+    await addCredential(rotated, `new-${rotated}`, `${ACC2}:new-token`);
+    await usage(rotated);
+    // An API key: unknown account until a send was settled through it.
+    const apiKey = `tw${++n}`;
+    await db.insert(orgs).values({ id: apiKey, name: apiKey });
+    await addCredential(apiKey, `sk-${apiKey}`, `SK${'d'.repeat(32)}:secret`);
+    await usage(apiKey);
+    await engine.addPending(
+      apiKey,
+      'req-sk',
+      {
+        provider: 'twilio',
+        credentialId: `sk-${apiKey}`,
+        scopes: ['org'],
+        at: AT.toISOString(),
+        timeZone: TZ,
+        committedMicros: '0',
+        ref: { accountSid: ACC2, sid: SID, sku: 'twilio.sms.US', units: '1' },
+        keyId: 'k1',
+      },
+      AT,
+    );
+    // A credential Twilio refuses.
+    const revoked = `tw${++n}`;
+    await db.insert(orgs).values({ id: revoked, name: revoked });
+    await addCredential(revoked, `bad-${revoked}`, `${ACC}:revoked-token`);
+
+    const now = new Date('2026-10-30T09:00:00Z');
+    const respond = (url: string) =>
+      url.includes('Usage/Records') && url.includes(ACC) && !url.includes(ACC2)
+        ? new Response('{"code":20003}', { status: 401 })
+        : url.includes('/Messages/')
+          ? { price: null, status: 'queued' }
+          : records(url);
+    await settleTwilioPending(deps(now, respond), [apiKey]);
+    const warnings: string[] = [];
+    const d = { ...deps(now, respond), log: { warn: (_o: object, m: string) => warnings.push(m) } };
+    await reconcileTwilio(d);
+    expect(await row(rotated)).toMatchObject({
+      billedMicros: 1_000_000n,
+      ledgerMicros: 1_000_000n,
+    });
+    expect(await row(apiKey)).toMatchObject({ billedMicros: 1_000_000n });
+    expect(warnings).toContain('twilio reconciliation failed');
+  });
+
+  it('records yesterday without alerting while sends may still be settling', async () => {
+    const orgId = await newOrg();
+    await usage(orgId);
+    const d = deps(new Date('2026-10-29T09:00:00Z'), (url) => {
+      const u = new URL(url);
+      if (u.searchParams.get('Category') !== 'sms-outbound') return { usage_records: [] };
+      return { usage_records: [{ price: '2.0', price_unit: 'USD' }] };
+    });
+    const alerts = (await reconcileTwilio(d)).filter(
+      (a) => a.orgId === orgId && a.data.day === '2026-10-28',
+    );
+    expect(alerts).toEqual([]);
+    expect(await row(orgId)).toMatchObject({ billedMicros: 2_000_000n });
   });
 });

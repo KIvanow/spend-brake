@@ -42,6 +42,9 @@ The request path. Every proxied call goes through these steps:
 | `/here-geocode`, `/here-revgeocode`, `/here-discover`, `/here-autosuggest`, `/here-autocomplete` | `https://{geocode,revgeocode,discover,autosuggest,autocomplete}.search.hereapi.com` |
 | `/here-router`, `/here-matrix`                                                                   | `https://router.hereapi.com`, `https://matrix.router.hereapi.com`                   |
 
+Paths with `.` or `..` segments (also percent-encoded) or backslashes are refused with `400`:
+the upstream URL would resolve them to another endpoint than the one priced.
+
 In drop-in mode the virtual key goes where the provider's own key would: `key` or
 `X-Goog-Api-Key` (Google), `access_token` (Mapbox), `apiKey` or `Authorization: Bearer` (HERE).
 

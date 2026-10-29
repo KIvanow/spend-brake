@@ -1,5 +1,5 @@
 import { BudgetEngine, Registry } from '@spend-brake/budget';
-import { loadGoogleMapsCatalog, loadMapboxCatalog, loadPlacesFields } from '@spend-brake/catalog';
+import { loadGoogleMapsCatalog, loadPlacesFields } from '@spend-brake/catalog';
 import { type Db, ensureUsagePartitions, orgs, reconciliationConfigs } from '@spend-brake/db';
 import {
   type Envelope,
@@ -59,9 +59,10 @@ export interface WorkerDeps {
   now?: () => Date;
 }
 
-// HERE's prices load client-side (no tables in the page), so its page cannot be checked here.
+// Mapbox and HERE render their price tables client-side (no <table> in the page HTML), so
+// their pages cannot be checked this way; re-verify those catalogs by hand.
 export function catalogSourceUrls(): string[] {
-  return [loadGoogleMapsCatalog().source, loadPlacesFields().source, loadMapboxCatalog().source];
+  return [loadGoogleMapsCatalog().source, loadPlacesFields().source];
 }
 
 export class Worker {
@@ -140,6 +141,12 @@ export class Worker {
         return res.text();
       });
     const results = await checkSources(this.deps.db, catalogSourceUrls(), fetchPage, this.now());
+    for (const r of results.filter((x) => x.tables === 0)) {
+      this.deps.log.warn(
+        { url: r.url },
+        'catalog source has no price tables; cannot detect changes',
+      );
+    }
     const changed = results.filter((r) => r.changed);
     this.metrics.catalogDrift.inc(changed.length);
     await this.alerts.add(
@@ -177,8 +184,10 @@ export class Worker {
       engine: this.engine,
       registry: new Registry(this.deps.valkey),
       wrapper,
+      valkey: this.deps.valkey,
       fetch: this.deps.fetch ?? fetch,
       now: this.now,
+      log: this.deps.log,
     };
   }
 

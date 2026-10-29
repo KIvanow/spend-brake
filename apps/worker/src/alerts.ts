@@ -83,7 +83,8 @@ export function alertsFor(orgId: string, streamId: string, e: Record<string, str
       data: { keyId: e.keyId, session: e.session, hash: e.hash },
     });
   }
-  if (e.type === 'usage' && e.underpriced === '1') {
+  // Settlement adjustments above the worst case mean the same thing (Twilio priced higher).
+  if ((e.type === 'usage' || e.type === 'adjustment') && e.underpriced === '1') {
     out.push({
       type: 'catalog_underpriced',
       orgId,

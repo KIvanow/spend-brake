@@ -6,6 +6,8 @@ export interface DriftResult {
   changed: boolean;
   hash: string;
   previous: string | null;
+  /** Tables found on the page; 0 means the check cannot see the prices. */
+  tables: number;
 }
 
 /**
@@ -32,7 +34,9 @@ export async function checkSources(
 ): Promise<DriftResult[]> {
   const results: DriftResult[] = [];
   for (const url of urls) {
-    const hash = tablesHash(await fetchPage(url));
+    const html = await fetchPage(url);
+    const tables = (html.match(/<table[\s>]/gi) ?? []).length;
+    const hash = tablesHash(html);
     const [prev] = await db.select().from(catalogChecks).where(eq(catalogChecks.url, url)).limit(1);
     const changed = prev !== undefined && prev.hash !== hash;
     await db
@@ -42,7 +46,7 @@ export async function checkSources(
         target: catalogChecks.url,
         set: { hash, checkedAt: now, ...(changed ? { changedAt: now } : {}) },
       });
-    results.push({ url, changed, hash, previous: prev?.hash ?? null });
+    results.push({ url, changed, hash, previous: prev?.hash ?? null, tables });
   }
   return results;
 }

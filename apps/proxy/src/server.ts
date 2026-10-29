@@ -106,6 +106,25 @@ interface Priced {
   route: string;
 }
 
+/**
+ * Whether a request path has a `.` or `..` segment or a backslash (also percent-encoded): the
+ * upstream URL would resolve it to a different path than the adapter priced.
+ */
+export function unsafePath(url: string): boolean {
+  const q = url.indexOf('?');
+  const pathname = q === -1 ? url : url.slice(0, q);
+  if (pathname.includes('\\')) return true;
+  return pathname.split('/').some((seg) => {
+    let s: string;
+    try {
+      s = decodeURIComponent(seg);
+    } catch {
+      return true;
+    }
+    return s === '.' || s === '..' || s.includes('\\');
+  });
+}
+
 const micros = (v: bigint | null) => (v === null ? null : Number(v));
 
 function compact(event: Record<string, string | undefined>): Record<string, string> {
@@ -310,6 +329,15 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
   app.all('/*', async (request, reply) => {
     const started = performance.now();
     const at = now();
+    // The upstream URL resolves `.`/`..` segments (WHATWG URL), so a path the adapter priced as
+    // one endpoint could reach another. Such paths never come from a real client.
+    if (unsafePath(request.url)) {
+      return sendError(
+        reply,
+        'invalid_request',
+        'Path must not contain dot segments or backslashes.',
+      );
+    }
     const found = findRoute(request.url);
     if (!found)
       return sendError(reply, 'unknown_route', 'No provider is configured for this path.');
@@ -727,11 +755,14 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
             }
             // Every accepted request counts toward the session, including the free ones (later
             // keystrokes, the request that closes it).
+            // A request that closes the session closes it whatever the answer: keeping it open
+            // could make the next session look free.
             if (
               billingSessionHash &&
               billingSession &&
               priced.classified &&
-              adapter.billedOnStatus(status, priced.classified)
+              (adapter.billedOnStatus(status, priced.classified) ||
+                (billingSession.ends === true && status > 0))
             ) {
               await engine.recordBillingSessionCall(
                 org.id,

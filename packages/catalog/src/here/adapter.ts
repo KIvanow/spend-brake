@@ -52,7 +52,56 @@ export function matrixTransactions(origins: number, destinations: number): numbe
 
 type Route = { route: string; items: LineItem[] } | { unpriced: string };
 
-const one = (route: string, sku: string): Route => ({ route, items: [{ sku, units: 1n }] });
+const one = (route: string, sku: string, units = 1n): Route => ({
+  route,
+  items: [{ sku, units }],
+});
+
+// POST bodies may carry these (HERE merges body and query); anything else could change the price.
+const ROUTE_BODY_KEYS = new Set(['avoid', 'exclude']);
+// "Requests with more than 100 waypoints are billed as 2 transactions."
+const WAYPOINTS_PER_TRANSACTION = 100;
+
+/** Every value of a parameter must agree, or the request is not priced. */
+function single(q: URLSearchParams, name: string): string | null | undefined {
+  const values = q.getAll(name);
+  if (values.length === 0) return null;
+  return values.every((v) => v === values[0]) ? values[0] : undefined;
+}
+
+function routing(req: IncomingReq): Route {
+  const q = req.query;
+  if (req.method === 'POST' && req.body !== undefined) {
+    const body = req.body;
+    if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+      return { unpriced: 'routing body must be a JSON object' };
+    }
+    const extra = Object.keys(body).filter((k) => !ROUTE_BODY_KEYS.has(k));
+    if (extra.length) return { unpriced: `routing body field ${extra[0]}` };
+  }
+  // Features with their own price lists (EV routing, toll costs) are not transcribed yet.
+  if ([...q.keys()].some((k) => k.startsWith('ev['))) return { unpriced: 'EV routing' };
+  if (q.getAll('return').some((v) => v.split(',').includes('tolls'))) {
+    return { unpriced: 'toll costs' };
+  }
+  const waypoints = 2 + q.getAll('via').length;
+  const units = waypoints > WAYPOINTS_PER_TRANSACTION ? 2n : 1n;
+  const mode = single(q, 'transportMode');
+  if (mode === undefined) return { unpriced: 'conflicting transportMode values' };
+  if (mode === 'truck') return one('here.routing.truck', 'here.routing.truck', units);
+  if (mode === 'car' || mode === 'pedestrian' || mode === 'bicycle') {
+    // Without one of these HERE bills the route as time-aware routing; every value must say so.
+    const departures = q.getAll('departureTime');
+    const traffic = q.getAll('traffic[mode]');
+    const timeless =
+      (departures.length > 0 && departures.every((v) => v === 'any')) ||
+      (traffic.length > 0 && traffic.every((v) => v === 'disabled') && departures.length === 0);
+    return timeless
+      ? one('here.routing.basic', 'here.routing.basic', units)
+      : one('here.routing.time_aware', 'here.routing.time_aware', units);
+  }
+  return { unpriced: `routing transportMode ${mode ?? '(none)'}` };
+}
 
 /**
  * HERE location services on the Base Plan: Geocoding & Search (geocode, reverse geocode,
@@ -89,7 +138,7 @@ export class HereAdapter implements ProviderAdapter {
   }
 
   private route(req: IncomingReq): Route {
-    const { method, origin, path, query: q } = req;
+    const { method, origin, path } = req;
     const get = method === 'GET';
     if (get && origin === GEOCODE && path === '/v1/geocode')
       return one('here.geocode', 'here.geocode');
@@ -106,21 +155,7 @@ export class HereAdapter implements ProviderAdapter {
     }
 
     if (origin === ROUTER && path === '/v8/routes' && (get || method === 'POST')) {
-      // Features with their own price lists (EV routing, toll costs) are not transcribed yet.
-      if ([...q.keys()].some((k) => k.startsWith('ev['))) return { unpriced: 'EV routing' };
-      if (q.getAll('return').some((v) => v.split(',').includes('tolls'))) {
-        return { unpriced: 'toll costs' };
-      }
-      const mode = q.get('transportMode');
-      if (mode === 'truck') return one('here.routing.truck', 'here.routing.truck');
-      if (mode === 'car' || mode === 'pedestrian' || mode === 'bicycle') {
-        // Without one of these HERE bills the route as time-aware routing.
-        const timeless = q.get('departureTime') === 'any' || q.get('traffic[mode]') === 'disabled';
-        return timeless
-          ? one('here.routing.basic', 'here.routing.basic')
-          : one('here.routing.time_aware', 'here.routing.time_aware');
-      }
-      return { unpriced: `routing transportMode ${mode ?? '(none)'}` };
+      return routing(req);
     }
 
     if (origin === MATRIX) {

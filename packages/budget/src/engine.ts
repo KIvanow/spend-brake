@@ -529,8 +529,15 @@ export class BudgetEngine {
     const out: { reqId: string; record: PendingSettlement }[] = [];
     for (const reqId of ids) {
       const raw = await this.client.get(k.pending(reqId));
-      if (raw === null) await this.client.zrem(k.pendingQueue(), reqId);
-      else out.push({ reqId, record: JSON.parse(raw) as PendingSettlement });
+      let record: PendingSettlement | null = null;
+      try {
+        record = raw === null ? null : (JSON.parse(raw) as PendingSettlement);
+      } catch {
+        // Unreadable: drop it rather than block the queue (the worst case stays committed).
+      }
+      if (record === null) await this.client.del(k.pending(reqId));
+      if (record === null) await this.client.zrem(k.pendingQueue(), reqId);
+      else out.push({ reqId, record });
     }
     return out;
   }

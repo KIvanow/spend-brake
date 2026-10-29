@@ -1,6 +1,8 @@
 import { HereAdapter, MapboxAdapter } from '@spend-brake/catalog';
 import type { StartedTestContainer } from 'testcontainers';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { request as httpRequest } from 'node:http';
+import { unsafePath } from '../src/server.js';
 import { StaticSecretStore } from '../src/secrets.js';
 import { type Harness, MockGoogle, newKey, newOrg, startProxy, startValkey } from './harness.js';
 
@@ -143,5 +145,78 @@ describe('HERE through the proxy', () => {
       });
     expect((await route('')).headers['x-brake-cost-micros']).toBe('2920');
     expect((await route('&departureTime=any')).headers['x-brake-cost-micros']).toBe('880');
+  });
+});
+
+describe('paths the upstream would resolve differently', () => {
+  it('recognises dot segments, encoded or not, and backslashes', () => {
+    for (const p of [
+      '/mapbox/styles/v1/u/s/static/../../x',
+      '/mapbox/a/%2e%2e/b',
+      '/mapbox/a/%2E/b',
+      '/mapbox/a/.',
+      '/mapbox/a\\b',
+      '/mapbox/a/%5c/b',
+      '/mapbox/a/%zz/b',
+    ]) {
+      expect(unsafePath(p), p).toBe(true);
+    }
+    expect(unsafePath('/mapbox/geocoding/v5/mapbox.places/a%2Fb.json?q=../x')).toBe(false);
+    expect(unsafePath('/mapbox/styles/v1/u/s/static/1,2,3/10x10')).toBe(false);
+  });
+
+  it('refuses them over a real socket, before anything is priced or forwarded', async () => {
+    const { token } = await mapboxKey(newOrg());
+    const address = await h.proxy.listen({ port: 0, host: '127.0.0.1' });
+    const port = Number(new URL(address).port);
+    const before = mock.seen.length;
+    const status = await new Promise<number>((resolve, reject) => {
+      const r = httpRequest(
+        {
+          host: '127.0.0.1',
+          port,
+          // Not normalized by the client: exactly what an attacker would send.
+          path: '/mapbox/styles/v1/u/s/static/../../../../../geocoding/v5/mapbox.places-permanent/a.json',
+          headers: { 'x-brake-key': token },
+        },
+        (res) => {
+          res.resume();
+          resolve(res.statusCode ?? 0);
+        },
+      );
+      r.on('error', reject);
+      r.end();
+    });
+    expect(status).toBe(400);
+    expect(mock.seen.length).toBe(before);
+  });
+
+  it('closes a Search Box session even when /retrieve fails, and ignores a client token', async () => {
+    const { token } = await mapboxKey(newOrg());
+    const call = async (path: string) => {
+      const res = await h.proxy.inject({
+        url: `/mapbox${path}&access_token=pk.client-own`,
+        headers: { 'x-brake-key': token },
+      });
+      await h.proxy.brakeDrain();
+      return res;
+    };
+    expect(
+      (await call('/search/searchbox/v1/suggest?q=a&session_token=t9')).headers[
+        'x-brake-cost-micros'
+      ],
+    ).toBe('11500');
+    expect(new URL(mock.last().url, 'http://x').searchParams.getAll('access_token')).toEqual([
+      'pk.real-mapbox-token',
+    ]);
+    const respond = mock.respond;
+    mock.respond = (_req, reply) => reply.code(404).send({ message: 'Not Found' });
+    expect((await call('/search/searchbox/v1/retrieve/x?session_token=t9')).statusCode).toBe(404);
+    mock.respond = respond;
+    expect(
+      (await call('/search/searchbox/v1/suggest?q=b&session_token=t9')).headers[
+        'x-brake-cost-micros'
+      ],
+    ).toBe('11500');
   });
 });
