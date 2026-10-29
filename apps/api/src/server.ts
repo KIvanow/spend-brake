@@ -12,6 +12,7 @@ import { budgetRoutes } from './routes/budget.js';
 import { credentialRoutes } from './routes/credentials.js';
 import { keyRoutes } from './routes/keys.js';
 import { ledgerRoutes } from './routes/ledger.js';
+import { sessionRoutes } from './routes/sessions.js';
 import { webhookRoutes } from './routes/webhooks.js';
 
 export interface ApiDeps {
@@ -85,16 +86,13 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   });
 
   const perToken = deps.rateLimitPerMinute ?? 600;
-  const router = new Router(
-    app,
-    new Authenticator(deps.db, now, deps.authCacheMs),
-    async (auth) => {
-      const key = `bk:rl:api:tok:${auth.tokenId}:${Math.floor(now().getTime() / 60_000)}`;
-      const n = await deps.valkey.incr(key);
-      if (n === 1) await deps.valkey.expire(key, 120);
-      return n <= perToken;
-    },
-  );
+  const authenticator = new Authenticator(deps.db, now, deps.authCacheMs);
+  const router = new Router(app, authenticator, async (auth) => {
+    const key = `bk:rl:api:tok:${auth.tokenId}:${Math.floor(now().getTime() / 60_000)}`;
+    const n = await deps.valkey.incr(key);
+    if (n === 1) await deps.valkey.expire(key, 120);
+    return n <= perToken;
+  });
   credentialRoutes(router, ctx);
   keyRoutes(router, ctx);
   budgetRoutes(router, ctx);
@@ -102,6 +100,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   adminRoutes(router, ctx);
   webhookRoutes(router, ctx);
   actionRoutes(app, router, ctx, deps.actionSecret);
+  sessionRoutes(app, router, ctx, authenticator);
 
   const spec = router.document();
   app.get('/v1/openapi.json', { config: { rateLimit: false } }, () => spec);

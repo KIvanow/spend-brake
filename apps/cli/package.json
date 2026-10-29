@@ -1,21 +1,42 @@
 {
   "name": "@spend-brake/cli",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "license": "Apache-2.0",
   "type": "module",
   "bin": {
-    "brake": "./dist/main.js"
+    "brake": "./dist/brake.cjs"
   },
   "files": [
-    "dist"
+    "dist/brake.cjs",
+    "README.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && node scripts/bundle.mjs",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run"
+    "test": "node scripts/bundle.mjs && vitest run",
+    "build:sea": "node scripts/build-sea.mjs"
   },
   "dependencies": {
     "commander": "^15.0.0"
+  },
+  "devDependencies": {
+    "@spend-brake/api": "workspace:^",
+    "@spend-brake/budget": "workspace:^",
+    "@spend-brake/catalog": "workspace:^",
+    "@spend-brake/db": "workspace:^",
+    "@spend-brake/proxy": "workspace:^",
+    "@spend-brake/shared": "workspace:^",
+    "esbuild": "^0.28.2",
+    "fastify": "^5.12.5",
+    "ioredis": "^6.0.0",
+    "postject": "1.0.0-alpha.6",
+    "testcontainers": "^12.2.1"
+  },
+  "description": "Hard dollar caps for every paid API your agents touch: capped calls, agent sessions and budgets from the shell.",
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

@@ -77,6 +77,10 @@ function record(keyId: string, orgId: string, f: Fields, base?: KeyRecord): KeyR
     failOpenMicros: pick('failOpenMicros', base?.failOpenMicros ?? null, (v) => v.toString()),
     allowedIps: pick('allowedIps', base?.allowedIps ?? null, (v) => v),
     canMintSessions: f.canMintSessions ?? base?.canMintSessions ?? false,
+    // Session-key fields are set only by POST /v1/sessions.
+    sessionId: base?.sessionId ?? null,
+    agentDayCapMicros: base?.agentDayCapMicros ?? null,
+    parentKeyId: base?.parentKeyId ?? null,
   };
 }
 

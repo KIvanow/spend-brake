@@ -322,13 +322,14 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
       return sendError(reply, 'sku_not_allowed', `Key may not call provider ${adapter.id}.`);
     }
     const { org } = auth;
-    const session = request.headers['x-brake-session'];
+    // A session key carries its session; otherwise the client may name one.
+    const session = key.sessionId ?? request.headers['x-brake-session'];
     if (session !== undefined && (typeof session !== 'string' || !SESSION_ID.test(session))) {
       return sendError(reply, 'invalid_request', 'Invalid X-Brake-Session.');
     }
     // Sessions are client-named scopes; only keys with a session budget may open them, so a
     // client cannot create unbounded per-session counters.
-    if (session !== undefined && key.sessionCapMicros === null) {
+    if (session !== undefined && key.sessionCapMicros === null && key.sessionId === null) {
       return sendError(
         reply,
         'invalid_request',
@@ -430,6 +431,8 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
       // Multi-SKU requests count against their primary SKU's scope.
       { kind: 'sku', provider: adapter.id, sku: priced.items[0]!.sku },
     ];
+    // Session keys spend from their parent's budget too, and die with it.
+    if (key.parentKeyId) scopes.push({ kind: 'key', id: key.parentKeyId });
     if (key.env) scopes.push({ kind: 'env', name: key.env });
     if (key.agentId) scopes.push({ kind: 'agent', id: key.agentId });
     if (sessionScope) scopes.push(sessionScope);
@@ -439,10 +442,18 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
       { kind: 'prov', name: adapter.id },
     ];
     if (session) killTargets.push({ kind: 'sess', id: session });
-    const capTemplates: CapTemplate[] =
-      sessionScope && key.sessionCapMicros
-        ? [{ scope: sessionScope, kind: 'm', hard: BigInt(key.sessionCapMicros) }]
-        : [];
+    if (key.parentKeyId) killTargets.push({ kind: 'key', id: key.parentKeyId });
+    const capTemplates: CapTemplate[] = [];
+    if (sessionScope && key.sessionCapMicros) {
+      capTemplates.push({ scope: sessionScope, kind: 'm', hard: BigInt(key.sessionCapMicros) });
+    }
+    if (key.agentId && key.agentDayCapMicros) {
+      capTemplates.push({
+        scope: { kind: 'agent', id: key.agentId },
+        kind: 'd',
+        hard: BigInt(key.agentDayCapMicros),
+      });
+    }
 
     const reqId = request.id;
     let remaining: bigint | null = null;

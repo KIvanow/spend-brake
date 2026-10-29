@@ -58,6 +58,12 @@ export const keyRecordSchema = z.strictObject({
   /** Source IPs (exact match) allowed to use the key; null allows any. */
   allowedIps: z.array(z.string()).nullable().default(null),
   canMintSessions: z.boolean().default(false),
+  /** Session keys minted by `brake session`: every request belongs to this session. */
+  sessionId: id.nullable().default(null),
+  /** Daily cap created for the key's agent scope on first use (the agent's budget per day). */
+  agentDayCapMicros: micros.nullable().default(null),
+  /** The key that minted this session key. */
+  parentKeyId: id.nullable().default(null),
 });
 
 export type OrgRecord = z.output<typeof orgRecordSchema>;

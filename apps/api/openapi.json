@@ -519,6 +519,64 @@
           "events",
           "createdAt"
         ]
+      },
+      "Session": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "keyId": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "budgetMicros": {
+            "type": "number"
+          },
+          "dayBudgetMicros": {
+            "type": "number"
+          },
+          "expiresAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "sessionId",
+          "keyId",
+          "token",
+          "agentId",
+          "budgetMicros",
+          "dayBudgetMicros",
+          "expiresAt"
+        ]
+      },
+      "SessionEnd": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "keyId": {
+            "type": "string"
+          },
+          "spentMicros": {
+            "type": "number"
+          },
+          "heldMicros": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "sessionId",
+          "keyId",
+          "spentMicros",
+          "heldMicros"
+        ]
       }
     },
     "parameters": {}
@@ -2848,6 +2906,124 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sessions": {
+      "post": {
+        "summary": "Mint a session key (admin token, or X-Brake-Key of a parent key with canMintSessions)",
+        "tags": [
+          "Sessions"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "parentKeyId": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_.-]{1,128}$"
+                  },
+                  "budgetMicros": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^\\d{1,16}$"
+                      }
+                    ],
+                    "description": "Micro-dollars (1 USD = 1,000,000)",
+                    "example": 5000000
+                  },
+                  "dayBudgetMicros": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^\\d{1,16}$"
+                      }
+                    ],
+                    "description": "Micro-dollars (1 USD = 1,000,000)",
+                    "example": 5000000
+                  },
+                  "agentId": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_.-]{1,128}$"
+                  },
+                  "ttlSec": {
+                    "type": "integer",
+                    "minimum": 60,
+                    "maximum": 604800,
+                    "default": 43200
+                  },
+                  "name": {
+                    "type": "string",
+                    "maxLength": 200
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sessions/{keyId}": {
+      "delete": {
+        "summary": "End a session: revoke its key and report its spend (admin, parent or the session key)",
+        "tags": [
+          "Sessions"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.-]{1,128}$"
+            },
+            "required": true,
+            "name": "keyId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionEnd"
                 }
               }
             }

@@ -23,8 +23,9 @@ export default tseslint.config(
     },
   },
   {
-    files: ['**/*.js'],
+    files: ['**/*.js', '**/*.mjs'],
     ...tseslint.configs.disableTypeChecked,
+    languageOptions: { parserOptions: { projectService: false } },
   },
   prettier,
 );
