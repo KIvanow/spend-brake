@@ -113,6 +113,10 @@ The proxy process runs at about 60% of one core at 2,000 rps; the median overhea
 
 ## Messaging (Twilio)
 
+Send responses are read for the message SID so the worker can settle at Twilio's final price.
+Settlement polls the Messages API instead of rewriting the app's `StatusCallback`: the proxy
+never has to receive callbacks, verify Twilio signatures for the app, or forward to app URLs.
+
 On top of dollar caps, message sends are checked before any money moves:
 
 - **Countries:** a key may only send to the countries in its `countries` list; without a list,

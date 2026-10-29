@@ -52,4 +52,4 @@ export async function ensureUsagePartitions(db: Db, now = new Date()): Promise<s
 
 // Apps import query helpers from here so there is one drizzle-orm instance (a second copy with
 // different optional peers has incompatible types).
-export { type SQL, and, asc, desc, eq, gte, inArray, isNull, lt, or, sql } from 'drizzle-orm';
+export { type SQL, and, asc, desc, eq, gte, inArray, isNull, like, lt, or, sql } from 'drizzle-orm';

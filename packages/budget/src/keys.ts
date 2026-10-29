@@ -83,6 +83,9 @@ export function keys(orgId: string) {
     billingSession: (provider: string, tokenHash: string) =>
       `${p}:bsess:${part(provider, 'provider')}:${part(tokenHash, 'hash')}`,
     events: () => `${p}:events`,
+    /** A send whose final provider price is fetched later (Twilio), and the queue of them. */
+    pending: (reqId: string) => `${p}:pending:${reqId}`,
+    pendingQueue: () => `${p}:pendingq`,
     /** Messaging sends to one destination number (hashed) / one number prefix, per hour. */
     pumpNumber: (keyId: string, numberHash: string) =>
       `${p}:pump:n:${part(keyId, 'key id')}:${part(numberHash, 'hash')}`,
@@ -91,4 +94,24 @@ export function keys(orgId: string) {
     resexp: () => `${p}:resexp`,
     kill: () => `${p}:kill`,
   };
+}
+
+/** The inverse of scopeLabel. */
+export function parseScopeLabel(label: string): Scope {
+  const [kind, a, b] = label.split(':');
+  switch (kind) {
+    case 'org':
+      return { kind: 'org' };
+    case 'key':
+      return { kind: 'key', id: part(a ?? '', 'key id') };
+    case 'sku':
+      return { kind: 'sku', provider: part(a ?? '', 'provider'), sku: part(b ?? '', 'sku') };
+    case 'env':
+      return { kind: 'env', name: part(a ?? '', 'env name') };
+    case 'sess':
+      return { kind: 'sess', id: part(a ?? '', 'session id') };
+    case 'agent':
+      return { kind: 'agent', id: part(a ?? '', 'agent id') };
+  }
+  throw new Error(`invalid scope label: ${JSON.stringify(label)}`);
 }

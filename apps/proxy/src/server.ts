@@ -13,6 +13,7 @@ import {
   type Scope,
   type ValkeyClient,
   isVirtualKey,
+  scopeLabel,
   windowsFor,
 } from '@spend-brake/budget';
 import type {
@@ -642,6 +643,7 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
       upstreamMs: number,
       error?: string,
       keyError = false,
+      pendingRef: Record<string, string> | null = null,
     ) => {
       metrics.cost.inc({ provider: adapter.id }, Number(actual));
       const event = compact({
@@ -692,6 +694,24 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
               units: priced.items,
               event,
             });
+            // Providers that price later (Twilio): settle the real price in the worker.
+            if (billed && pendingRef) {
+              await engine.addPending(
+                org.id,
+                reqId,
+                {
+                  provider: adapter.id,
+                  credentialId,
+                  scopes: scopes.map(scopeLabel),
+                  at: at.toISOString(),
+                  timeZone: org.timeZone,
+                  committedMicros: actual.toString(),
+                  ref: pendingRef,
+                  keyId: key.id,
+                },
+                new Date(at.getTime() + 120_000),
+              );
+            }
             if (billed && billingSessionHash && billingSession) {
               await engine.startBillingSession(
                 org.id,
@@ -824,7 +844,15 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
         headers: resHeaders,
         ...(body !== undefined ? { body } : {}),
       });
-      settle(actual, billed, res.statusCode, upstreamMs, undefined, keyError);
+      const upstreamRes = {
+        status: res.statusCode,
+        headers: resHeaders,
+        ...(body !== undefined ? { body } : {}),
+      };
+      const pendingRef = priced.classified
+        ? (adapter.pendingSettlement?.(priced.classified, upstreamRes) ?? null)
+        : null;
+      settle(actual, billed, res.statusCode, upstreamMs, undefined, keyError, pendingRef);
       reply.code(res.statusCode).headers(passHeaders);
       costHeaders(actual);
       return reply.send(raw);

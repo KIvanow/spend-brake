@@ -106,6 +106,20 @@ export interface RecordSpendRequest {
   event?: Record<string, string>;
 }
 
+export interface PendingSettlement {
+  provider: string;
+  credentialId: string;
+  /** Scope labels and the original time: an adjustment lands in the same windows. */
+  scopes: string[];
+  at: string;
+  timeZone: string;
+  /** What was committed at send time (the worst case). */
+  committedMicros: string;
+  /** Provider reference, e.g. Twilio's account and message SIDs. */
+  ref: Record<string, string>;
+  keyId: string;
+}
+
 export interface PumpingPolicy {
   perNumberPerHour: number;
   perPrefixPerHour: number;
@@ -368,6 +382,23 @@ export class BudgetEngine {
 
   /** Add spend that was never reserved (fail-open requests replayed after an outage). */
   async recordSpend(r: RecordSpendRequest): Promise<void> {
+    assertMicros(r.amount, 'amount');
+    return this.writeSpend(r, r.amount);
+  }
+
+  /**
+   * Correct spend already committed, in the windows of the original request (`at`): a settled
+   * provider price below (or above) the worst case committed at send time. `delta` is signed.
+   */
+  async adjustSpend(
+    r: Omit<RecordSpendRequest, 'amount' | 'units'> & { delta: bigint },
+  ): Promise<void> {
+    const abs = r.delta < 0n ? -r.delta : r.delta;
+    assertMicros(abs, 'delta');
+    return this.writeSpend({ ...r, amount: 0n }, r.delta);
+  }
+
+  private async writeSpend(r: RecordSpendRequest, amount: bigint): Promise<void> {
     const k = orgKeys(r.orgId);
     const windows = windowsFor(r.at, r.timeZone);
     const labels = [...new Set(r.scopes.map(scopeLabel))];
@@ -381,7 +412,7 @@ export class BudgetEngine {
       scripts.record,
       [k.events(), ...pairs.map((p) => p.key), ...units.map((u) => k.units(u.sku, month.id))],
       [
-        assertMicros(r.amount, 'amount'),
+        amount.toString(),
         pairs.length,
         units.length,
         month.ttlSec,
@@ -462,6 +493,62 @@ export class BudgetEngine {
     )) as [string, number?, number?];
     if (reply[0] === 'OK') return { ok: true };
     return { ok: false, retryAfterSec: Number(reply[1]), tripped: reply[2] === 1 };
+  }
+
+  /**
+   * Remember a send whose real price the provider reports later. The worker picks it up from
+   * `checkAt` on (see `duePending`) and settles it once with `takePending`.
+   */
+  async addPending(
+    orgId: string,
+    reqId: string,
+    record: PendingSettlement,
+    checkAt: Date,
+  ): Promise<void> {
+    const k = orgKeys(orgId);
+    const tx = this.client.multi();
+    tx.set(k.pending(assertReqId(reqId)), JSON.stringify(record), 'EX', 4 * 24 * 3600);
+    tx.zadd(k.pendingQueue(), checkAt.getTime(), reqId);
+    await tx.exec();
+  }
+
+  async duePending(
+    orgId: string,
+    now = new Date(),
+    limit = 200,
+  ): Promise<{ reqId: string; record: PendingSettlement }[]> {
+    const k = orgKeys(orgId);
+    const ids = await this.client.zrangebyscore(
+      k.pendingQueue(),
+      '-inf',
+      now.getTime(),
+      'LIMIT',
+      0,
+      limit,
+    );
+    const out: { reqId: string; record: PendingSettlement }[] = [];
+    for (const reqId of ids) {
+      const raw = await this.client.get(k.pending(reqId));
+      if (raw === null) await this.client.zrem(k.pendingQueue(), reqId);
+      else out.push({ reqId, record: JSON.parse(raw) as PendingSettlement });
+    }
+    return out;
+  }
+
+  /** Check again later (the provider has not priced it yet). */
+  async deferPending(orgId: string, reqId: string, checkAt: Date): Promise<void> {
+    await this.client.zadd(orgKeys(orgId).pendingQueue(), checkAt.getTime(), reqId);
+  }
+
+  /** Claim a pending send for settlement; false when another worker already did. */
+  async takePending(orgId: string, reqId: string): Promise<boolean> {
+    const k = orgKeys(orgId);
+    const res = await this.client
+      .multi()
+      .del(k.pending(reqId))
+      .zrem(k.pendingQueue(), reqId)
+      .exec();
+    return Number(res?.[0]?.[1] ?? 0) === 1;
   }
 
   /** Close a key's loop circuit early (the alert's "Reset circuit" action). */

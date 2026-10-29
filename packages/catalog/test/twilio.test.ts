@@ -89,3 +89,44 @@ describe('Twilio classify', () => {
     );
   });
 });
+
+describe('Twilio settlement', () => {
+  const c = send({ To: '+14155552671', Body: 'hi' });
+  if (!c.priced) throw new Error('unpriced');
+  const sid = `SM${'b'.repeat(32)}`;
+  it('reads the message and account SIDs from the send response', () => {
+    expect(
+      adapter.pendingSettlement(c, { status: 201, headers: {}, body: { sid, account_sid: AC } }),
+    ).toEqual({
+      accountSid: AC,
+      sid,
+      sku: 'twilio.sms.US',
+      units: '1',
+    });
+    expect(
+      adapter.pendingSettlement(c, { status: 400, headers: {}, body: { sid, account_sid: AC } }),
+    ).toBeNull();
+    expect(
+      adapter.pendingSettlement(c, {
+        status: 201,
+        headers: {},
+        body: { sid: '../x', account_sid: AC },
+      }),
+    ).toBeNull();
+  });
+
+  it('prices the settled message with US carrier fees on top', () => {
+    const ref = { accountSid: AC, sid, sku: 'twilio.sms.US', units: '1' };
+    expect(adapter.settledPrice(ref, { price: null })).toBeNull();
+    expect(
+      adapter.settledPrice(ref, { price: '-0.00830', price_unit: 'USD', num_segments: '2' }),
+    ).toBe(8_300n + 2n * 6_200n);
+    expect(
+      adapter.settledPrice(
+        { ...ref, sku: 'twilio.sms.DE' },
+        { price: '-0.07800', price_unit: 'USD', num_segments: '1' },
+      ),
+    ).toBe(78_000n);
+    expect(() => adapter.settledPrice(ref, { price: '-0.01', price_unit: 'EUR' })).toThrow(/EUR/);
+  });
+});

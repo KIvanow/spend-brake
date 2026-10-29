@@ -104,9 +104,15 @@ export class TwilioAdapter implements ProviderAdapter {
   ] as const;
   readonly timeoutBilled = true;
   readonly prices: Map<string, bigint>;
+  private readonly carrierFees: { sms: bigint; mms: bigint };
 
   constructor(prices = loadTwilioPrices()) {
     this.prices = prices;
+    const sms = smsSchema.parse(parse(readDataFile('twilio/sms.yaml')));
+    this.carrierFees = {
+      sms: parseUsd(sms.usCarrierFees.sms),
+      mms: parseUsd(sms.usCarrierFees.mms),
+    };
   }
 
   match(req: IncomingReq): boolean {
@@ -183,8 +189,47 @@ export class TwilioAdapter implements ProviderAdapter {
     return null;
   }
 
-  needsBody(): boolean {
-    return false;
+  /** Sends are buffered to read the message and account SIDs for later settlement. */
+  needsBody(c: PricedClassified): boolean {
+    return c.route === 'twilio.sms' || c.route === 'twilio.mms';
+  }
+
+  pendingSettlement(c: PricedClassified, res: UpstreamRes): Record<string, string> | null {
+    if (!this.needsBody(c) || !this.billedOnStatus(res.status)) return null;
+    const body = res.body as { sid?: unknown; account_sid?: unknown } | undefined;
+    if (typeof body?.sid !== 'string' || typeof body.account_sid !== 'string') return null;
+    if (!/^(SM|MM)[0-9a-f]{32}$/.test(body.sid) || !/^AC[0-9a-f]{32}$/.test(body.account_sid))
+      return null;
+    const item = c.items[0]!;
+    return {
+      accountSid: body.account_sid,
+      sid: body.sid,
+      sku: item.sku,
+      units: item.units.toString(),
+    };
+  }
+
+  /**
+   * The final cost of a sent message from its Message resource: Twilio's `price` (negative, in
+   * `price_unit`) plus, for US numbers, the carrier pass-through fee Twilio bills separately.
+   * Null while Twilio has not priced it yet.
+   */
+  settledPrice(
+    ref: Record<string, string>,
+    resource: { price?: unknown; price_unit?: unknown; num_segments?: unknown },
+  ): bigint | null {
+    if (typeof resource.price !== 'string' || resource.price === '') return null;
+    if (resource.price_unit !== 'USD')
+      throw new Error(`Twilio price in ${String(resource.price_unit)}; only USD is supported`);
+    const price = parseUsd(resource.price.replace(/^-/, ''));
+    const sku = ref.sku ?? '';
+    const segments = /^\d+$/.test(String(resource.num_segments))
+      ? BigInt(String(resource.num_segments))
+      : BigInt(ref.units ?? '1');
+    let carrier = 0n;
+    if (sku === 'twilio.sms.US') carrier = this.carrierFees.sms * segments;
+    if (sku === 'twilio.mms.US') carrier = this.carrierFees.mms;
+    return price + carrier;
   }
 
   worstCase(c: PricedClassified): bigint {

@@ -23,7 +23,8 @@ const COLUMNS = new Set([
   'hash',
 ]);
 
-const big = (v: string | undefined) => (v === undefined || !/^\d+$/.test(v) ? null : BigInt(v));
+// Signed: settlement adjustments carry negative costs.
+const big = (v: string | undefined) => (v === undefined || !/^-?\d+$/.test(v) ? null : BigInt(v));
 const num = (v: string | undefined) => (v === undefined || v === '' ? null : Number(v));
 
 export function toRow(orgId: string, streamId: string, f: Record<string, string>) {

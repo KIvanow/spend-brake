@@ -89,5 +89,7 @@ the credential is `<AccountSid>:<AuthToken>` (or an API key pair), injected as B
 - **Verify:** $0.05 base fee per verification plus the channel's delivery fee (SMS priced as an SMS
   to that country; WhatsApp US only; email base fee only); voice is not published as data and is
   unpriced. The base fee is reserved with the verification; the check itself costs nothing more.
-- Sends are billed on creation (Twilio charges undelivered messages too).
+- Sends are billed on creation (Twilio charges undelivered messages too). The proxy commits the
+  worst case and queues the message SID; the worker reads the message's final `price` from Twilio
+  and adjusts spend by the difference (`TwilioAdapter.settledPrice`, carrier fees included).
 - WhatsApp messaging and numbers that cannot be placed in a country are unpriced.

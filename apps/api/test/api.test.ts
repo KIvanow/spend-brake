@@ -420,6 +420,11 @@ describe('ledger queries', () => {
       row('2026-10-29T18:00:00Z', '2-0', 'k1', 'geocoding', 5000n),
       row('2026-10-29T19:00:00Z', '3-0', 'k2', 'places.text_search.pro', 32000n),
       { ...row('2026-10-29T19:00:01Z', '4-0', 'k2', 'x', 1n), type: 'blocked' },
+      // A settlement adjustment moves the cost but is not a request.
+      {
+        ...row('2026-10-29T19:30:00Z', '5-0', 'k2', 'places.text_search.pro', -2000n),
+        type: 'adjustment',
+      },
     ]);
     const res = await call(org.viewer, { url: '/v1/spend?groupBy=key,sku,day' });
     expect(res.json()).toEqual({
@@ -430,7 +435,7 @@ describe('ledger queries', () => {
           key: 'k2',
           sku: 'places.text_search.pro',
           day: '2026-10-29',
-          costMicros: 32000,
+          costMicros: 30000,
           requests: 1,
         },
       ],
@@ -439,17 +444,17 @@ describe('ledger queries', () => {
       url: '/v1/spend?groupBy=day&from=2026-10-29T12:00:00Z&to=2026-10-30T00:00:00Z',
     });
     expect(ranged.json()).toEqual({
-      items: [{ day: '2026-10-29', costMicros: 37000, requests: 2 }],
+      items: [{ day: '2026-10-29', costMicros: 35000, requests: 2 }],
     });
     expect((await call(org.viewer, { url: '/v1/spend?groupBy=nope' })).statusCode).toBe(400);
 
     const page1 = await call(org.viewer, { url: '/v1/events?limit=2' });
     const p1 = page1.json<{ items: { streamId: string }[]; nextCursor: string }>();
-    expect(p1.items.map((i) => i.streamId)).toEqual(['4-0', '3-0']);
+    expect(p1.items.map((i) => i.streamId)).toEqual(['5-0', '4-0']);
     const page2 = await call(org.viewer, { url: `/v1/events?limit=2&cursor=${p1.nextCursor}` });
     expect(page2.json<{ items: { streamId: string }[] }>().items.map((i) => i.streamId)).toEqual([
+      '3-0',
       '2-0',
-      '1-0',
     ]);
     const blocked = await call(org.viewer, { url: '/v1/events?type=blocked' });
     expect(blocked.json<{ items: unknown[] }>().items).toHaveLength(1);

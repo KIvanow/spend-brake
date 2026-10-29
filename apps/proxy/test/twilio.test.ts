@@ -25,7 +25,9 @@ beforeAll(async () => {
   });
   engine = new BudgetEngine(h.valkey);
   mock.respond = (_req, reply) =>
-    reply.code(201).send({ sid: 'SM1', status: 'queued', price: null });
+    reply
+      .code(201)
+      .send({ sid: `SM${'c'.repeat(32)}`, account_sid: AC, status: 'queued', price: null });
 });
 
 afterAll(async () => {
@@ -54,6 +56,16 @@ describe('Twilio through the proxy', () => {
       `Basic ${Buffer.from(`${AC}:auth-token`).toString('base64')}`,
     );
     expect(mock.last().body.toString()).toContain('Body=aaaa');
+    await h.proxy.brakeDrain();
+    // Queued for settlement at Twilio's final price.
+    const due = await engine.duePending(org, new Date('2026-10-29T12:05:00Z'));
+    expect(due).toHaveLength(1);
+    expect(due[0]!.record).toMatchObject({
+      provider: 'twilio',
+      credentialId: 'cred-twilio',
+      committedMicros: '29000',
+      ref: { accountSid: AC, sid: `SM${'c'.repeat(32)}`, sku: 'twilio.sms.US', units: '2' },
+    });
   });
 
   it('denies countries the key does not allow; US and CA are the default', async () => {

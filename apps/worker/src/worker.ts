@@ -1,4 +1,4 @@
-import { BudgetEngine } from '@spend-brake/budget';
+import { BudgetEngine, Registry } from '@spend-brake/budget';
 import { loadGoogleMapsCatalog, loadPlacesFields } from '@spend-brake/catalog';
 import { type Db, ensureUsagePartitions, orgs, reconciliationConfigs } from '@spend-brake/db';
 import {
@@ -20,6 +20,12 @@ import {
   markRun,
   reconcileDay,
 } from './reconcile.js';
+import {
+  type SettleResult,
+  type TwilioDeps,
+  reconcileTwilio,
+  settleTwilioPending,
+} from './twilio.js';
 
 export interface Logger {
   info(obj: object, msg?: string): void;
@@ -41,7 +47,10 @@ export interface WorkerDeps {
     driftMs?: number;
     orgsMs?: number;
     reconcileMs?: number;
+    settleMs?: number;
   };
+  /** For calls to providers (Twilio settlement and usage); tests inject one. */
+  fetch?: typeof fetch;
   fetchPage?: (url: string) => Promise<string>;
   /** Decrypts billing-export service accounts; reconciliation is off without it. */
   wrapper?: KeyWrapper | null;
@@ -147,6 +156,31 @@ export class Worker {
     return changed.length;
   }
 
+  /** Settle Twilio sends at Twilio's final price (see twilio.ts). */
+  async settleTwilioOnce(): Promise<SettleResult> {
+    if (!this.deps.wrapper) return { settled: 0, deferred: 0, expired: 0 };
+    return settleTwilioPending(this.twilioDeps(this.deps.wrapper), this.orgIds);
+  }
+
+  /** Twilio Usage Records vs the ledger for the last three UTC days. */
+  async reconcileTwilioOnce(): Promise<number> {
+    if (!this.deps.wrapper) return 0;
+    const alerts = await reconcileTwilio(this.twilioDeps(this.deps.wrapper));
+    await this.alerts.add(alerts);
+    return alerts.length;
+  }
+
+  private twilioDeps(wrapper: KeyWrapper): TwilioDeps {
+    return {
+      db: this.deps.db,
+      engine: this.engine,
+      registry: new Registry(this.deps.valkey),
+      wrapper,
+      fetch: this.deps.fetch ?? fetch,
+      now: this.now,
+    };
+  }
+
   /**
    * Compare the ledger with each configured org's Google billing export for the last few billing
    * days (the export lags); upserts results, alerts on drift above 5%.
@@ -220,6 +254,8 @@ export class Worker {
     this.every(6 * 3600_000, 'partitions', () => this.partitionsOnce());
     this.every(i.driftMs ?? 24 * 3600_000, 'drift', () => this.driftOnce());
     this.every(i.reconcileMs ?? 6 * 3600_000, 'reconcile', () => this.reconcileOnce());
+    this.every(i.settleMs ?? 60_000, 'twilio-settle', () => this.settleTwilioOnce());
+    this.every(i.reconcileMs ?? 6 * 3600_000, 'twilio-reconcile', () => this.reconcileTwilioOnce());
     this.deps.log.info({ workerId: this.deps.workerId }, 'worker started');
   }
 

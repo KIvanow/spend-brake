@@ -104,4 +104,9 @@ export interface ProviderAdapter {
   credentialRejected(res: UpstreamRes): boolean;
   /** Whether the provider may have billed a request that timed out. */
   timeoutBilled: boolean;
+  /**
+   * Providers that price a request only later (Twilio): a reference to look the final price up
+   * by, from the send response. The worker settles it; until then the worst case stands.
+   */
+  pendingSettlement?(c: PricedClassified, res: UpstreamRes): Record<string, string> | null;
 }

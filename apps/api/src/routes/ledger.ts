@@ -55,7 +55,11 @@ export function ledgerRoutes(r: Router, ctx: Ctx): void {
             ? sql`to_char(${usageEvents.ts} at time zone ${tz}, 'YYYY-MM-DD')`
             : sql`${GROUPS[g]}`;
       }
-      const where = [eq(usageEvents.orgId, auth.orgId), eq(usageEvents.type, 'usage')];
+      // Settlement adjustments (signed) correct the cost of sends priced later (Twilio).
+      const where = [
+        eq(usageEvents.orgId, auth.orgId),
+        sql`${usageEvents.type} in ('usage', 'adjustment')`,
+      ];
       if (query.from) where.push(gte(usageEvents.ts, new Date(query.from)));
       if (query.to) where.push(lt(usageEvents.ts, new Date(query.to)));
       // Group by position: a parameterized expression (the time zone) appears twice otherwise,
@@ -69,7 +73,7 @@ export function ledgerRoutes(r: Router, ctx: Ctx): void {
         .select({
           ...Object.fromEntries(Object.entries(cols).map(([k, v]) => [k, v.mapWith(String)])),
           costMicros: sql<string>`coalesce(sum(${usageEvents.costMicros}), 0)::text`,
-          requests: sql<string>`count(*)::text`,
+          requests: sql<string>`(count(*) filter (where ${usageEvents.type} = 'usage'))::text`,
         })
         .from(usageEvents)
         .where(and(...where))

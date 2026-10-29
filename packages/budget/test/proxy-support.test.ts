@@ -323,3 +323,53 @@ describe('pumping guard', () => {
     expect((await p('d')).ok).toBe(false);
   });
 });
+
+describe('spend adjustment', () => {
+  it('moves committed spend by a signed delta in the original windows', async () => {
+    const org = newOrg();
+    const at = new Date('2026-10-28T12:00:00Z');
+    await engine.recordSpend({ orgId: org, amount: 14_500n, scopes: [keyScope], timeZone: TZ, at });
+    await engine.adjustSpend({
+      orgId: org,
+      delta: -6_200n,
+      scopes: [keyScope],
+      timeZone: TZ,
+      at,
+      event: { type: 'adjustment' },
+    });
+    const [day] = await engine.status(org, [keyScope], TZ, at);
+    expect(day).toMatchObject({ window: 'd:20261028', spent: 8_300n });
+    await expect(
+      engine.adjustSpend({ orgId: org, delta: -(2n ** 60n), scopes: [keyScope], timeZone: TZ, at }),
+    ).rejects.toThrow(RangeError);
+  });
+});
+
+describe('pending settlements', () => {
+  it('queue, defer and are taken exactly once', async () => {
+    const org = newOrg();
+    const rec = {
+      provider: 'twilio',
+      credentialId: 'c1',
+      scopes: ['org', 'key:k1'],
+      at: NOW.toISOString(),
+      timeZone: TZ,
+      committedMicros: '14500',
+      ref: { accountSid: 'AC1', sid: 'SM1' },
+      keyId: 'k1',
+    };
+    await engine.addPending(org, 'r1', rec, new Date(NOW.getTime() + 60_000));
+    expect(await engine.duePending(org, NOW)).toEqual([]);
+    expect(await engine.duePending(org, new Date(NOW.getTime() + 61_000))).toEqual([
+      { reqId: 'r1', record: rec },
+    ]);
+    await engine.deferPending(org, 'r1', new Date(NOW.getTime() + 600_000));
+    expect(await engine.duePending(org, new Date(NOW.getTime() + 61_000))).toEqual([]);
+    const [a, b] = await Promise.all([
+      engine.takePending(org, 'r1'),
+      engine.takePending(org, 'r1'),
+    ]);
+    expect([a, b].sort()).toEqual([false, true]);
+    expect(await engine.duePending(org, new Date(NOW.getTime() + 999_000))).toEqual([]);
+  });
+});
