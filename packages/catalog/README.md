@@ -25,11 +25,17 @@ routes that bill it are unpriced and the proxy denies them by default.
 Pricing rules, all built to never undercharge:
 
 - **Places (New):** the highest tier of any field in the field mask. `*`, unknown fields and a
-  missing mask price at Enterprise + Atmosphere.
+  missing mask price at Enterprise + Atmosphere. A Place Details call with a `sessionToken` and
+  any Pro-or-higher field prices at Enterprise + Atmosphere, as Google bills the call that closes
+  an Autocomplete session.
+- **Photos:** Google answers with a 302 redirect to the image and bills it, so a 3xx counts as
+  billed on the two photo routes.
 - **Autocomplete (New):** per request; session pricing can only lower it.
 - **Routes:** Essentials, Pro or Enterprise from the features in the body (traffic, waypoints,
   location modifiers, tolls, two-wheeler). Any field we do not recognise prices as Enterprise.
-  The matrix reserves origins × destinations elements and settles on the elements returned.
+  `extraComputations` values that are not SKU triggers (fuel consumption, HTML instructions,
+  flyover and narrow-road info) stay at the current tier. The matrix bills origins × destinations
+  elements; it only settles higher if the response holds more elements than that.
 - **Legacy Places:** base SKU plus Contact and Atmosphere data SKUs from `fields`. Text and Nearby
   Search take no field list, so both data SKUs always apply. Autocomplete with a session token
   prices at the per-session SKU.
@@ -39,6 +45,17 @@ Pricing rules, all built to never undercharge:
 - **Free allowances** are ignored unless `trustFreeTier` is set. The volume band comes from the
   proxy's own monthly unit counter, which can only see less traffic than Google, so the band is
   never cheaper than the real one.
+
+## Differences from the design doc
+
+- `ProviderAdapter` also carries `upstreams` (the SSRF allow-list of origins, each behind a proxy
+  prefix) and `timeoutBilled`. `match()` checks the upstream origin the prefix resolved to.
+- `classify()` returns `{ priced: false, reason }` for routes the catalog cannot price, so the
+  proxy can answer `402 unpriced_route`; `worstCase`/`actual` only take priced requests.
+- One request can bill several SKUs (`items`), as legacy Places data SKUs do.
+- `billedOnStatus(status, classified?)` is route-aware: photo endpoints bill their 302 redirect.
+- Prices keep Google's own unit (USD per 1,000 events, as strings) with volume bands shared per
+  file; `source` and `verifiedAt` are recorded per file, with Google's SKU ID on every price.
 
 ## Generic adapter
 

@@ -8,18 +8,25 @@ export type ValkeyClient = Redis | Cluster;
 
 /**
  * KEYS: kill, resexp, res, then (held, spent, cap, alerted) per (scope, window) pair
- * ARGV: amount, reqId, expiresAtMs, resTtlSec, nKill, killTargets..., then
+ * ARGV: amount, reqId, expiresAtMs, nKill, killTargets..., then
  *       (scopeLabel, windowId, windowTtlSec) per pair
  *
- * Returns {'KILLED', target} | {'DUPLICATE'} | {'DENY', scope, window, hard, used}
+ * Returns {'KILLED', target} | {'DUPLICATE'} | {'DENY', scope, window, hard, used, firstDeny}
  *       | {'OK', {{scope, window, mark}, ...}}
+ *
+ * A deny changes no counter. It does set the scope's '100' alert mark (once per window), since a
+ * request that does not fit means the cap has been reached for practical purposes; firstDeny is 1
+ * when this deny set it.
+ *
+ * The res record has no TTL: commit or the sweeper deletes it. An expiring record would leave its
+ * held amount counted until the window key expires.
  */
 export const RESERVE_LUA = `
 local amount = tonumber(ARGV[1])
-local nKill = tonumber(ARGV[5])
+local nKill = tonumber(ARGV[4])
 for i = 1, nKill do
-  if redis.call('SISMEMBER', KEYS[1], ARGV[5 + i]) == 1 then
-    return {'KILLED', ARGV[5 + i]}
+  if redis.call('SISMEMBER', KEYS[1], ARGV[4 + i]) == 1 then
+    return {'KILLED', ARGV[4 + i]}
   end
 end
 if redis.call('EXISTS', KEYS[3]) == 1 then
@@ -27,7 +34,7 @@ if redis.call('EXISTS', KEYS[3]) == 1 then
 end
 
 local n = (#KEYS - 3) / 4
-local base = 5 + nKill
+local base = 4 + nKill
 local used = {}
 local caps = {}
 for i = 0, n - 1 do
@@ -36,7 +43,12 @@ for i = 0, n - 1 do
   local cap = redis.call('HMGET', KEYS[k + 2], 'hard', 'soft')
   local hard = tonumber(cap[1] or '-1')
   if hard >= 0 and u + amount > hard then
-    return {'DENY', ARGV[base + i * 3 + 1], ARGV[base + i * 3 + 2], hard, u}
+    local firstDeny = 0
+    if hard > 0 and redis.call('HSETNX', KEYS[k + 3], '100', '1') == 1 then
+      redis.call('EXPIRE', KEYS[k + 3], ARGV[base + i * 3 + 3], 'NX')
+      firstDeny = 1
+    end
+    return {'DENY', ARGV[base + i * 3 + 1], ARGV[base + i * 3 + 2], hard, u, firstDeny}
   end
   used[i] = u
   caps[i] = {hard, tonumber(cap[2] or '-1')}
@@ -76,7 +88,6 @@ for i = 0, n - 1 do
     cross(i, k, 'soft', soft)
   end
 end
-redis.call('EXPIRE', KEYS[3], ARGV[4])
 redis.call('ZADD', KEYS[2], ARGV[3], ARGV[2])
 return {'OK', crossings}
 `;

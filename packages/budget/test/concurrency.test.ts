@@ -117,7 +117,7 @@ describe('budget invariant under concurrency', () => {
                 now: NOW,
               });
               if (r.outcome === 'budget_exceeded') {
-                if (r.spent + amount <= r.cap) violations.push(`bad deny ${r.spent}+${amount}`);
+                if (r.used + amount <= r.cap) violations.push(`bad deny ${r.used}+${amount}`);
                 return;
               }
               if (r.outcome !== 'ok') throw new Error(r.outcome);

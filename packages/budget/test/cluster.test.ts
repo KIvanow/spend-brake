@@ -21,6 +21,9 @@ echo CLUSTER READY
 tail -f /dev/null
 `;
 
+// A fixed clock so the test never straddles midnight in the org's time zone.
+const NOW = new Date('2026-10-29T12:00:00Z');
+
 let container: StartedTestContainer;
 let cluster: Cluster;
 
@@ -74,10 +77,10 @@ describe('budget engine on a 3-node cluster', () => {
         ...base,
         reqId: newReq(),
         amount: 1_000_000n,
-        now: new Date(Date.now() - 200_000),
+        now: new Date(NOW.getTime() - 200_000),
       };
       expect((await engine.reserve(late)).outcome).toBe('ok');
-      expect(await engine.sweep(org)).toEqual({ committed: 1, alreadySettled: 0 });
+      expect(await engine.sweep(org, NOW)).toEqual({ committed: 1, alreadySettled: 0 });
 
       await engine.kill(org, { kind: 'key', id: 'k1' });
       expect((await engine.reserve({ ...base, reqId: newReq(), amount: 1n })).outcome).toBe(
@@ -85,7 +88,7 @@ describe('budget engine on a 3-node cluster', () => {
       );
       await engine.unkill(org, { kind: 'key', id: 'k1' });
 
-      const [day] = await engine.status(org, [keyScope], 'Europe/Sofia');
+      const [day] = await engine.status(org, [keyScope], 'Europe/Sofia', NOW);
       expect(day).toMatchObject({ spent: 2_500_000n, held: 0n, remaining: 500_000n });
     }
   });

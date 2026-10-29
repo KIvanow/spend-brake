@@ -23,8 +23,14 @@ const EXPECTED: Record<string, [string[], bigint, bigint]> = {
   'geocode-reverse-zero-results': [['geocoding'], 5_000n, 5_000n],
   'geocode-request-denied': [['geocoding'], 5_000n, 0n],
   'routes-compute-traffic': [['routes.compute_routes.pro'], 10_000n, 10_000n],
-  // 2 x 3 = 6 elements reserved, 4 returned
-  'routes-matrix-partial': [['routes.compute_route_matrix.essentials'], 30_000n, 20_000n],
+  // 2 x 3 = 6 elements are billed even though the body was cut off after 4
+  'routes-matrix-partial': [['routes.compute_route_matrix.essentials'], 30_000n, 30_000n],
+  // Photos answer with a redirect to the image; Google bills it.
+  'places-photo-redirect': [['places.photo'], 7_000n, 7_000n],
+  'legacy-photo-redirect': [['legacy.places.photo'], 7_000n, 7_000n],
+  // A Pro field closing an Autocomplete session bills Enterprise + Atmosphere; Essentials stays.
+  'places-details-closes-session': [['places.details.enterprise_atmosphere'], 25_000n, 25_000n],
+  'places-details-essentials-closes-session': [['places.details.essentials'], 5_000n, 5_000n],
   'routes-upstream-500': [['routes.compute_routes.essentials'], 5_000n, 0n],
   'legacy-details-contact': [
     ['legacy.places.details', 'legacy.places.contact_data'],
@@ -131,11 +137,34 @@ describe('google-maps adapter', () => {
     expect(places.query.has('key')).toBe(false);
   });
 
-  it('bills only 2xx responses, and timeouts by default', () => {
+  it('bills only 2xx responses, plus redirects on photo routes, and timeouts by default', () => {
     expect(adapter.billedOnStatus(200)).toBe(true);
+    expect(adapter.billedOnStatus(302)).toBe(false);
     expect(adapter.billedOnStatus(400)).toBe(false);
     expect(adapter.billedOnStatus(503)).toBe(false);
+    const photo = adapter.classify(
+      req('GET', 'https://maps.googleapis.com/maps/api/place/photo?photo_reference=x'),
+    );
+    if (!photo.priced) throw new Error(photo.reason);
+    expect(adapter.billedOnStatus(302, photo)).toBe(true);
+    expect(adapter.billedOnStatus(404, photo)).toBe(false);
     expect(adapter.timeoutBilled).toBe(true);
+  });
+
+  it('settles a matrix on more elements than requested, never fewer', () => {
+    const c = adapter.classify(
+      req(
+        'GET',
+        'https://maps.googleapis.com/maps/api/distancematrix/json?origins=A&destinations=B',
+      ),
+    );
+    if (!c.priced) throw new Error(c.reason);
+    const rows = (n: number) => ({
+      rows: [{ elements: Array.from({ length: n }, () => ({})) }],
+      status: 'OK',
+    });
+    expect(adapter.actual(c, { status: 200, headers: {}, body: rows(0) }, ctx())).toBe(5_000n);
+    expect(adapter.actual(c, { status: 200, headers: {}, body: rows(3) }, ctx())).toBe(15_000n);
   });
 
   it('hashes identical requests the same, ignoring keys, session tokens and order', () => {

@@ -1,0 +1,7 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "https://places.googleapis.com/v1/places/ChIJ1/photos/AUc7tXX/media?maxWidthPx=400"
+  },
+  "response": { "status": 302 }
+}

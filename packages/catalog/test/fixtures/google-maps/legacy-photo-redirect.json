@@ -1,0 +1,7 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photo_reference=AUc7tXX"
+  },
+  "response": { "status": 302 }
+}

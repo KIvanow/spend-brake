@@ -54,6 +54,14 @@ const ESSENTIAL_TRAVEL_MODES = new Set([
   'WALK',
   'TRANSIT',
 ]);
+// Extra computations that exist in the Routes API but are not Pro or Enterprise triggers on the
+// SKU page.
+const ESSENTIAL_EXTRA_COMPUTATIONS = new Set([
+  'FUEL_CONSUMPTION',
+  'HTML_FORMATTED_NAVIGATION_INSTRUCTIONS',
+  'FLYOVER_INFO_ON_POLYLINE',
+  'NARROW_ROAD_INFO_ON_POLYLINE',
+]);
 const TRAFFIC_AWARE = new Set(['TRAFFIC_AWARE', 'TRAFFIC_AWARE_OPTIMAL']);
 const ESSENTIAL_PREFERENCES = new Set([
   undefined,
@@ -105,9 +113,11 @@ function checkCommon(body: Obj, acc: TierAcc) {
 
   const extra = body.extraComputations;
   if (extra !== undefined) {
-    // TOLLS and TRAFFIC_ON_POLYLINE are Enterprise; other values are not on the SKU page.
-    for (const e of Array.isArray(extra) ? extra : [extra])
+    for (const e of Array.isArray(extra) ? extra : [extra]) {
+      if (ESSENTIAL_EXTRA_COMPUTATIONS.has(e as string)) continue;
+      // TOLLS and TRAFFIC_ON_POLYLINE are the listed Enterprise triggers; unknown values too.
       acc.enterprise(`extraComputations ${String(e)}`);
+    }
   }
 }
 

@@ -71,7 +71,8 @@ export interface ProviderAdapter {
   worstCase(c: PricedClassified, ctx: PriceCtx): bigint;
   actual(c: PricedClassified, res: UpstreamRes, ctx: PriceCtx): bigint;
   injectCredential(req: OutgoingReq, secret: string): void;
-  billedOnStatus(status: number): boolean;
+  /** Whether the provider bills a response with this status (some routes bill redirects). */
+  billedOnStatus(status: number, c?: PricedClassified): boolean;
   /** Whether the provider may have billed a request that timed out. */
   timeoutBilled: boolean;
 }

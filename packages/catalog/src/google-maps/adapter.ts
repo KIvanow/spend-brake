@@ -18,6 +18,7 @@ import {
   legacyDataSkus,
 } from './legacy.js';
 import {
+  TIERS,
   type PlacesEndpoint,
   type PlacesFields,
   parsePlacesFields,
@@ -72,6 +73,18 @@ const ENDPOINT_SKU: Record<PlacesEndpoint, string> = {
   textSearch: 'places.text_search',
   nearbySearch: 'places.nearby_search',
 };
+
+function matrixElements(route: string, body: unknown): bigint | null {
+  if (route === 'routes.compute_route_matrix' && Array.isArray(body)) return BigInt(body.length);
+  if (route === 'legacy.distance_matrix' && body && typeof body === 'object') {
+    const rows = (body as { rows?: { elements?: unknown[] }[] }).rows;
+    if (!Array.isArray(rows)) return null;
+    return BigInt(
+      rows.reduce((n, r) => n + (Array.isArray(r.elements) ? r.elements.length : 0), 0),
+    );
+  }
+  return null;
+}
 
 type Route = { route: string; items: LineItem[] } | { unpriced: string };
 
@@ -128,7 +141,16 @@ export class GoogleMapsAdapter implements ProviderAdapter {
 
     if (origin === PLACES) {
       const places = (endpoint: PlacesEndpoint, route: string): Route => {
-        const { tier } = resolveFieldMask(this.fields, endpoint, fieldMask(req));
+        let { tier } = resolveFieldMask(this.fields, endpoint, fieldMask(req));
+        // A Details call that closes an Autocomplete session with any Pro-or-higher field is
+        // billed at Enterprise + Atmosphere (SKU page, Place Details Enterprise + Atmosphere).
+        if (
+          endpoint === 'details' &&
+          q.has('sessionToken') &&
+          TIERS.indexOf(tier) >= TIERS.indexOf('pro')
+        ) {
+          tier = 'enterprise_atmosphere';
+        }
         return { route, items: [{ sku: `${ENDPOINT_SKU[endpoint]}.${tier}`, units: 1n }] };
       };
       if (method === 'POST' && path === '/v1/places:searchText')
@@ -214,33 +236,18 @@ export class GoogleMapsAdapter implements ProviderAdapter {
   }
 
   actual(c: PricedClassified, res: UpstreamRes, ctx: PriceCtx): bigint {
-    if (!this.billedOnStatus(res.status)) return 0n;
+    if (!this.billedOnStatus(res.status, c)) return 0n;
     const body = res.body;
     if (c.route.startsWith('legacy.') || c.route === 'geocoding') {
       const status = (body as { status?: unknown } | undefined)?.status;
       if (typeof status === 'string' && LEGACY_UNBILLED_STATUSES.has(status)) return 0n;
     }
-    // Matrix calls bill per returned element; without the body we keep the worst case.
-    if (c.route === 'routes.compute_route_matrix' && Array.isArray(body)) {
-      return priceItems(
-        this.catalog.skus,
-        [{ sku: c.items[0]!.sku, units: BigInt(body.length) }],
-        ctx,
-      );
-    }
-    if (c.route === 'legacy.distance_matrix' && body && typeof body === 'object') {
-      const rows = (body as { rows?: { elements?: unknown[] }[] }).rows;
-      if (Array.isArray(rows)) {
-        const elements = rows.reduce(
-          (n, r) => n + (Array.isArray(r.elements) ? r.elements.length : 0),
-          0,
-        );
-        return priceItems(
-          this.catalog.skus,
-          [{ sku: c.items[0]!.sku, units: BigInt(elements) }],
-          ctx,
-        );
-      }
+    // Matrices bill origins x destinations, and every element comes back (unroutable ones
+    // carry a condition), so a short body means a cut-off response, not a smaller bill. Only
+    // more elements than requested can change the price.
+    const returned = matrixElements(c.route, body);
+    if (returned !== null && returned > c.items[0]!.units) {
+      return priceItems(this.catalog.skus, [{ sku: c.items[0]!.sku, units: returned }], ctx);
     }
     return this.worstCase(c, ctx);
   }
@@ -252,7 +259,10 @@ export class GoogleMapsAdapter implements ProviderAdapter {
     else req.headers['x-goog-api-key'] = secret;
   }
 
-  billedOnStatus(status: number): boolean {
-    return status >= 200 && status < 300;
+  billedOnStatus(status: number, c?: PricedClassified): boolean {
+    if (status >= 200 && status < 300) return true;
+    // Photo endpoints answer a successful (billed) request with a redirect to the image.
+    const photo = c?.route === 'places.photo' || c?.route === 'legacy.places.photo';
+    return photo && status >= 300 && status < 400;
   }
 }

@@ -43,6 +43,22 @@ describe('computeRoutes tier', () => {
     expect(computeRoutesTier({ ...basic, ...extra }).tier).toBe('enterprise');
   });
 
+  it('keeps extra computations that are not SKU triggers at Essentials', () => {
+    expect(
+      computeRoutesTier({
+        ...basic,
+        extraComputations: ['HTML_FORMATTED_NAVIGATION_INSTRUCTIONS', 'FLYOVER_INFO_ON_POLYLINE'],
+      }).tier,
+    ).toBe('essentials');
+    expect(
+      computeRoutesTier({ ...basic, extraComputations: ['FLYOVER_INFO_ON_POLYLINE', 'TOLLS'] })
+        .tier,
+    ).toBe('enterprise');
+    expect(computeRoutesTier({ ...basic, extraComputations: ['SOMETHING_NEW'] }).tier).toBe(
+      'enterprise',
+    );
+  });
+
   it('Enterprise wins over Pro', () => {
     expect(
       computeRoutesTier({ ...basic, routingPreference: 'TRAFFIC_AWARE', travelMode: 'TWO_WHEELER' })

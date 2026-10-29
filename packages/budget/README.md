@@ -9,15 +9,15 @@ All money is integer micro-dollars (`bigint` in TypeScript, integers below 2^53 
 
 Every key for an org carries the hash tag `{o:<orgId>}`, so every script works on Valkey Cluster.
 
-| Key                                   | Type          | Meaning                                        |
-| ------------------------------------- | ------------- | ---------------------------------------------- |
-| `bk:{o:ORG}:spent:<scope>:<window>`   | string int    | Committed micros                               |
-| `bk:{o:ORG}:held:<scope>:<window>`    | string int    | Reserved, not yet settled                      |
-| `bk:{o:ORG}:cap:<scope>:<d\|m>`       | hash          | `hard`, `soft`, `version`                      |
-| `bk:{o:ORG}:alerted:<scope>:<window>` | hash          | Marks already fired: `50`, `80`, `100`, `soft` |
-| `bk:{o:ORG}:res:<reqId>`              | hash, TTL 1 h | `amount`, `n`, and `h<i>`/`s<i>` key pairs     |
-| `bk:{o:ORG}:resexp`                   | zset          | reqId by expiry (ms), for the sweeper          |
-| `bk:{o:ORG}:kill`                     | set           | `org`, `key:<id>`, `prov:<name>`, `sess:<id>`  |
+| Key                                   | Type         | Meaning                                        |
+| ------------------------------------- | ------------ | ---------------------------------------------- |
+| `bk:{o:ORG}:spent:<scope>:<window>`   | string int   | Committed micros                               |
+| `bk:{o:ORG}:held:<scope>:<window>`    | string int   | Reserved, not yet settled                      |
+| `bk:{o:ORG}:cap:<scope>:<d\|m>`       | hash         | `hard`, `soft`, `version`                      |
+| `bk:{o:ORG}:alerted:<scope>:<window>` | hash         | Marks already fired: `50`, `80`, `100`, `soft` |
+| `bk:{o:ORG}:res:<reqId>`              | hash, no TTL | `amount`, `n`, and `h<i>`/`s<i>` key pairs     |
+| `bk:{o:ORG}:resexp`                   | zset         | reqId by expiry (ms), for the sweeper          |
+| `bk:{o:ORG}:kill`                     | set          | `org`, `key:<id>`, `prov:<name>`, `sess:<id>`  |
 
 `<scope>` is `org`, `key:<id>`, `sku:<provider>:<sku>`, `env:<name>`, `sess:<id>` or `agent:<id>`.
 `<window>` is `d:YYYYMMDD` or `m:YYYYMM` in the org's time zone. Window keys expire after 40 days
@@ -26,10 +26,16 @@ Every key for an org carries the hash tag `{o:<orgId>}`, so every script works o
 Differences from the design doc, agreed during Phase 1 review:
 
 - Caps are stored per window kind (`d` / `m`), so they do not need rewriting every day.
-- A reservation expires after 120 s, but its record lives 1 h so the sweeper can still settle it.
+- A reservation expires after 120 s, but its record has no TTL: only commit or the sweeper removes
+  it, so a reserved amount can never stay counted after its record is gone.
 - The record stores both the `held` and the `spent` key for each pair.
 - Sessions can be killed.
-- Alert dedupe uses one hash per scope and window instead of one key per mark.
+- Alert dedupe uses one hash per scope and window instead of one key per mark. A mark fires once
+  per window, even if a refund later drops spend below it.
+- The first denied request in a window fires the `100` mark (`firstDeny: true`), since a request
+  that no longer fits means the cap is reached for practical purposes.
+- A denial reports `used` (committed plus held), not just committed spend.
+- Reserving with a `reqId` that is still reserved throws instead of double-counting.
 
 ## Usage
 

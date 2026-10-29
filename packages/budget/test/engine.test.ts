@@ -68,7 +68,9 @@ describe('reserve', () => {
       scope: 'key:k1',
       window: 'd:20261029',
       cap: 3n * USD,
-      spent: 3n * USD,
+      used: 3n * USD,
+      // Filling the cap exactly already fired the 100% mark.
+      firstDeny: false,
     });
   });
 
@@ -146,6 +148,30 @@ describe('reserve', () => {
   });
 });
 
+describe('key expiry', () => {
+  it('gives window counters and alert marks a TTL tied to the window kind', async () => {
+    const org = newOrg();
+    await engine.setCap(org, keyScope, 'd', { hard: 2n, soft: null });
+    await engine.reserve(req(org, 2n));
+    const ttl = (key: string) => valkey.client.ttl(`bk:{o:${org}}:${key}`);
+    const day = 40 * 86400;
+    const month = 400 * 86400;
+    for (const key of [
+      'held:key:k1:d:20261029',
+      'spent:key:k1:d:20261029',
+      'alerted:key:k1:d:20261029',
+    ]) {
+      expect(await ttl(key), key).toBeGreaterThan(day - 60);
+      expect(await ttl(key), key).toBeLessThanOrEqual(day);
+    }
+    for (const key of ['held:org:m:202610', 'spent:org:m:202610']) {
+      expect(await ttl(key), key).toBeGreaterThan(month - 60);
+    }
+    // Caps and the kill set are configuration and never expire.
+    expect(await ttl('cap:key:k1:d')).toBe(-1);
+  });
+});
+
 describe('threshold crossings', () => {
   it('reports 50/80/100% and soft once per scope and window', async () => {
     const org = newOrg();
@@ -159,6 +185,19 @@ describe('threshold crossings', () => {
     expect(await marks(3n * USD)).toEqual(['key:k1/d:20261029/50', 'key:k1/d:20261029/soft']);
     expect(await marks(3n * USD)).toEqual(['key:k1/d:20261029/80']);
     expect(await marks(2n * USD)).toEqual(['key:k1/d:20261029/100']);
+  });
+
+  it('fires the 100% mark on the first deny in a window', async () => {
+    const org = newOrg();
+    await engine.setCap(org, keyScope, 'd', { hard: 10n * USD, soft: null });
+    expect((await engine.reserve(req(org, 3n * USD))).outcome).toBe('ok');
+    const first = await engine.reserve(req(org, 9n * USD));
+    expect(first).toMatchObject({ outcome: 'budget_exceeded', firstDeny: true });
+    const second = await engine.reserve(req(org, 9n * USD));
+    expect(second).toMatchObject({ outcome: 'budget_exceeded', firstDeny: false });
+    // Reaching exactly 100% later does not fire it again.
+    const exact = await engine.reserve(req(org, 7n * USD));
+    expect(exact.outcome === 'ok' && exact.crossings.map((c) => c.mark)).toEqual(['50', '80']);
   });
 
   it('does not repeat a mark after a refund drops spend below it', async () => {
@@ -281,12 +320,13 @@ describe('sweeper', () => {
     expect(await engine.commit(org, stale.reqId, 1n)).toEqual({ outcome: 'already_settled' });
   });
 
-  it('keeps the reservation record past its expiry so the sweeper can still settle it', async () => {
+  it('keeps the reservation record until it is settled', async () => {
     const org = newOrg();
     const r = req(org, 1n);
     await engine.reserve(r);
-    const ttl = await valkey.client.ttl(`bk:{o:${org}}:res:${r.reqId}`);
-    expect(ttl).toBeGreaterThan(120);
+    expect(await valkey.client.ttl(`bk:{o:${org}}:res:${r.reqId}`)).toBe(-1);
+    await engine.commit(org, r.reqId, 1n);
+    expect(await valkey.client.exists(`bk:{o:${org}}:res:${r.reqId}`)).toBe(0);
   });
 });
 

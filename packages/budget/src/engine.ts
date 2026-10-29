@@ -42,8 +42,11 @@ export type ReserveResult =
       scope: string;
       window: string;
       cap: bigint;
-      spent: bigint;
+      /** Committed plus held in that scope and window when the request was denied. */
+      used: bigint;
       resetsAt: Date;
+      /** First deny for this scope and window: the 100% mark fired with it. */
+      firstDeny: boolean;
     };
 
 export type CommitResult =
@@ -73,8 +76,6 @@ export interface ScopeStatus {
 export interface BudgetEngineOptions {
   /** How long a reservation may stay unsettled before the sweeper commits it. */
   reservationTtlMs?: number;
-  /** How long the reservation record lives; must outlast reservationTtlMs plus sweep lag. */
-  recordTtlSec?: number;
 }
 
 export interface SweepResult {
@@ -103,17 +104,12 @@ function optBig(v: string | null | undefined): bigint | null {
 
 export class BudgetEngine {
   private readonly reservationTtlMs: number;
-  private readonly recordTtlSec: number;
 
   constructor(
     private readonly client: ValkeyClient,
     opts: BudgetEngineOptions = {},
   ) {
     this.reservationTtlMs = opts.reservationTtlMs ?? 120_000;
-    this.recordTtlSec = opts.recordTtlSec ?? 3600;
-    if (this.recordTtlSec * 1000 <= this.reservationTtlMs) {
-      throw new Error('recordTtlSec must outlast reservationTtlMs');
-    }
   }
 
   async reserve(req: ReserveRequest): Promise<ReserveResult> {
@@ -139,7 +135,7 @@ export class BudgetEngine {
         pairArgs.push(label, w.id, w.ttlSec);
       }
     }
-    const args = [amount, reqId, expiresAt.getTime(), this.recordTtlSec, kill.length];
+    const args = [amount, reqId, expiresAt.getTime(), kill.length];
     const reply = (await runScript(this.client, scripts.reserve, keyList, [
       ...args,
       ...kill,
@@ -166,8 +162,9 @@ export class BudgetEngine {
           scope: reply[1] as string,
           window,
           cap: toBig(reply[3]),
-          spent: toBig(reply[4]),
+          used: toBig(reply[4]),
           resetsAt: windowResetsAt(window.startsWith('d:') ? 'd' : 'm', now, req.timeZone),
+          firstDeny: reply[5] === 1,
         };
       }
       case 'DUPLICATE':
