@@ -200,7 +200,7 @@ describe('alerts', () => {
       worstMicros: '5',
     });
     await usage(org, { reqId: 'r3', status: '403', keyId: 'k1' });
-    await usage(org, { reqId: 'r4', status: '403', keyId: 'k1' });
+    await usage(org, { reqId: 'r4', status: '200', keyError: '1', keyId: 'k1' });
     for (let i = 0; i < 3; i++) {
       await engine.emit(org, {
         type: 'blocked',

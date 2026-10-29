@@ -274,6 +274,29 @@ describe('upstream behaviour', () => {
     expect(await h.valkey.get(`bk:{o:${org}}:held:org:d:20261029`)).toBe('0');
   });
 
+  it('flags usage events when Google rejects the real key', async () => {
+    const org = newOrg();
+    const { token } = await newKey(h, org);
+    mock.respond = (_req, reply) =>
+      reply.code(400).send({
+        error: {
+          code: 400,
+          message: 'API key not valid. Please pass a valid API key.',
+          status: 'INVALID_ARGUMENT',
+          details: [{ reason: 'API_KEY_INVALID' }],
+        },
+      });
+    const res = await textSearch(token);
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: { details: [{ reason: 'API_KEY_INVALID' }] } });
+    mock.respond = (_req, reply) => reply.send({ results: [], status: 'REQUEST_DENIED' });
+    await h.proxy.inject(`/google-maps/maps/api/geocode/json?address=x&key=${token}`);
+    mock.respond = (_req, reply) => reply.code(400).send({ error: { message: 'bad query' } });
+    await textSearch(token);
+    const flagged = (await events(org)).filter((e) => e.keyError === '1');
+    expect(flagged.map((e) => e.status)).toEqual(['400', '200']);
+  });
+
   it('commits worst case on a timeout, since Google may have billed', async () => {
     const org = newOrg();
     const { token } = await newKey(h, org);

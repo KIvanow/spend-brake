@@ -117,6 +117,10 @@ export class GenericAdapter implements ProviderAdapter {
     return false;
   }
 
+  credentialRejected(res: UpstreamRes): boolean {
+    return res.status === 401 || res.status === 403;
+  }
+
   worstCase(c: PricedClassified): bigint {
     return c.items.reduce((sum, item) => {
       const route = this.routes.find((r) => r.sku === item.sku);

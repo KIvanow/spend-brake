@@ -205,6 +205,41 @@ describe('google-maps adapter', () => {
     expect(adapter.timeoutBilled).toBe(true);
   });
 
+  it('recognises Google rejecting the real key', () => {
+    const rejected = (status: number, body: unknown) =>
+      adapter.credentialRejected({ status, headers: {}, body });
+    expect(
+      rejected(200, {
+        status: 'REQUEST_DENIED',
+        error_message: 'The provided API key is invalid.',
+      }),
+    ).toBe(true);
+    expect(
+      rejected(400, {
+        error: {
+          code: 400,
+          message: 'API key not valid. Please pass a valid API key.',
+          status: 'INVALID_ARGUMENT',
+          details: [
+            { '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason: 'API_KEY_INVALID' },
+          ],
+        },
+      }),
+    ).toBe(true);
+    expect(
+      rejected(403, {
+        error: { status: 'PERMISSION_DENIED', details: [{ reason: 'API_KEY_SERVICE_BLOCKED' }] },
+      }),
+    ).toBe(true);
+    expect(rejected(403, undefined)).toBe(true);
+    expect(rejected(200, { status: 'OK' })).toBe(false);
+    expect(rejected(200, { status: 'ZERO_RESULTS' })).toBe(false);
+    expect(
+      rejected(400, { error: { message: 'Invalid textQuery', status: 'INVALID_ARGUMENT' } }),
+    ).toBe(false);
+    expect(rejected(500, undefined)).toBe(false);
+  });
+
   it('settles a matrix on more elements than requested, never fewer', () => {
     const c = adapter.classify(
       req(

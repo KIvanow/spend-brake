@@ -562,6 +562,7 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
       status: number,
       upstreamMs: number,
       error?: string,
+      keyError = false,
     ) => {
       metrics.cost.inc({ provider: adapter.id }, Number(actual));
       const event = compact({
@@ -584,6 +585,7 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
         // Marks were set at reserve; only announce them for spend that actually happened.
         crossings: billed && crossings.length ? JSON.stringify(crossings) : undefined,
         failOpen: failOpenDay ? '1' : undefined,
+        keyError: keyError ? '1' : undefined,
         error,
       });
       if (failOpenDay) {
@@ -719,7 +721,9 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
 
     const passHeaders = responseHeaders(res.headers);
 
-    if (priced.classified && adapter.needsBody(priced.classified)) {
+    // Error responses are small; buffering them lets the adapter see whether the provider rejected
+    // our key, which raises an alert.
+    if ((priced.classified && adapter.needsBody(priced.classified)) || res.statusCode >= 400) {
       let raw: Buffer;
       try {
         raw = await readLimited(res.body, maxBuffered);
@@ -736,7 +740,12 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
         body = undefined;
       }
       const { actual, billed } = await actualOf(body);
-      settle(actual, billed, res.statusCode, upstreamMs);
+      const keyError = adapter.credentialRejected({
+        status: res.statusCode,
+        headers: resHeaders,
+        ...(body !== undefined ? { body } : {}),
+      });
+      settle(actual, billed, res.statusCode, upstreamMs, undefined, keyError);
       reply.code(res.statusCode).headers(passHeaders);
       costHeaders(actual);
       return reply.send(raw);

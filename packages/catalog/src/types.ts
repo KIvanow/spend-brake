@@ -92,6 +92,11 @@ export interface ProviderAdapter {
   injectCredential(req: OutgoingReq, secret: string): void;
   /** Whether the provider bills a response with this status (some routes bill redirects). */
   billedOnStatus(status: number, c?: PricedClassified): boolean;
+  /**
+   * Whether the provider rejected the real credential (invalid, restricted, API not enabled).
+   * The proxy buffers error responses so this can read their body.
+   */
+  credentialRejected(res: UpstreamRes): boolean;
   /** Whether the provider may have billed a request that timed out. */
   timeoutBilled: boolean;
 }

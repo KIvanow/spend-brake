@@ -91,7 +91,7 @@ export function alertsFor(orgId: string, streamId: string, e: Record<string, str
       data: { route: e.route, skus: e.skus, worstMicros: e.worstMicros, costMicros: e.costMicros },
     });
   }
-  if (e.type === 'usage' && (e.status === '401' || e.status === '403')) {
+  if (e.type === 'usage' && (e.keyError === '1' || e.status === '401' || e.status === '403')) {
     // The provider rejected our real key: first per provider per hour.
     out.push({
       type: 'upstream_key_error',

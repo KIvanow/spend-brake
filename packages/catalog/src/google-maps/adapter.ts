@@ -44,6 +44,17 @@ export const GOOGLE_MAPS_UPSTREAMS = [
 // which can only overcharge.
 const SESSION_TTL_SEC = 600;
 
+const KEY_REJECTION_REASONS = new Set([
+  'API_KEY_INVALID',
+  'API_KEY_SERVICE_BLOCKED',
+  'API_KEY_HTTP_REFERRER_BLOCKED',
+  'API_KEY_IP_ADDRESS_BLOCKED',
+  'API_KEY_ANDROID_APP_BLOCKED',
+  'API_KEY_IOS_APP_BLOCKED',
+  'SERVICE_DISABLED',
+  'BILLING_DISABLED',
+]);
+
 // Never part of the loop-detection hash: credentials and per-session tokens.
 const VOLATILE = ['key', 'signature', 'sessiontoken', 'sessionToken'];
 
@@ -300,6 +311,24 @@ export class GoogleMapsAdapter implements ProviderAdapter {
     delete req.headers['x-goog-api-key'];
     if (req.origin === MAPS) req.query.set('key', secret);
     else req.headers['x-goog-api-key'] = secret;
+  }
+
+  /**
+   * Google's own signs that our key was refused: the legacy APIs answer 200 with
+   * `REQUEST_DENIED`; the new APIs answer 400/403 with an ErrorInfo reason about the key or the
+   * service, or 401/403 outright.
+   */
+  credentialRejected(res: UpstreamRes): boolean {
+    const body = res.body as
+      | { status?: unknown; error?: { message?: unknown; details?: { reason?: unknown }[] } }
+      | undefined;
+    if (body?.status === 'REQUEST_DENIED') return true;
+    const reasons = (body?.error?.details ?? []).map((d) => d?.reason);
+    if (reasons.some((r) => typeof r === 'string' && KEY_REJECTION_REASONS.has(r))) return true;
+    if (res.status === 400 && typeof body?.error?.message === 'string') {
+      return /api key/i.test(body.error.message);
+    }
+    return res.status === 401 || res.status === 403;
   }
 
   billedOnStatus(status: number, c?: PricedClassified): boolean {
