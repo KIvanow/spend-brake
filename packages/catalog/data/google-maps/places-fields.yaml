@@ -1,0 +1,236 @@
+# Places API (New) field -> SKU tier, per endpoint. Transcribed from the source table, one row per
+# field. A request is billed at the highest tier of any field in its field mask.
+source: https://developers.google.com/maps/documentation/places/web-service/data-fields
+sourceUpdated: 2026-10-28
+verifiedAt: 2026-10-29
+fields:
+  accessibilityOptions: { details: pro, textSearch: pro, nearbySearch: pro } # Accessibility options
+  addressComponents: { details: essentials, textSearch: pro, nearbySearch: pro } # Address components
+  addressDescriptor: { details: essentials, textSearch: pro, nearbySearch: pro } # Address descriptor
+  adrFormatAddress: { details: essentials, textSearch: pro, nearbySearch: pro } # Address (ADR microformat)
+  allowsDogs: {
+      details: enterprise_atmosphere,
+      textSearch: enterprise_atmosphere,
+      nearbySearch: enterprise_atmosphere,
+    } # Allows dogs
+  attributions: { details: ids_only, textSearch: ids_only, nearbySearch: pro } # Attributions
+  businessStatus: { details: pro, textSearch: pro, nearbySearch: pro } # Business status
+  consumerAlert: { details: ids_only, textSearch: ids_only, nearbySearch: pro } # Consumer alert
+  containingPlaces: { details: pro, textSearch: pro, nearbySearch: pro } # Containing places
+  curbsidePickup: {
+      details: enterprise_atmosphere,
+      textSearch: enterprise_atmosphere,
+      nearbySearch: enterprise_atmosphere,
+    } # Curbside pickup
+  currentOpeningHours: { details: enterprise, textSearch: enterprise, nearbySearch: enterprise } # Current opening hours
+  currentSecondaryOpeningHours: {
+      details: enterprise,
+      textSearch: enterprise,
+      nearbySearch: enterprise,
+    } # Current secondary opening hours
+  delivery: {
+      details: enterprise_atmosphere,
+      textSearch: enterprise_atmosphere,
+      nearbySearch: enterprise_atmosphere,
+    } # Delivery
+  dineIn: {
+      details: enterprise_atmosphere,
+      textSearch: enterprise_atmosphere,
+      nearbySearch: enterprise_atmosphere,
+    } # Dine in
+  displayName: { details: pro, textSearch: pro, nearbySearch: pro } # Display name
+  editorialSummary: {
+      details: enterprise_atmosphere,
+      textSearch: enterprise_atmosphere,
+      nearbySearch: enterprise_atmosphere,
+    } # Editorial summary
+  entrances: { details: pro, textSearch: pro, nearbySearch: pro } # Entrances
+  evChargeAmenitySummary: {
+      details: enterprise_atmosphere,
+      textSearch: enterprise_atmosphere,
+      nearbySearch: enterprise_atmosphere,
+    } # AI-powered EVCS amenity summary
+  evChargeOptions: {
+      details: enterprise_atmosphere,
+      textSearch: enterprise_atmosphere,
+      nearbySearch: enterprise_atmosphere,
+    } # EV charging options
+  formattedAddress: { details: essentials, textSearch: pro, nearbySearch: pro } # Formatted address
+  fuelOptions: {
+      details: enterprise_atmosphere,
+      textSearch: enterprise_atmosphere,
+      nearbySearch: enterprise_atmosphere,
+    } # Fuel options
+  generativeSummary: {
+      details: enterprise_atmosphere,
+      textSearch: enterprise_atmosphere,
+      nearbySearch: enterprise_atmosphere,
+    } # AI-powered place summary
+  goodForChildren: {
+      details: enterprise_atmosphere,
+      textSearch: enterprise_atmosphere,
+      nearbySearch: enterprise_atmosphere,
+    } # Good for children
+  goodForGroups: {
+      details: enterprise_atmosphere,
+      textSearch: enterprise_atmosphere,
+      nearbySearch: enterprise_atmosphere,
+    } # Good for groups
+  goodForWatchingSports: {
+      details: enterprise_atmosphere,
+      textSearch: enterprise_atmosphere,
+      nearbySearch: enterprise_atmosphere,
+    } # Good for watching sports
+  googleMapsLinks: { details: pro, textSearch: pro, nearbySearch: pro } # Google Maps links
+  googleMapsTypeLabel: { details: pro, textSearch: pro, nearbySearch: pro } # Google Maps type label
+  googleMapsUri: { details: pro, textSearch: pro, nearbySearch: pro } # Google Maps URI
+  iconBackgroundColor: { details: pro, textSearch: pro, nearbySearch: pro } # Icon background color
+  iconMaskBaseUri: { details: pro, textSearch: pro, nearbySearch: pro } # Icon mask base URI
+  id: { details: ids_only, textSearch: ids_only, nearbySearch: pro } # Place ID
+  internationalPhoneNumber: {
+      details: enterprise,
+      textSearch: enterprise,
+      nearbySearch: enterprise,
+    } # International phone number
+  liveMusic: {
+      details: enterprise_atmosphere,
+      textSearch: enterprise_atmosphere,
+      nearbySearch: enterprise_atmosphere,
+    } # Live music
+  location: { details: essentials, textSearch: pro, nearbySearch: pro } # Location
+  menuForChildren: {
+      details: enterprise_atmosphere,
+      textSearch: enterprise_atmosphere,
+      nearbySearch: enterprise_atmosphere,
+    } # Menu for children
+  movedPlace: { details: ids_only, textSearch: ids_only, nearbySearch: pro } # Moved place
+  movedPlaceId: { details: ids_only, textSearch: ids_only, nearbySearch: pro } # Moved place ID
+  name: { details: ids_only, textSearch: ids_only, nearbySearch: pro } # Name
+  nationalPhoneNumber: { details: enterprise, textSearch: enterprise, nearbySearch: enterprise } # National phone number
+  navigationPoints: { details: pro, textSearch: pro, nearbySearch: pro } # Navigation points
+  neighborhoodSummary: {
+      details: enterprise_atmosphere,
+      textSearch: enterprise_atmosphere,
+      nearbySearch: enterprise_atmosphere,
+    } # AI-powered neighborhood summary
+  nextPageToken: { details: null, textSearch: ids_only, nearbySearch: null } # Next page token
+  openingDate: { details: pro, textSearch: pro, nearbySearch: pro } # Opening date
+  outdoorSeating: {
+      details: enterprise_atmosphere,
+      textSearch: enterprise_atmosphere,
+      nearbySearch: enterprise_atmosphere,
+    } # Outdoor seating
+  parkingOptions: {
+      details: enterprise_atmosphere,
+      textSearch: enterprise_atmosphere,
+      nearbySearch: enterprise_atmosphere,
+    } # Parking options
+  paymentOptions: {
+      details: enterprise_atmosphere,
+      textSearch: enterprise_atmosphere,
+      nearbySearch: enterprise_atmosphere,
+    } # Payment options
+  photos: { details: ids_only, textSearch: pro, nearbySearch: pro } # Photos
+  plusCode: { details: essentials, textSearch: pro, nearbySearch: pro } # Plus code
+  postalAddress: { details: essentials, textSearch: pro, nearbySearch: pro } # Postal address
+  priceLevel: { details: enterprise, textSearch: enterprise, nearbySearch: enterprise } # Price level
+  priceRange: { details: enterprise, textSearch: enterprise, nearbySearch: enterprise } # Price range
+  primaryType: { details: pro, textSearch: pro, nearbySearch: pro } # Primary type
+  primaryTypeDisplayName: { details: pro, textSearch: pro, nearbySearch: pro } # Primary type display name
+  pureServiceAreaBusiness: { details: pro, textSearch: pro, nearbySearch: pro } # Pure service area business
+  rating: { details: enterprise, textSearch: enterprise, nearbySearch: enterprise } # Rating
+  regularOpeningHours: { details: enterprise, textSearch: enterprise, nearbySearch: enterprise } # Regular opening hours
+  regularSecondaryOpeningHours: {
+      details: enterprise,
+      textSearch: enterprise,
+      nearbySearch: enterprise,
+    } # Regular secondary opening hours
+  reservable: {
+      details: enterprise_atmosphere,
+      textSearch: enterprise_atmosphere,
+      nearbySearch: enterprise_atmosphere,
+    } # Reservable
+  restroom: {
+      details: enterprise_atmosphere,
+      textSearch: enterprise_atmosphere,
+      nearbySearch: enterprise_atmosphere,
+    } # Restroom
+  reviewSummary: {
+      details: enterprise_atmosphere,
+      textSearch: enterprise_atmosphere,
+      nearbySearch: enterprise_atmosphere,
+    } # AI-powered review summary
+  reviews: {
+      details: enterprise_atmosphere,
+      textSearch: enterprise_atmosphere,
+      nearbySearch: enterprise_atmosphere,
+    } # Reviews
+  routingSummaries: {
+      details: enterprise_atmosphere,
+      textSearch: enterprise_atmosphere,
+      nearbySearch: enterprise_atmosphere,
+    } # Routing summaries
+  servesBeer: {
+      details: enterprise_atmosphere,
+      textSearch: enterprise_atmosphere,
+      nearbySearch: enterprise_atmosphere,
+    } # Serves beer
+  servesBreakfast: {
+      details: enterprise_atmosphere,
+      textSearch: enterprise_atmosphere,
+      nearbySearch: enterprise_atmosphere,
+    } # Serves breakfast
+  servesBrunch: {
+      details: enterprise_atmosphere,
+      textSearch: enterprise_atmosphere,
+      nearbySearch: enterprise_atmosphere,
+    } # Serves brunch
+  servesCocktails: {
+      details: enterprise_atmosphere,
+      textSearch: enterprise_atmosphere,
+      nearbySearch: enterprise_atmosphere,
+    } # Serves cocktails
+  servesCoffee: {
+      details: enterprise_atmosphere,
+      textSearch: enterprise_atmosphere,
+      nearbySearch: enterprise_atmosphere,
+    } # Serves coffee
+  servesDessert: {
+      details: enterprise_atmosphere,
+      textSearch: enterprise_atmosphere,
+      nearbySearch: enterprise_atmosphere,
+    } # Serves dessert
+  servesDinner: {
+      details: enterprise_atmosphere,
+      textSearch: enterprise_atmosphere,
+      nearbySearch: enterprise_atmosphere,
+    } # Serves dinner
+  servesLunch: {
+      details: enterprise_atmosphere,
+      textSearch: enterprise_atmosphere,
+      nearbySearch: enterprise_atmosphere,
+    } # Serves lunch
+  servesVegetarianFood: {
+      details: enterprise_atmosphere,
+      textSearch: enterprise_atmosphere,
+      nearbySearch: enterprise_atmosphere,
+    } # Serves vegetarian food
+  servesWine: {
+      details: enterprise_atmosphere,
+      textSearch: enterprise_atmosphere,
+      nearbySearch: enterprise_atmosphere,
+    } # Serves wine
+  shortFormattedAddress: { details: essentials, textSearch: pro, nearbySearch: pro } # Short formatted address
+  subDestinations: { details: pro, textSearch: pro, nearbySearch: pro } # Sub-destinations
+  takeout: {
+      details: enterprise_atmosphere,
+      textSearch: enterprise_atmosphere,
+      nearbySearch: enterprise_atmosphere,
+    } # Takeout
+  timeZone: { details: pro, textSearch: pro, nearbySearch: pro } # Time zone
+  transitStation: { details: enterprise, textSearch: enterprise, nearbySearch: enterprise } # Transit station
+  types: { details: essentials, textSearch: pro, nearbySearch: pro } # Types
+  userRatingCount: { details: enterprise, textSearch: enterprise, nearbySearch: enterprise } # User rating count
+  utcOffsetMinutes: { details: pro, textSearch: pro, nearbySearch: pro } # UTC offset (minutes)
+  viewport: { details: essentials, textSearch: pro, nearbySearch: pro } # Viewport
+  websiteUri: { details: enterprise, textSearch: enterprise, nearbySearch: enterprise } # Website URI

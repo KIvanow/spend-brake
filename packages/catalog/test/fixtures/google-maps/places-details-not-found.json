@@ -1,0 +1,13 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "https://places.googleapis.com/v1/places/does-not-exist",
+    "headers": { "X-Goog-FieldMask": "id,displayName" }
+  },
+  "response": {
+    "status": 404,
+    "body": {
+      "error": { "code": 404, "message": "Requested entity was not found.", "status": "NOT_FOUND" }
+    }
+  }
+}

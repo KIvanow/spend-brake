@@ -1,0 +1,24 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix",
+    "headers": { "X-Goog-FieldMask": "originIndex,destinationIndex,duration" },
+    "body": {
+      "origins": [{ "waypoint": { "address": "Sofia" } }, { "waypoint": { "address": "Varna" } }],
+      "destinations": [
+        { "waypoint": { "address": "Plovdiv" } },
+        { "waypoint": { "address": "Burgas" } },
+        { "waypoint": { "address": "Ruse" } }
+      ]
+    }
+  },
+  "response": {
+    "status": 200,
+    "body": [
+      { "originIndex": 0, "destinationIndex": 0, "duration": "5400s" },
+      { "originIndex": 0, "destinationIndex": 1, "duration": "14000s" },
+      { "originIndex": 1, "destinationIndex": 2, "duration": "9000s" },
+      { "originIndex": 1, "destinationIndex": 0, "duration": "15000s" }
+    ]
+  }
+}

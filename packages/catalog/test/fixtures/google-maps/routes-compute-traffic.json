@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "https://routes.googleapis.com/directions/v2:computeRoutes",
+    "headers": { "X-Goog-FieldMask": "routes.duration,routes.distanceMeters" },
+    "body": {
+      "origin": { "address": "Sofia" },
+      "destination": { "address": "Plovdiv" },
+      "travelMode": "DRIVE",
+      "routingPreference": "TRAFFIC_AWARE"
+    }
+  },
+  "response": {
+    "status": 200,
+    "body": { "routes": [{ "distanceMeters": 145000, "duration": "5400s" }] }
+  }
+}

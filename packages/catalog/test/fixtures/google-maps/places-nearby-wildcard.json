@@ -1,0 +1,13 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "https://places.googleapis.com/v1/places:searchNearby",
+    "headers": { "X-Goog-FieldMask": "*" },
+    "body": {
+      "locationRestriction": {
+        "circle": { "center": { "latitude": 42.69, "longitude": 23.32 }, "radius": 500 }
+      }
+    }
+  },
+  "response": { "status": 200, "body": { "places": [] } }
+}

@@ -1,0 +1,10 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "https://maps.googleapis.com/maps/api/geocode/json?address=Sofia&key=CLIENT_KEY"
+  },
+  "response": {
+    "status": 200,
+    "body": { "results": [{ "place_id": "ChIJ9Xsxy4KGqkAR7SQ-yCpw8Y4" }], "status": "OK" }
+  }
+}

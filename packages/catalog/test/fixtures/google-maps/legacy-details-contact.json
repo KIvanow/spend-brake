@@ -1,0 +1,7 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "https://maps.googleapis.com/maps/api/place/details/json?place_id=ChIJ1&fields=name,formatted_phone_number"
+  },
+  "response": { "status": 200, "body": { "result": { "name": "Pizza" }, "status": "OK" } }
+}

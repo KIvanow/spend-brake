@@ -1,0 +1,8 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "https://places.googleapis.com/v1/places:autocomplete",
+    "body": { "input": "piz", "sessionToken": "6b8f3c2a-0000-4000-8000-000000000000" }
+  },
+  "response": { "status": 200, "body": { "suggestions": [] } }
+}

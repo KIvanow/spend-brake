@@ -1,0 +1,16 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "https://maps.googleapis.com/maps/api/distancematrix/json?origins=Sofia|Varna&destinations=Plovdiv|Burgas"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "rows": [
+        { "elements": [{ "status": "OK" }, { "status": "OK" }] },
+        { "elements": [{ "status": "OK" }, { "status": "ZERO_RESULTS" }] }
+      ],
+      "status": "OK"
+    }
+  }
+}

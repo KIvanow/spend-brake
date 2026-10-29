@@ -1,0 +1,8 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "https://routes.googleapis.com/directions/v2:computeRoutes",
+    "body": { "origin": { "address": "Sofia" }, "destination": { "address": "Plovdiv" } }
+  },
+  "response": { "status": 500, "body": { "error": { "code": 500, "status": "INTERNAL" } } }
+}

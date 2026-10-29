@@ -1,0 +1,14 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "https://maps.googleapis.com/maps/api/geocode/json?address=Sofia"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "results": [],
+      "status": "REQUEST_DENIED",
+      "error_message": "The provided API key is invalid."
+    }
+  }
+}

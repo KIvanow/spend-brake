@@ -1,0 +1,209 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`google-maps fixtures > geocode-ok 1`] = `
+{
+  "actual": 5000n,
+  "items": [
+    {
+      "sku": "geocoding",
+      "units": 1n,
+    },
+  ],
+  "route": "geocoding",
+  "worstCase": 5000n,
+}
+`;
+
+exports[`google-maps fixtures > geocode-request-denied 1`] = `
+{
+  "actual": 0n,
+  "items": [
+    {
+      "sku": "geocoding",
+      "units": 1n,
+    },
+  ],
+  "route": "geocoding",
+  "worstCase": 5000n,
+}
+`;
+
+exports[`google-maps fixtures > geocode-reverse-zero-results 1`] = `
+{
+  "actual": 5000n,
+  "items": [
+    {
+      "sku": "geocoding",
+      "units": 1n,
+    },
+  ],
+  "route": "geocoding",
+  "worstCase": 5000n,
+}
+`;
+
+exports[`google-maps fixtures > legacy-details-contact 1`] = `
+{
+  "actual": 20000n,
+  "items": [
+    {
+      "sku": "legacy.places.details",
+      "units": 1n,
+    },
+    {
+      "sku": "legacy.places.contact_data",
+      "units": 1n,
+    },
+  ],
+  "route": "legacy.places.details",
+  "worstCase": 20000n,
+}
+`;
+
+exports[`google-maps fixtures > legacy-distancematrix 1`] = `
+{
+  "actual": 20000n,
+  "items": [
+    {
+      "sku": "legacy.distance_matrix",
+      "units": 4n,
+    },
+  ],
+  "route": "legacy.distance_matrix",
+  "worstCase": 20000n,
+}
+`;
+
+exports[`google-maps fixtures > legacy-textsearch 1`] = `
+{
+  "actual": 40000n,
+  "items": [
+    {
+      "sku": "legacy.places.text_search",
+      "units": 1n,
+    },
+    {
+      "sku": "legacy.places.contact_data",
+      "units": 1n,
+    },
+    {
+      "sku": "legacy.places.atmosphere_data",
+      "units": 1n,
+    },
+  ],
+  "route": "legacy.places.textsearch",
+  "worstCase": 40000n,
+}
+`;
+
+exports[`google-maps fixtures > places-autocomplete 1`] = `
+{
+  "actual": 2830n,
+  "items": [
+    {
+      "sku": "places.autocomplete",
+      "units": 1n,
+    },
+  ],
+  "route": "places.autocomplete",
+  "worstCase": 2830n,
+}
+`;
+
+exports[`google-maps fixtures > places-details-atmosphere 1`] = `
+{
+  "actual": 25000n,
+  "items": [
+    {
+      "sku": "places.details.enterprise_atmosphere",
+      "units": 1n,
+    },
+  ],
+  "route": "places.details",
+  "worstCase": 25000n,
+}
+`;
+
+exports[`google-maps fixtures > places-details-not-found 1`] = `
+{
+  "actual": 0n,
+  "items": [
+    {
+      "sku": "places.details.pro",
+      "units": 1n,
+    },
+  ],
+  "route": "places.details",
+  "worstCase": 17000n,
+}
+`;
+
+exports[`google-maps fixtures > places-nearby-wildcard 1`] = `
+{
+  "actual": 40000n,
+  "items": [
+    {
+      "sku": "places.nearby_search.enterprise_atmosphere",
+      "units": 1n,
+    },
+  ],
+  "route": "places.nearby_search",
+  "worstCase": 40000n,
+}
+`;
+
+exports[`google-maps fixtures > places-text-search-pro 1`] = `
+{
+  "actual": 32000n,
+  "items": [
+    {
+      "sku": "places.text_search.pro",
+      "units": 1n,
+    },
+  ],
+  "route": "places.text_search",
+  "worstCase": 32000n,
+}
+`;
+
+exports[`google-maps fixtures > routes-compute-traffic 1`] = `
+{
+  "actual": 10000n,
+  "items": [
+    {
+      "sku": "routes.compute_routes.pro",
+      "units": 1n,
+    },
+  ],
+  "route": "routes.compute_routes",
+  "worstCase": 10000n,
+}
+`;
+
+exports[`google-maps fixtures > routes-matrix-partial 1`] = `
+{
+  "actual": 20000n,
+  "items": [
+    {
+      "sku": "routes.compute_route_matrix.essentials",
+      "units": 6n,
+    },
+  ],
+  "route": "routes.compute_route_matrix",
+  "worstCase": 30000n,
+}
+`;
+
+exports[`google-maps fixtures > routes-upstream-500 1`] = `
+{
+  "actual": 0n,
+  "items": [
+    {
+      "sku": "routes.compute_routes.essentials",
+      "units": 1n,
+    },
+  ],
+  "route": "routes.compute_routes",
+  "worstCase": 5000n,
+}
+`;

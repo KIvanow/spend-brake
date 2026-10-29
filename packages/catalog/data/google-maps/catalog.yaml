@@ -1,0 +1,237 @@
+# Google Maps Platform server-side prices, transcribed from the global price list.
+# Prices are USD per 1,000 billable events (as on the source page). Tier bands are monthly event
+# counts per billing account; `upTo: null` is the open-ended top band. `freeMonthly` is the free
+# usage cap; `free: true` marks SKUs Google lists as unlimited / no charge.
+provider: google-maps
+version: 2026-10-28
+source: https://developers.google.com/maps/billing-and-pricing/pricing
+skuSource: https://developers.google.com/maps/billing-and-pricing/sku-details
+sourceUpdated: 2026-10-28
+verifiedAt: 2026-10-29
+currency: USD
+billingTimeZone: America/Los_Angeles
+
+bands:
+  core: [100000, 500000, 1000000, 5000000, null]
+  legacy: [100000, null]
+
+skus:
+  # --- Places API (New) ---
+  places.autocomplete:
+    googleSku: 4EF4-B17C-B31A
+    name: Autocomplete Requests
+    band: core
+    freeMonthly: 10000
+    per1000: ['2.83', '2.27', '1.70', '0.85', '0.21']
+  places.details.ids_only:
+    googleSku: 5C36-E272-E88F
+    name: Places API Place Details Essentials (IDs Only)
+    free: true
+  places.details.essentials:
+    googleSku: 6E05-E1C3-8D85
+    name: Places API Place Details Essentials
+    band: core
+    freeMonthly: 10000
+    per1000: ['5.00', '4.00', '3.00', '1.50', '0.38']
+  places.details.pro:
+    googleSku: 4ED6-464A-2AFC
+    name: Places API Place Details Pro
+    band: core
+    freeMonthly: 5000
+    per1000: ['17.00', '13.60', '10.20', '5.10', '1.28']
+  places.details.enterprise:
+    googleSku: 2D9A-3DE0-3766
+    name: Places API Place Details Enterprise
+    band: core
+    freeMonthly: 1000
+    per1000: ['20.00', '16.00', '12.00', '6.00', '1.51']
+  places.details.enterprise_atmosphere:
+    googleSku: EB23-5ECC-F753
+    name: Places API Place Details Enterprise + Atmosphere
+    band: core
+    freeMonthly: 1000
+    per1000: ['25.00', '20.00', '15.00', '7.50', '2.28']
+  places.photo:
+    googleSku: DCD1-FE97-8C71
+    name: Places API Place Details Photos
+    band: core
+    freeMonthly: 1000
+    per1000: ['7.00', '5.60', '4.20', '2.10', '0.53']
+  places.text_search.ids_only:
+    googleSku: 635D-A9DD-C520
+    name: Places API Text Search Essentials (IDs Only)
+    free: true
+  places.text_search.pro:
+    googleSku: 4FDA-34B1-A910
+    name: Places API Text Search Pro
+    band: core
+    freeMonthly: 5000
+    per1000: ['32.00', '25.60', '19.20', '9.60', '2.40']
+  places.text_search.enterprise:
+    googleSku: E967-44BC-B44D
+    name: Places API Text Search Enterprise
+    band: core
+    freeMonthly: 1000
+    per1000: ['35.00', '28.00', '21.00', '10.50', '2.63']
+  places.text_search.enterprise_atmosphere:
+    googleSku: 120C-BEC3-B48F
+    name: Places API Text Search Enterprise + Atmosphere
+    band: core
+    freeMonthly: 1000
+    per1000: ['40.00', '32.00', '24.00', '12.00', '3.40']
+  places.nearby_search.pro:
+    googleSku: 99F9-A108-83A6
+    name: Places API Nearby Search Pro
+    band: core
+    freeMonthly: 5000
+    per1000: ['32.00', '25.60', '19.20', '9.60', '2.40']
+  places.nearby_search.enterprise:
+    googleSku: 772E-9975-BE34
+    name: Places API Nearby Search Enterprise
+    band: core
+    freeMonthly: 1000
+    per1000: ['35.00', '28.00', '21.00', '10.50', '2.63']
+  places.nearby_search.enterprise_atmosphere:
+    googleSku: F20E-7034-0EF7
+    name: Places API Nearby Search Enterprise + Atmosphere
+    band: core
+    freeMonthly: 1000
+    per1000: ['40.00', '32.00', '24.00', '12.00', '3.40']
+  # --- Geocoding API (forward and reverse share one SKU) ---
+  geocoding:
+    googleSku: BAC8-4E68-E261
+    name: Geocoding
+    band: core
+    freeMonthly: 10000
+    per1000: ['5.00', '4.00', '3.00', '1.50', '0.38']
+  # --- Routes API (Compute Route Matrix is billed per element) ---
+  routes.compute_routes.essentials:
+    googleSku: 9EFF-679A-9B16
+    name: 'Routes: Compute Routes Essentials'
+    band: core
+    freeMonthly: 10000
+    per1000: ['5.00', '4.00', '3.00', '1.50', '0.38']
+  routes.compute_routes.pro:
+    googleSku: 02F7-1B55-DC90
+    name: 'Routes: Compute Routes Pro'
+    band: core
+    freeMonthly: 5000
+    per1000: ['10.00', '8.00', '6.00', '3.00', '0.75']
+  routes.compute_routes.enterprise:
+    googleSku: 6EBD-08E5-319A
+    name: 'Routes: Compute Routes Enterprise'
+    band: core
+    freeMonthly: 1000
+    per1000: ['15.00', '12.00', '9.00', '4.50', '1.14']
+  routes.compute_route_matrix.essentials:
+    googleSku: 9392-1087-2045
+    name: 'Routes: Compute Route Matrix Essentials'
+    band: core
+    freeMonthly: 10000
+    per1000: ['5.00', '4.00', '3.00', '1.50', '0.38']
+  routes.compute_route_matrix.pro:
+    googleSku: 2E25-887A-DAD4
+    name: 'Routes: Compute Route Matrix Pro'
+    band: core
+    freeMonthly: 5000
+    per1000: ['10.00', '8.00', '6.00', '3.00', '0.75']
+  routes.compute_route_matrix.enterprise:
+    googleSku: CEB3-E352-A99B
+    name: 'Routes: Compute Route Matrix Enterprise'
+    band: core
+    freeMonthly: 1000
+    per1000: ['15.00', '12.00', '9.00', '4.50', '1.14']
+  # --- Places API (Legacy). Data SKUs are charged on top of the base SKU. ---
+  legacy.places.autocomplete:
+    googleSku: 7384-2DE4-D388
+    name: Autocomplete - Per Request
+    band: legacy
+    freeMonthly: 10000
+    per1000: ['2.83', '2.27']
+  legacy.places.autocomplete_session:
+    googleSku: B52C-8320-6DC5
+    name: Autocomplete without Places Details - Per Session
+    band: legacy
+    freeMonthly: 5000
+    per1000: ['17.00', '13.60']
+  legacy.places.query_autocomplete:
+    googleSku: C4B1-8805-63EF
+    name: Query Autocomplete - Per Request
+    band: legacy
+    freeMonthly: 10000
+    per1000: ['2.83', '2.27']
+  legacy.places.find_place_id_only:
+    googleSku: 44A2-D839-A3AC
+    name: Find Place - ID only
+    free: true
+  legacy.places.find_place:
+    googleSku: DC67-3188-2294
+    name: Find Place
+    band: legacy
+    freeMonthly: 5000
+    per1000: ['17.00', '13.60']
+  legacy.places.nearby_search:
+    googleSku: 6B23-8A17-D29D
+    name: Places - Nearby Search
+    band: legacy
+    freeMonthly: 5000
+    per1000: ['32.00', '25.60']
+  legacy.places.text_search:
+    googleSku: E95A-86C7-7F47
+    name: Places - Text Search
+    band: legacy
+    freeMonthly: 5000
+    per1000: ['32.00', '25.60']
+  legacy.places.details:
+    googleSku: FC5C-DF28-543F
+    name: Places Details
+    band: legacy
+    freeMonthly: 5000
+    per1000: ['17.00', '13.60']
+  legacy.places.basic_data:
+    googleSku: 75D4-C522-326B
+    name: Basic Data
+    free: true
+  legacy.places.contact_data:
+    googleSku: F095-CD01-81B2
+    name: Contact Data
+    band: legacy
+    freeMonthly: 1000
+    per1000: ['3.00', '2.40']
+  legacy.places.atmosphere_data:
+    googleSku: D63D-5CC5-302A
+    name: Atmosphere Data
+    band: legacy
+    freeMonthly: 1000
+    per1000: ['5.00', '4.00']
+  legacy.places.photo:
+    googleSku: 81E7-85D0-58A7
+    name: Places Photo
+    band: legacy
+    freeMonthly: 1000
+    per1000: ['7.00', '5.60']
+  # --- Directions / Distance Matrix (Legacy). Distance Matrix is billed per element. ---
+  legacy.directions:
+    googleSku: 28A8-3EB4-4595
+    name: Directions
+    band: legacy
+    freeMonthly: 10000
+    per1000: ['5.00', '4.00']
+  legacy.directions_advanced:
+    googleSku: 9407-00C2-CF85
+    name: Directions Advanced
+    band: legacy
+    freeMonthly: 5000
+    per1000: ['10.00', '8.00']
+  legacy.distance_matrix:
+    googleSku: C1B6-FF9D-7700
+    name: Distance Matrix
+    band: legacy
+    freeMonthly: 10000
+    per1000: ['5.00', '4.00']
+  legacy.distance_matrix_advanced:
+    googleSku: DFAE-763F-CF6E
+    name: Distance Matrix Advanced
+    band: legacy
+    freeMonthly: 5000
+    per1000: ['10.00', '8.00']

@@ -1,0 +1,7 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "https://maps.googleapis.com/maps/api/geocode/json?latlng=0,0"
+  },
+  "response": { "status": 200, "body": { "results": [], "status": "ZERO_RESULTS" } }
+}
