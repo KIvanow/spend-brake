@@ -1,4 +1,22 @@
+# Full stack: docker compose -f infra/docker-compose.yml up --build
+# Needs infra/.env (copy infra/.env.example). `pnpm dev` starts only valkey and postgres from here.
 name: spend-brake
+
+x-app: &app
+  restart: unless-stopped
+  env_file: .env
+  environment: &app-env
+    VALKEY_URL: redis://valkey:6379
+    DATABASE_URL: postgres://brake:${POSTGRES_PASSWORD:-brake}@postgres:5432/brake
+    LOG_LEVEL: info
+  depends_on: &app-deps
+    valkey: { condition: service_healthy }
+    postgres: { condition: service_healthy }
+
+x-health: &health
+  interval: 5s
+  timeout: 3s
+  retries: 30
 
 services:
   valkey:
@@ -6,21 +24,19 @@ services:
     # Caps live here: never evict (an evicted spent counter would reset a cap) and persist
     # across restarts. The API also rebuilds config records from Postgres on start.
     command: ['valkey-server', '--appendonly', 'yes', '--maxmemory-policy', 'noeviction']
-    volumes:
-      - valkeydata:/data
     ports:
       - '${BRAKE_VALKEY_PORT:-16379}:6379'
+    volumes:
+      - valkeydata:/data
     healthcheck:
       test: ['CMD', 'valkey-cli', 'ping']
-      interval: 2s
-      timeout: 2s
-      retries: 30
+      <<: *health
 
   postgres:
     image: postgres:16
     environment:
       POSTGRES_USER: brake
-      POSTGRES_PASSWORD: brake
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-brake}
       POSTGRES_DB: brake
     ports:
       - '${BRAKE_POSTGRES_PORT:-15432}:5432'
@@ -28,9 +44,71 @@ services:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U brake -d brake']
-      interval: 2s
-      timeout: 2s
-      retries: 30
+      <<: *health
+
+  api:
+    <<: *app
+    build: { context: .., dockerfile: infra/Dockerfile, args: { APP: api } }
+    environment:
+      <<: *app-env
+      PORT: '8081'
+    ports: ['8081:8081']
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://localhost:8081/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))",
+        ]
+      <<: *health
+
+  proxy:
+    <<: *app
+    build: { context: .., dockerfile: infra/Dockerfile, args: { APP: proxy } }
+    environment:
+      <<: *app-env
+      PORT: '8080'
+    ports: ['8080:8080']
+    depends_on:
+      <<: *app-deps
+      api: { condition: service_healthy }
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://localhost:8080/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))",
+        ]
+      <<: *health
+
+  worker:
+    <<: *app
+    build: { context: .., dockerfile: infra/Dockerfile, args: { APP: worker } }
+    # The API runs migrations first.
+    depends_on:
+      <<: *app-deps
+      api: { condition: service_healthy }
+
+  notifier:
+    <<: *app
+    build: { context: .., dockerfile: infra/Dockerfile, args: { APP: notifier } }
+    environment:
+      <<: *app-env
+      PORT: '8082'
+      BRAKE_API_URL: http://api:8081
+    ports: ['8082:8082']
+    depends_on:
+      <<: *app-deps
+      api: { condition: service_healthy }
+
+  web:
+    build: { context: .., dockerfile: infra/web.Dockerfile }
+    restart: unless-stopped
+    ports: ['3000:80']
+    depends_on:
+      api: { condition: service_healthy }
 
 volumes:
   pgdata:

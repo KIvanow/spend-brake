@@ -1,4 +1,6 @@
 import type { SpawnOptions } from 'node:child_process';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
 /** Everything the CLI touches outside itself, so tests can run it in-process. */
 export interface Io {
@@ -7,6 +9,8 @@ export interface Io {
   stderr: (s: string) => void;
   fetch: typeof fetch;
   spawn: (cmd: string, args: string[], opts: SpawnOptions) => Child;
+  /** Ask the user (init wizard); absent when not interactive. */
+  prompt?: (question: string, opts?: { secret?: boolean; default?: string }) => Promise<string>;
 }
 
 export interface Child {
@@ -37,15 +41,55 @@ export class CliError extends Error {
   }
 }
 
+export interface SavedConfig {
+  apiUrl?: string;
+  proxyUrl?: string;
+  adminToken?: string;
+  orgId?: string;
+}
+
+/** `$XDG_CONFIG_HOME/brake/config.json` (or `~/.config/...`), written by `brake init`, mode 0600. */
+export function configPath(io: Io): string | null {
+  const base = io.env.XDG_CONFIG_HOME ?? (io.env.HOME ? join(io.env.HOME, '.config') : null);
+  return base ? join(base, 'brake', 'config.json') : null;
+}
+
+export function readSavedConfig(io: Io): SavedConfig {
+  const path = configPath(io);
+  if (!path || !existsSync(path)) return {};
+  try {
+    return JSON.parse(readFileSync(path, 'utf8')) as SavedConfig;
+  } catch {
+    return {};
+  }
+}
+
+export function saveConfig(io: Io, cfg: SavedConfig): string {
+  const path = configPath(io);
+  if (!path) throw new CliError('Cannot find a config directory (set HOME or XDG_CONFIG_HOME).');
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  writeFileSync(path, `${JSON.stringify(cfg, null, 2)}\n`, { mode: 0o600 });
+  chmodSync(path, 0o600);
+  return path;
+}
+
+/** Environment first, then the saved config, then local defaults. */
 export function config(io: Io) {
-  const proxyUrl = (io.env.BRAKE_URL ?? 'http://localhost:8080').replace(/\/$/, '');
-  const apiUrl = (io.env.BRAKE_API_URL ?? 'http://localhost:8081').replace(/\/$/, '');
+  const saved = readSavedConfig(io);
+  const proxyUrl = (io.env.BRAKE_URL ?? saved.proxyUrl ?? 'http://localhost:8080').replace(
+    /\/$/,
+    '',
+  );
+  const apiUrl = (io.env.BRAKE_API_URL ?? saved.apiUrl ?? 'http://localhost:8081').replace(
+    /\/$/,
+    '',
+  );
   return {
     proxyUrl,
     apiUrl,
     key: io.env.BRAKE_KEY,
     session: io.env.BRAKE_SESSION,
-    adminToken: io.env.BRAKE_ADMIN_TOKEN,
+    adminToken: io.env.BRAKE_ADMIN_TOKEN ?? saved.adminToken,
   };
 }
 

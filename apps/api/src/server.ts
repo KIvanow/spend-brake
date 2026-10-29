@@ -12,7 +12,11 @@ import { budgetRoutes } from './routes/budget.js';
 import { credentialRoutes } from './routes/credentials.js';
 import { keyRoutes } from './routes/keys.js';
 import { ledgerRoutes } from './routes/ledger.js';
+import type { KeyCheck } from './google-check.js';
+import { estimateRoutes } from './routes/estimates.js';
+import { meRoutes } from './routes/me.js';
 import { sessionRoutes } from './routes/sessions.js';
+import { setupRoutes } from './routes/setup.js';
 import { webhookRoutes } from './routes/webhooks.js';
 
 export interface ApiDeps {
@@ -28,6 +32,10 @@ export interface ApiDeps {
   authCacheMs?: number;
   /** HMAC secret for alert action links (shared with the notifier). */
   actionSecret?: string;
+  /** First-run token for POST /v1/setup. */
+  setupToken?: string;
+  /** Check new Google keys' restrictions (calls Google); off unless given. */
+  checkGoogleKey?: (key: string) => Promise<KeyCheck>;
 }
 
 export function apiContext(deps: ApiDeps): Ctx {
@@ -38,6 +46,7 @@ export function apiContext(deps: ApiDeps): Ctx {
     registry: new Registry(deps.valkey),
     wrapper: deps.wrapper,
     now: deps.now ?? (() => new Date()),
+    ...(deps.checkGoogleKey ? { checkGoogleKey: deps.checkGoogleKey } : {}),
   };
 }
 
@@ -101,6 +110,9 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   webhookRoutes(router, ctx);
   actionRoutes(app, router, ctx, deps.actionSecret);
   sessionRoutes(app, router, ctx, authenticator);
+  setupRoutes(app, router, ctx, deps.setupToken);
+  meRoutes(app, router, ctx);
+  estimateRoutes(router, ctx);
 
   const spec = router.document();
   app.get('/v1/openapi.json', { config: { rateLimit: false } }, () => spec);

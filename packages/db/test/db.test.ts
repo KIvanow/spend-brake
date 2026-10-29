@@ -36,6 +36,21 @@ describe('migrations', () => {
     await migrate(db);
   });
 
+  it('are safe to run from several processes at once on a fresh database', async () => {
+    await db.execute(sql`create database fresh`);
+    const url = `postgres://brake:p@${container.getHost()}:${container.getMappedPort(5432)}/fresh`;
+    const many = Array.from({ length: 4 }, () => createDb(url, 2));
+    try {
+      await Promise.all(many.map((m) => migrate(m.db)));
+      const r = await many[0]!.db.execute<{ n: string }>(
+        sql`select count(*)::text as n from information_schema.tables where table_name = 'api_tokens'`,
+      );
+      expect(r.rows[0]!.n).toBe('1');
+    } finally {
+      await Promise.all(many.map((m) => m.pool.end()));
+    }
+  });
+
   it('partition the usage ledger by month', async () => {
     const names = await ensureUsagePartitions(db, new Date('2026-12-15T00:00:00Z'));
     expect(names).toEqual(['usage_events_202612', 'usage_events_202701']);

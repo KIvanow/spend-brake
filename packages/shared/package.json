@@ -8,6 +8,14 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./telemetry": {
+      "types": "./dist/telemetry.d.ts",
+      "default": "./dist/telemetry.js"
+    },
+    "./telemetry-register": {
+      "types": "./dist/telemetry-register.d.ts",
+      "default": "./dist/telemetry-register.js"
     }
   },
   "files": [
@@ -18,5 +26,12 @@
     "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run"
+  },
+  "dependencies": {
+    "@opentelemetry/auto-instrumentations-node": "^0.82.0",
+    "@opentelemetry/core": "^2.10.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.300.0",
+    "@opentelemetry/sdk-node": "^0.300.0",
+    "@opentelemetry/sdk-trace-base": "^2.10.0"
   }
 }

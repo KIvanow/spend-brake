@@ -19,6 +19,41 @@
       }
     },
     "schemas": {
+      "KeyCheck": {
+        "type": "object",
+        "properties": {
+          "apiRestricted": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "ipRestricted": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "valid": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "apiRestricted",
+          "ipRestricted",
+          "valid",
+          "warnings"
+        ]
+      },
       "ProviderCredential": {
         "type": "object",
         "properties": {
@@ -630,7 +665,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProviderCredential"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ProviderCredential"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "check": {
+                          "$ref": "#/components/schemas/KeyCheck"
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -3024,6 +3071,236 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SessionEnd"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/setup": {
+      "post": {
+        "summary": "First run: create the org and its owner token (needs BRAKE_SETUP_TOKEN)",
+        "tags": [
+          "Admin"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "setupToken": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "orgId": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{1,64}$"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "timeZone": {
+                    "type": "string",
+                    "default": "UTC"
+                  }
+                },
+                "required": [
+                  "setupToken",
+                  "orgId",
+                  "name"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "orgId": {
+                      "type": "string"
+                    },
+                    "ownerToken": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "orgId",
+                    "ownerToken"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Already set up",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/me": {
+      "get": {
+        "summary": "Remaining budget of the calling virtual key (X-Brake-Key)",
+        "tags": [
+          "Sessions"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "keyId": {
+                      "type": "string"
+                    },
+                    "sessionId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "killed": {
+                      "type": "boolean"
+                    },
+                    "scopes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "scope": {
+                            "type": "string"
+                          },
+                          "window": {
+                            "type": "string"
+                          },
+                          "spent": {
+                            "type": "number"
+                          },
+                          "held": {
+                            "type": "number"
+                          },
+                          "hard": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "remaining": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "scope",
+                          "window",
+                          "spent",
+                          "held",
+                          "hard",
+                          "remaining"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "keyId",
+                    "sessionId",
+                    "killed",
+                    "scopes"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/estimates/migration": {
+      "post": {
+        "summary": "Price the last N days of usage on OSM-based providers (Geoapify, Stadia Maps, Open Places API) (viewer)",
+        "tags": [
+          "Spend"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "days": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 90,
+                    "default": 30
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role too low",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }

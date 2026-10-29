@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "dev": "tsx watch src/main.ts",
+    "dev": "tsx watch --env-file-if-exists=../../infra/.env src/main.ts",
     "start": "node dist/main.js",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run"

@@ -18,10 +18,23 @@ export function createDb(url: string, max = 10) {
 
 export type Db = ReturnType<typeof createDb>['db'];
 
+const MIGRATION_LOCK = 7_212_024;
+
+/**
+ * Apply migrations. Several services run this on start (API, worker); a session-level advisory
+ * lock makes them take turns, so two fresh processes never race to create the same tables.
+ */
 export async function migrate(db: Db): Promise<void> {
-  await runMigrations(db, {
-    migrationsFolder: fileURLToPath(new URL('../drizzle', import.meta.url)),
-  });
+  const lock = await db.$client.connect();
+  try {
+    await lock.query('select pg_advisory_lock($1)', [MIGRATION_LOCK]);
+    await runMigrations(db, {
+      migrationsFolder: fileURLToPath(new URL('../drizzle', import.meta.url)),
+    });
+  } finally {
+    await lock.query('select pg_advisory_unlock($1)', [MIGRATION_LOCK]).catch(() => undefined);
+    lock.release();
+  }
 }
 
 /** Create the monthly ledger partitions for this month and the next. */

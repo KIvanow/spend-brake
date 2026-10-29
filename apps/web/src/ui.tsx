@@ -1,0 +1,81 @@
+import type { ReactNode } from 'react';
+import { usd } from './api.js';
+
+export function Table<T>({
+  rows,
+  columns,
+  empty = 'Nothing yet.',
+}: {
+  rows: T[];
+  columns: { label: string; render: (row: T) => ReactNode; numeric?: boolean }[];
+  empty?: string;
+}) {
+  if (rows.length === 0) return <p className="muted">{empty}</p>;
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            {columns.map((c) => (
+              <th key={c.label} className={c.numeric ? 'num' : undefined}>
+                {c.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={i}>
+              {columns.map((c) => (
+                <td key={c.label} className={c.numeric ? 'num' : undefined}>
+                  {c.render(r)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Spend per day as bars; values in micros. */
+export function BarChart({ data }: { data: { label: string; value: number }[] }) {
+  if (data.length === 0) return <p className="muted">No spend in this period.</p>;
+  const max = Math.max(...data.map((d) => d.value), 1);
+  const w = 100 / data.length;
+  return (
+    <figure className="chart" aria-label="Spend per day">
+      <svg viewBox="0 0 100 40" preserveAspectRatio="none" role="img">
+        {data.map((d, i) => {
+          const h = (d.value / max) * 38;
+          return (
+            <rect key={d.label} x={i * w + w * 0.15} y={40 - h} width={w * 0.7} height={h}>
+              <title>{`${d.label}: ${usd(d.value, 4)}`}</title>
+            </rect>
+          );
+        })}
+      </svg>
+      <figcaption>
+        <span>{data[0]!.label}</span>
+        <span>peak {usd(max)}</span>
+        <span>{data.at(-1)!.label}</span>
+      </figcaption>
+    </figure>
+  );
+}
+
+export function Meter({ spent, hard }: { spent: number; hard: number | null }) {
+  if (!hard) return <span className="muted">no cap</span>;
+  const pct = Math.min(100, Math.round((spent / hard) * 100));
+  return (
+    <span className="meter" title={`${pct}% of ${usd(hard)}`}>
+      <span className={pct >= 80 ? 'fill warn' : 'fill'} style={{ width: `${pct}%` }} />
+    </span>
+  );
+}
+
+export const windowName = (w: string) =>
+  w.startsWith('d:')
+    ? `today (${w.slice(2, 6)}-${w.slice(6, 8)}-${w.slice(8)})`
+    : `month (${w.slice(2, 6)}-${w.slice(6)})`;

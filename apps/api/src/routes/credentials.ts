@@ -16,6 +16,15 @@ const credential = z
   })
   .openapi('ProviderCredential');
 
+const keyCheck = z
+  .object({
+    apiRestricted: z.boolean().nullable(),
+    ipRestricted: z.boolean().nullable(),
+    valid: z.boolean().nullable(),
+    warnings: z.array(z.string()),
+  })
+  .openapi('KeyCheck');
+
 const view = (r: typeof providerCredentials.$inferSelect) => ({
   id: r.id,
   provider: r.provider,
@@ -37,7 +46,7 @@ export function credentialRoutes(r: Router, ctx: Ctx): void {
       name: z.string().min(1).max(200),
       secret: z.string().min(1).max(4096).openapi({ description: 'Never returned or logged' }),
     }),
-    response: credential,
+    response: credential.extend({ check: keyCheck.optional() }),
     handler: async ({ auth, body }) => {
       if (!ctx.wrapper) {
         throw new ApiError(503, 'no_master_key', 'Set BRAKE_MASTER_KEY or BRAKE_KMS_KEY_ID first.');
@@ -68,11 +77,18 @@ export function credentialRoutes(r: Router, ctx: Ctx): void {
           createdAt: ctx.now(),
         })
         .returning();
+      // Google keys: report whether the key is restricted (APIs and IPs), so the proxy is the
+      // only path to spend. Advisory only; the key is stored either way.
+      const check =
+        body.provider === 'google-maps' && ctx.checkGoogleKey
+          ? await ctx.checkGoogleKey(body.secret)
+          : undefined;
       await audit(ctx, auth, 'credential.create', credId, {
         provider: body.provider,
         name: body.name,
+        ...(check ? { check } : {}),
       });
-      return view(row!);
+      return { ...view(row!), ...(check ? { check } : {}) };
     },
   });
 

@@ -10,13 +10,15 @@
   "scripts": {
     "build": "turbo run build",
     "dev": "pnpm infra:up && turbo run dev",
-    "infra:up": "docker compose -f infra/docker-compose.yml up -d --wait",
+    "infra:up": "docker compose -f infra/docker-compose.yml up -d --wait valkey postgres",
     "infra:down": "docker compose -f infra/docker-compose.yml down",
     "lint": "eslint .",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "stack:up": "docker compose -f infra/docker-compose.yml up -d --build --wait",
+    "stack:down": "docker compose -f infra/docker-compose.yml down"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -2,6 +2,7 @@ import { createDb, migrate } from '@spend-brake/db';
 import { keyWrapperFromEnv, redactingLoggerOptions } from '@spend-brake/shared';
 import { Redis } from 'ioredis';
 import { loadEnv } from './config.js';
+import { checkGoogleKey } from './google-check.js';
 import { resyncValkey } from './resync.js';
 import { apiContext, buildApi } from './server.js';
 
@@ -22,6 +23,8 @@ const app = await buildApi({
   rateLimitPerMinute: env.RATE_LIMIT_PER_MINUTE,
   trustProxy: env.TRUST_PROXY,
   ...(env.BRAKE_ACTION_SECRET ? { actionSecret: env.BRAKE_ACTION_SECRET } : {}),
+  ...(env.BRAKE_SETUP_TOKEN ? { setupToken: env.BRAKE_SETUP_TOKEN } : {}),
+  ...(env.GOOGLE_KEY_CHECK ? { checkGoogleKey: (key: string) => checkGoogleKey(key) } : {}),
 });
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {

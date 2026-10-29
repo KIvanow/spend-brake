@@ -4,6 +4,7 @@ import { type Db, auditLog } from '@spend-brake/db';
 import type { KeyWrapper } from '@spend-brake/shared';
 import { z } from 'zod';
 import type { Auth } from './auth.js';
+import type { KeyCheck } from './google-check.js';
 import { ApiError } from './route.js';
 
 export interface Ctx {
@@ -13,6 +14,8 @@ export interface Ctx {
   registry: Registry;
   wrapper: KeyWrapper | null;
   now: () => Date;
+  /** Checks a newly added Google key's restrictions; absent disables the check. */
+  checkGoogleKey?: (key: string) => Promise<KeyCheck>;
 }
 
 export const id = z.string().regex(/^[A-Za-z0-9_.-]{1,128}$/);

@@ -6,8 +6,8 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "dev": "tsx watch src/main.ts",
-    "start": "node dist/main.js",
+    "dev": "tsx watch --env-file-if-exists=../../infra/.env src/main.ts",
+    "start": "node --import @spend-brake/shared/telemetry-register dist/main.js",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run"
   },

@@ -11,6 +11,10 @@ const envSchema = z.object({
   TRUST_PROXY: z.stringbool().default(false),
   /** Signs alert action links; the notifier must use the same value. */
   BRAKE_ACTION_SECRET: z.string().min(32).optional(),
+  /** First-run token for `brake init` (POST /v1/setup); remove it after setup. */
+  BRAKE_SETUP_TOKEN: z.string().min(16).optional(),
+  /** Check new Google keys' restrictions with a free call to Google. */
+  GOOGLE_KEY_CHECK: z.stringbool().default(true),
 });
 
 export type ApiEnv = z.output<typeof envSchema>;

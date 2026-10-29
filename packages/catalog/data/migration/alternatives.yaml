@@ -1,0 +1,87 @@
+# OSM/open-data alternatives for the migration estimator. Plan prices and per-request credits are
+# copied from each provider's pricing page; `credits` maps our catalog SKUs to what the same work
+# costs there. A SKU with no mapping is not offered by that provider and stays on Google.
+verifiedAt: 2026-10-29
+
+providers:
+  geoapify:
+    name: Geoapify
+    source: https://www.geoapify.com/pricing/
+    creditsSource: https://www.geoapify.com/pricing-details/
+    # Quotas are credits per day; limits are soft (Geoapify asks you to upgrade).
+    quota: daily
+    plans:
+      - { name: Free, usdPerMonth: '0', credits: 3000 }
+      - { name: API 10, usdPerMonth: '59', credits: 10000 }
+      - { name: API 25, usdPerMonth: '109', credits: 25000 }
+      - { name: API 50, usdPerMonth: '179', credits: 50000 }
+      - { name: API 100, usdPerMonth: '299', credits: 100000 }
+      - { name: API 250, usdPerMonth: '609', credits: 250000 }
+    overPlans: Custom (unmetered, from $860/month, by contract)
+    credits:
+      geocoding: { perUnit: 1 }
+      places.autocomplete: { perUnit: 1 }
+      legacy.places.autocomplete: { perUnit: 1 }
+      legacy.places.autocomplete_session: { perUnit: 1 }
+      legacy.places.query_autocomplete: { perUnit: 1 }
+      places.text_search: { perUnit: 1, note: '1 credit up to 20 places per request' }
+      places.nearby_search: { perUnit: 1, note: '1 credit up to 20 places per request' }
+      legacy.places.text_search: { perUnit: 1 }
+      legacy.places.nearby_search: { perUnit: 1 }
+      places.details: { perUnit: 1, note: 'base Place Details request, no extra features' }
+      legacy.places.details: { perUnit: 1 }
+      routes.compute_routes: { perUnit: 1, note: '1 credit per waypoint pair; A to B assumed' }
+      legacy.directions: { perUnit: 1, note: '1 credit per waypoint pair; A to B assumed' }
+      routes.compute_route_matrix:
+        {
+          perUnit: 1,
+          note: 'max(sources, targets) x min(sources, targets, 10); elements used, exact up to 10x10',
+        }
+      legacy.distance_matrix:
+        {
+          perUnit: 1,
+          note: 'max(sources, targets) x min(sources, targets, 10); elements used, exact up to 10x10',
+        }
+
+  stadia:
+    name: Stadia Maps
+    source: https://stadiamaps.com/pricing/
+    quota: monthly
+    plans:
+      - { name: Free, usdPerMonth: '0', credits: 200000, overagePer1000: null, commercial: false }
+      - { name: Starter, usdPerMonth: '20', credits: 1000000, overagePer1000: '0.03' }
+      - { name: Standard, usdPerMonth: '80', credits: 7500000, overagePer1000: '0.02' }
+      - { name: Professional, usdPerMonth: '250', credits: 25000000, overagePer1000: '0.015' }
+    credits:
+      geocoding: { perUnit: 20, note: 'forward and reverse geocoding: 20 credits per request' }
+      places.autocomplete: { perUnit: 1, note: 'Autocomplete Search v2' }
+      legacy.places.autocomplete: { perUnit: 1, note: 'Autocomplete Search v2' }
+      legacy.places.autocomplete_session: { perUnit: 1, note: 'Autocomplete Search v2' }
+      legacy.places.query_autocomplete: { perUnit: 1, note: 'Autocomplete Search v2' }
+      places.text_search: { perUnit: 20, note: 'forward geocoding search (addresses and POIs)' }
+      legacy.places.text_search:
+        { perUnit: 20, note: 'forward geocoding search (addresses and POIs)' }
+      places.details: { perUnit: 20, note: 'Place Lookup, 20 per GID' }
+      legacy.places.details: { perUnit: 20, note: 'Place Lookup, 20 per GID' }
+      routes.compute_routes: { perUnit: 20, note: 'Standard Routing' }
+      legacy.directions: { perUnit: 20, note: 'Standard Routing' }
+      routes.compute_route_matrix: { perUnit: 10, note: 'Time/Distance Matrix, 10 per element' }
+      legacy.distance_matrix: { perUnit: 10, note: 'Time/Distance Matrix, 10 per element' }
+
+  openplacesapi:
+    name: Open Places API
+    source: https://openplacesapi.com/pricing
+    # Hard monthly caps: the API stops at the quota, it never bills overage.
+    quota: monthly
+    plans:
+      - { name: Free, usdPerMonth: '0', credits: 10000 }
+      - { name: Indie, usdPerMonth: '19', credits: 30000 }
+      - { name: Startup, usdPerMonth: '49', credits: 100000 }
+      - { name: Business, usdPerMonth: '249', credits: 1000000 }
+    overPlans: Scale (more than 1M calls a month, by contract)
+    credits:
+      # One endpoint: place search by query, coordinate and radius.
+      places.text_search: { perUnit: 1 }
+      places.nearby_search: { perUnit: 1 }
+      legacy.places.text_search: { perUnit: 1 }
+      legacy.places.nearby_search: { perUnit: 1 }
