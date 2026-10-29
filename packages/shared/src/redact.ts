@@ -67,3 +67,24 @@ function decodeURIComponentSafe(s: string): string {
     return s;
   }
 }
+
+/**
+ * pino/Fastify logger options that keep credentials out of every line: URLs lose secret query
+ * parameters and credential headers are censored wherever they appear.
+ */
+export function redactingLoggerOptions(level: string) {
+  return {
+    level,
+    serializers: {
+      req: (req: { method: string; url: string; ip?: string }) => ({
+        method: req.method,
+        url: redactUrl(req.url),
+        remoteAddress: req.ip ?? '',
+      }),
+    },
+    redact: {
+      paths: [...SECRET_HEADERS].flatMap((h) => [`req.headers["${h}"]`, `headers["${h}"]`]),
+      censor: REDACTED,
+    },
+  };
+}

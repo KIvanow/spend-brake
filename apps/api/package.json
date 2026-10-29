@@ -9,9 +9,22 @@
     "dev": "tsx watch src/main.ts",
     "start": "node dist/main.js",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "bootstrap": "tsx src/bootstrap.ts",
+    "openapi": "tsx src/openapi.ts"
   },
   "dependencies": {
-    "fastify": "^5.12.5"
+    "@asteasolutions/zod-to-openapi": "^9.1.0",
+    "@aws-sdk/client-kms": "^3.1159.0",
+    "@fastify/rate-limit": "^11.2.1",
+    "@spend-brake/budget": "workspace:^",
+    "@spend-brake/db": "workspace:^",
+    "@spend-brake/shared": "workspace:^",
+    "fastify": "^5.12.5",
+    "ioredis": "^6.0.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "testcontainers": "^12.2.1"
   }
 }

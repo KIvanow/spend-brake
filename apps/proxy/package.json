@@ -14,6 +14,7 @@
     "bench:upstream": "tsx bench/mock-upstream.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-kms": "^3.1159.0",
     "@spend-brake/budget": "workspace:^",
     "@spend-brake/catalog": "workspace:^",
     "@spend-brake/shared": "workspace:^",

@@ -22,7 +22,7 @@ import type {
   ProviderAdapter,
   Upstream,
 } from '@spend-brake/catalog';
-import { redactUrl } from '@spend-brake/shared';
+import { redactUrl, redactingLoggerOptions } from '@spend-brake/shared';
 import Fastify, {
   type FastifyInstance,
   type FastifyRequest,
@@ -610,29 +610,8 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
 }
 
 /** Logger options that keep credentials out of every log line. */
-export function loggerOptions(level: string): FastifyServerOptions['logger'] {
-  return {
-    level,
-    serializers: {
-      req: (req: FastifyRequest) => ({
-        method: req.method,
-        url: redactUrl(req.url),
-        remoteAddress: req.ip,
-      }),
-    },
-    redact: {
-      paths: [
-        'req.headers.authorization',
-        'req.headers["x-brake-key"]',
-        'req.headers["x-goog-api-key"]',
-        'headers.authorization',
-        'headers["x-brake-key"]',
-        'headers["x-goog-api-key"]',
-      ],
-      censor: '[redacted]',
-    },
-  };
-}
+export const loggerOptions = (level: string): FastifyServerOptions['logger'] =>
+  redactingLoggerOptions(level);
 
 async function readLimited(body: AsyncIterable<Uint8Array>, limit: number): Promise<Buffer> {
   const chunks: Buffer[] = [];

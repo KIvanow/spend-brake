@@ -1,7 +1,9 @@
 import { GenericAdapter, GoogleMapsAdapter, type ProviderAdapter } from '@spend-brake/catalog';
+import { Registry } from '@spend-brake/budget';
+import { keyWrapperFromEnv } from '@spend-brake/shared';
 import { Redis } from 'ioredis';
 import { loadEnv } from './config.js';
-import { CachingSecretStore, StaticSecretStore } from './secrets.js';
+import { CachingSecretStore, EnvelopeSecretStore, StaticSecretStore } from './secrets.js';
 import { buildServer, loggerOptions } from './server.js';
 
 const env = loadEnv();
@@ -21,10 +23,16 @@ const adapters: ProviderAdapter[] = [
   ),
 ];
 
+// Encrypted credentials from the admin API; BRAKE_DEV_SECRETS only when no master key is set.
+const wrapper = await keyWrapperFromEnv(process.env);
+const secrets = wrapper
+  ? new EnvelopeSecretStore(new Registry(valkey), wrapper)
+  : new StaticSecretStore(env.BRAKE_DEV_SECRETS ?? {});
+
 const app = buildServer({
   valkey,
   adapters,
-  secrets: new CachingSecretStore(new StaticSecretStore(env.BRAKE_DEV_SECRETS ?? {})),
+  secrets: new CachingSecretStore(secrets),
   upstreamTimeoutMs: env.UPSTREAM_TIMEOUT_MS,
   trustProxy: env.TRUST_PROXY,
   logger: loggerOptions(env.LOG_LEVEL),

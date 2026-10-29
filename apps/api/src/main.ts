@@ -1,7 +1,30 @@
-import { buildServer } from './server.js';
+import { createDb, migrate } from '@spend-brake/db';
+import { keyWrapperFromEnv, redactingLoggerOptions } from '@spend-brake/shared';
+import { Redis } from 'ioredis';
+import { loadEnv } from './config.js';
+import { buildApi } from './server.js';
 
-const port = Number(process.env.PORT ?? 8081);
-const host = process.env.HOST ?? '0.0.0.0';
+const env = loadEnv();
+const { db, pool } = createDb(env.DATABASE_URL);
+await migrate(db);
+const valkey = new Redis(env.VALKEY_URL, { maxRetriesPerRequest: 2 });
 
-const app = buildServer({ logger: true });
-await app.listen({ port, host });
+const app = await buildApi({
+  db,
+  valkey,
+  wrapper: await keyWrapperFromEnv(process.env),
+  logger: redactingLoggerOptions(env.LOG_LEVEL),
+  rateLimitPerMinute: env.RATE_LIMIT_PER_MINUTE,
+  trustProxy: env.TRUST_PROXY,
+});
+
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.once(signal, () => {
+    void app
+      .close()
+      .then(() => Promise.all([valkey.quit(), pool.end()]))
+      .then(() => process.exit(0));
+  });
+}
+
+await app.listen({ port: env.PORT, host: env.HOST });

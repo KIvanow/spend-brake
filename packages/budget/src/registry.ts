@@ -83,6 +83,15 @@ export function hashVirtualKey(token: string): string {
 
 const keyLookup = (hash: string) => `bk:vk:${hash}`;
 const orgRecord = (orgId: string) => `bk:{o:${assertOrgId(orgId)}}:org`;
+const credentialRecord = (orgId: string, id: string) => `bk:{o:${assertOrgId(orgId)}}:cred:${id}`;
+
+/** An encrypted provider credential as the proxy reads it (the envelope is opaque here). */
+export interface CredentialRecord {
+  id: string;
+  orgId: string;
+  provider: string;
+  envelope: unknown;
+}
 
 export class Registry {
   constructor(private readonly client: ValkeyClient) {}
@@ -113,6 +122,27 @@ export class Registry {
     if (!isVirtualKey(token)) return null;
     const raw = await this.client.get(keyLookup(hashVirtualKey(token)));
     return raw === null ? null : keyRecordSchema.parse(JSON.parse(raw));
+  }
+
+  /** Write-through from the admin API, which only ever holds the token's hash. */
+  async putKeyByHash(tokenHash: string, key: z.input<typeof keyRecordSchema>): Promise<KeyRecord> {
+    if (!/^[0-9a-f]{64}$/.test(tokenHash)) throw new Error('invalid token hash');
+    const record = keyRecordSchema.parse(key);
+    await this.client.set(keyLookup(tokenHash), JSON.stringify(record));
+    return record;
+  }
+
+  async putCredential(c: CredentialRecord): Promise<void> {
+    await this.client.set(credentialRecord(c.orgId, id.parse(c.id)), JSON.stringify(c));
+  }
+
+  async getCredential(orgId: string, credentialId: string): Promise<CredentialRecord | null> {
+    const raw = await this.client.get(credentialRecord(orgId, id.parse(credentialId)));
+    return raw === null ? null : (JSON.parse(raw) as CredentialRecord);
+  }
+
+  async deleteCredential(orgId: string, credentialId: string): Promise<void> {
+    await this.client.del(credentialRecord(orgId, id.parse(credentialId)));
   }
 
   async revokeKey(token: string): Promise<void> {

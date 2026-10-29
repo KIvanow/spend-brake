@@ -513,3 +513,48 @@ describe('Valkey outage', () => {
     await side.proxy.close();
   });
 });
+
+describe('encrypted provider credentials', () => {
+  it('decrypts the credential the admin API stored, only for its own org', async () => {
+    const { randomBytes } = await import('node:crypto');
+    const { LocalKeyWrapper, credentialContext, encryptSecret } =
+      await import('@spend-brake/shared');
+    const { Registry } = await import('@spend-brake/budget');
+    const { EnvelopeSecretStore } = await import('../src/secrets.js');
+    const wrapper = new LocalKeyWrapper(randomBytes(32).toString('base64'));
+    const registry = new Registry(h.valkey);
+    const sealed = startProxy(valkeyUrl, mock, {
+      secrets: new EnvelopeSecretStore(registry, wrapper),
+    });
+    const s = await sealed;
+    const org = newOrg();
+    const other = newOrg();
+    const secret = 'AIzaSy-encrypted-at-rest';
+    await registry.putCredential({
+      id: 'cred-enc',
+      orgId: org,
+      provider: 'google-maps',
+      envelope: await encryptSecret(wrapper, secret, credentialContext(org, 'cred-enc')),
+    });
+    const mine = await newKey(s, org, { credentials: { 'google-maps': 'cred-enc' } });
+    const theirs = await newKey(s, other, { credentials: { 'google-maps': 'cred-enc' } });
+    mock.respond = (_req, reply) => reply.send({ results: [], status: 'OK' });
+
+    const ok = await s.proxy.inject(
+      `/google-maps/maps/api/geocode/json?address=a&key=${mine.token}`,
+    );
+    expect(ok.statusCode).toBe(200);
+    expect(new URL(mock.last().url, 'http://x').searchParams.get('key')).toBe(secret);
+
+    const before = mock.seen.length;
+    const denied = await s.proxy.inject(
+      `/google-maps/maps/api/geocode/json?address=b&key=${theirs.token}`,
+    );
+    expect(denied.statusCode).toBe(502);
+    expect(denied.json()).toMatchObject({ error: 'upstream_unavailable' });
+    expect(mock.seen.length).toBe(before);
+    expect(s.logs.text()).not.toContain(secret);
+    await s.proxy.close();
+    await s.valkey.quit();
+  });
+});
