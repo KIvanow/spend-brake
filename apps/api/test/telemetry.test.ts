@@ -187,10 +187,20 @@ describe('OpenTelemetry export settings', () => {
       url: '/v1/telemetry/otlp/test',
       headers: bearer(org.admin),
     });
+    // A local http:// collector saved where they were allowed: the test says what to set.
     expect(test.json()).toMatchObject({
       ok: false,
-      error: expect.stringContaining('private address') as string,
+      error: expect.stringContaining('ALLOW_PRIVATE_COLLECTORS=true') as string,
     });
+    // And it cannot be saved without the setting.
+    const put = await strict.inject({
+      method: 'PUT',
+      url: '/v1/telemetry/otlp',
+      headers: bearer(org.admin),
+      payload: { endpoint: 'http://localhost:4318' },
+    });
+    expect(put.statusCode).toBe(400);
+    expect(put.body).toContain('ALLOW_PRIVATE_COLLECTORS');
     await strict.close();
   });
 });

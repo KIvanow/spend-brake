@@ -252,9 +252,21 @@ export function budgetRoutes(r: Router, ctx: Ctx): void {
     }),
     response: z.object({
       killed: z.array(z.string()),
-      paused: z.array(z.object({ keyId: z.string(), retryAfterSec: z.number() })).openapi({
-        description: 'Keys refused for a loop (429 loop_detected) until the circuit closes',
-      }),
+      paused: z
+        .array(
+          z.object({
+            keyId: z.string(),
+            retryAfterSec: z.number(),
+            reason: z.enum(['loop', 'pumping']).openapi({
+              description:
+                'What opened the circuit: the loop breaker (repeated requests) or the SMS pumping guard',
+            }),
+          }),
+        )
+        .openapi({
+          description:
+            'Keys refused for every provider (429 loop_detected) until their circuit closes',
+        }),
       scopes: z.array(
         z.object({
           scope: z.string(),

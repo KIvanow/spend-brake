@@ -417,8 +417,14 @@ describe('caps, kill switch and status', () => {
     const status = await call(org.viewer, { url: '/v1/status' });
     const paused = status.json<{ paused: { keyId: string; retryAfterSec: number }[] }>().paused;
     expect(paused).toHaveLength(1);
-    expect(paused[0]!.keyId).toBe(k.id);
+    expect(paused[0]).toMatchObject({ keyId: k.id, reason: 'loop' });
     expect(paused[0]!.retryAfterSec).toBeGreaterThan(590);
+    // The SMS pumping guard marks its circuit, so the dashboard can say why.
+    await env.valkey.set(`bk:{o:${org.id}}:circuit:key:${k.id}`, 'pump', 'EX', 600);
+    expect(
+      (await call(org.viewer, { url: '/v1/status' })).json<{ paused: { reason: string }[] }>()
+        .paused[0]!.reason,
+    ).toBe('pumping');
 
     const url = `/v1/keys/${k.id}/resume`;
     expect((await call(org.viewer, { method: 'POST', url })).statusCode).toBe(403);

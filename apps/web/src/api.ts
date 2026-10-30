@@ -174,3 +174,29 @@ export interface Key {
     credentials?: Record<string, string>;
   };
 }
+
+const pad = (n: number) => String(n).padStart(2, '0');
+const parse = (iso: string): Date | null => {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+
+/**
+ * One date format across the dashboard: YYYY-MM-DD, in the browser's time zone. Budget windows
+ * (Overview, Caps) are the exception: they are cut in the org's time zone and say so.
+ */
+export function localDate(iso: string): string {
+  const d = parse(iso);
+  if (!d) return iso;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** YYYY-MM-DD HH:MM:SS in the browser's time zone. */
+export function localDateTime(iso: string): string {
+  const d = parse(iso);
+  if (!d) return iso;
+  return `${localDate(iso)} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+/** The browser's time zone, e.g. "Europe/Sofia", for labels. */
+export const localZone = (): string => Intl.DateTimeFormat().resolvedOptions().timeZone || 'local';

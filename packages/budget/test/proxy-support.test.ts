@@ -54,10 +54,14 @@ describe('loop detection', () => {
       outcome: 'loop_detected',
       retryAfterSec: 600,
       tripped: true,
+      reason: 'loop',
     });
     // Different requests on the same key are blocked too until the cooldown ends.
     const after = await engine.reserve(req(org, 1n, { loop: loop('h2') }));
-    expect(after).toMatchObject({ outcome: 'loop_detected', tripped: false });
+    expect(after).toMatchObject({ outcome: 'loop_detected', tripped: false, reason: 'loop' });
+    expect(await engine.pausedKeys(org, ['k1', 'k2'])).toEqual([
+      { keyId: 'k1', retryAfterSec: 600, reason: 'loop' },
+    ]);
     if (after.outcome === 'loop_detected') expect(after.retryAfterSec).toBeGreaterThan(590);
     // Nothing was reserved by blocked requests.
     const [day] = await engine.status(org, [keyScope], TZ, NOW);
@@ -331,12 +335,21 @@ describe('pumping guard', () => {
       { ok: true },
     );
     expect(await engine.pumpCheck(org, 'k1', { numberHash: 'n1', prefix: '1415' }, limits)).toEqual(
-      { ok: false, retryAfterSec: 600, tripped: true },
+      { ok: false, retryAfterSec: 600, tripped: true, reason: 'pumping' },
     );
     // The circuit now blocks everything on the key, including other numbers.
     expect(
       await engine.pumpCheck(org, 'k1', { numberHash: 'n9', prefix: '4420' }, limits),
-    ).toMatchObject({ ok: false, tripped: false });
+    ).toMatchObject({ ok: false, tripped: false, reason: 'pumping' });
+    // And every other request on the key, with the reason that opened it.
+    expect(await engine.reserve(req(org, 1n, { loop: loop('h1') }))).toMatchObject({
+      outcome: 'loop_detected',
+      tripped: false,
+      reason: 'pumping',
+    });
+    expect(await engine.pausedKeys(org, ['k1'])).toEqual([
+      { keyId: 'k1', retryAfterSec: 600, reason: 'pumping' },
+    ]);
     await engine.resetCircuit(org, 'k1');
     const p = (n: string) => engine.pumpCheck(org, 'k2', { numberHash: n, prefix: '1212' }, limits);
     expect((await p('a')).ok).toBe(true);

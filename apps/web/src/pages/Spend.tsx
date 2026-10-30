@@ -1,8 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import { api, usd } from '../api.js';
+import { ApiError, api, usd } from '../api.js';
 import { BarChart, Table } from '../ui.js';
-import { useKeys } from './Keys.js';
+import { useAuthOptions, useKeys } from './Keys.js';
 
 type Row = Record<string, string | number | null> & { costMicros: number; requests: number };
 
@@ -24,10 +24,17 @@ export function Spend() {
   const keys = useKeys();
   const keyName = new Map((keys.data?.items ?? []).map((k) => [k.id, k.name]));
   const total = (daily.data?.items ?? []).reduce((a, r) => a + r.costMicros, 0);
+  // Comparing with Google's bill is a self-hosted Business and Enterprise feature: the hosted
+  // service (open sign-up) has no such route and no way to get it, so the section is left out.
+  const options = useAuthOptions();
+  const showRec = !options.isPending && options.data?.signup !== true;
   const rec = useQuery({
     queryKey: ['reconciliation'],
     queryFn: () =>
       api<{ configured: boolean; message: string; lastError: string | null }>('/v1/reconciliation'),
+    enabled: showRec,
+    // 404: an edition without the feature. Asking again will not change that.
+    retry: (n, err) => !(err instanceof ApiError && err.status === 404) && n < 3,
   });
   const drift = useQuery({
     queryKey: ['reconciliation', 'report'],
@@ -41,7 +48,8 @@ export function Spend() {
           driftRatio: number | null;
         }[];
       }>('/v1/reconciliation/report'),
-    enabled: rec.data?.configured === true,
+    enabled: showRec && rec.data?.configured === true,
+    retry: (n, err) => !(err instanceof ApiError && err.status === 404) && n < 3,
   });
 
   return (
@@ -70,36 +78,42 @@ export function Spend() {
           }))}
         />
       )}
-      <h3>Compared with Google's bill</h3>
-      <p className={rec.data?.lastError ? 'error' : 'muted'}>
-        {rec.isError
-          ? 'Comparing spend with the bill is part of the Business and Enterprise editions.'
-          : rec.data?.lastError
-            ? `Last check failed: ${rec.data.lastError}`
-            : (rec.data?.message ?? '')}
-      </p>
-      {rec.data?.configured && (
-        <Table
-          rows={(drift.data?.items ?? []).filter((r) => r.family === 'total')}
-          empty="No billing days compared yet."
-          columns={[
-            { label: 'Billing day (PT)', render: (r) => r.day },
-            { label: 'Proxy ledger', render: (r) => usd(r.ledgerMicros), numeric: true },
-            { label: 'Google bill', render: (r) => usd(r.billedMicros), numeric: true },
-            {
-              label: 'Drift',
-              render: (r) =>
-                r.driftRatio === null ? (
-                  '—'
-                ) : (
-                  <span className={r.driftRatio > 0.05 ? 'badge danger' : 'badge'}>
-                    {(r.driftRatio * 100).toFixed(1)}%
-                  </span>
-                ),
-              numeric: true,
-            },
-          ]}
-        />
+      {showRec && (
+        <>
+          <h3>Compared with Google's bill</h3>
+          <p className={rec.data?.lastError ? 'error' : 'muted'}>
+            {rec.isError
+              ? rec.error instanceof ApiError && rec.error.status === 404
+                ? 'Comparing spend with the bill is part of the Business and Enterprise editions.'
+                : rec.error.message
+              : rec.data?.lastError
+                ? `Last check failed: ${rec.data.lastError}`
+                : (rec.data?.message ?? '')}
+          </p>
+          {rec.data?.configured && (
+            <Table
+              rows={(drift.data?.items ?? []).filter((r) => r.family === 'total')}
+              empty="No billing days compared yet."
+              columns={[
+                { label: 'Billing day (PT)', render: (r) => r.day },
+                { label: 'Proxy ledger', render: (r) => usd(r.ledgerMicros), numeric: true },
+                { label: 'Google bill', render: (r) => usd(r.billedMicros), numeric: true },
+                {
+                  label: 'Drift',
+                  render: (r) =>
+                    r.driftRatio === null ? (
+                      '—'
+                    ) : (
+                      <span className={r.driftRatio > 0.05 ? 'badge danger' : 'badge'}>
+                        {(r.driftRatio * 100).toFixed(1)}%
+                      </span>
+                    ),
+                  numeric: true,
+                },
+              ]}
+            />
+          )}
+        </>
       )}
       <div className="row">
         <h3>By {by}</h3>

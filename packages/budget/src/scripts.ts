@@ -13,14 +13,14 @@ export type ValkeyClient = Redis | Cluster;
  *       cooldownSec, nKill, killTargets..., then
  *       (scopeLabel, windowId, windowTtlSec, defaultHard) per pair
  *
- * Returns {'KILLED', target} | {'LOOP', retryAfterSec, tripped} | {'DUPLICATE'}
+ * Returns {'KILLED', target} | {'LOOP', retryAfterSec, tripped, circuit} | {'DUPLICATE'}
  *       | {'DENY', scope, window, hard, used, firstDeny}
  *       | {'OK', {{scope, window, mark}, ...}, minRemaining}
  *
  * Loop check: `loop` counts identical requests in a fixed window, `rate` counts requests per
  * minute; going over either opens `circuit` for cooldownSec (its value is the rate key, or '1'
- * without a session). tripped is 1 when this request
- * opened it. minRemaining is the smallest (hard - used) after this reservation, -1 if uncapped.
+ * without a session; the pumping guard stores 'pump'). tripped is 1 when this request opened it;
+ * circuit is the circuit's value, which tells who opened it. minRemaining is the smallest (hard - used) after this reservation, -1 if uncapped.
  *
  * defaultHard (may be '') creates the scope's hard cap on first use, e.g. a session budget.
  *
@@ -46,7 +46,7 @@ end
 if ARGV[4] == '1' then
   local open = redis.call('TTL', KEYS[4])
   if open > 0 then
-    return {'LOOP', open, 0}
+    return {'LOOP', open, 0, redis.call('GET', KEYS[4])}
   end
   local same = redis.call('INCR', KEYS[5])
   redis.call('EXPIRE', KEYS[5], ARGV[6], 'NX')
@@ -61,7 +61,7 @@ if ARGV[4] == '1' then
     local rate = '1'
     if ARGV[7] ~= '0' then rate = KEYS[6] end
     redis.call('SET', KEYS[4], rate, 'EX', ARGV[8])
-    return {'LOOP', tonumber(ARGV[8]), 1}
+    return {'LOOP', tonumber(ARGV[8]), 1, rate}
   end
 end
 
@@ -257,24 +257,25 @@ return 'OK'
 
 /**
  * Messaging pumping guard (SMS traffic pumping / toll fraud): sends per destination number and
- * per number prefix per hour. Going over either opens the key's circuit for the cooldown.
+ * per number prefix per hour. Going over either opens the key's circuit for the cooldown, with
+ * the value 'pump' so the pause can be told apart from a loop.
  *
  * KEYS: circuit, perNumber, perPrefix
  * ARGV: maxPerNumber, maxPerPrefix, cooldownSec
- * Returns {'OK'} | {'PUMP', retryAfterSec, tripped}
+ * Returns {'OK'} | {'PUMP', retryAfterSec, tripped, circuit}
  */
 export const PUMP_LUA = `
 local open = redis.call('TTL', KEYS[1])
 if open > 0 then
-  return {'PUMP', open, 0}
+  return {'PUMP', open, 0, redis.call('GET', KEYS[1])}
 end
 local n = redis.call('INCR', KEYS[2])
 redis.call('EXPIRE', KEYS[2], 3600, 'NX')
 local p = redis.call('INCR', KEYS[3])
 redis.call('EXPIRE', KEYS[3], 3600, 'NX')
 if n > tonumber(ARGV[1]) or p > tonumber(ARGV[2]) then
-  redis.call('SET', KEYS[1], '1', 'EX', ARGV[3])
-  return {'PUMP', tonumber(ARGV[3]), 1}
+  redis.call('SET', KEYS[1], 'pump', 'EX', ARGV[3])
+  return {'PUMP', tonumber(ARGV[3]), 1, 'pump'}
 end
 return {'OK'}
 `;

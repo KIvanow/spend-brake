@@ -6,8 +6,11 @@ import { useCredentials, useKeys } from './Keys.js';
 
 interface Status {
   killed: string[];
-  /** Keys the loop breaker is refusing (429 loop_detected) until their circuit closes. */
-  paused?: { keyId: string; retryAfterSec: number }[];
+  /**
+   * Keys refused for every provider (429 loop_detected) until their circuit closes, opened by the
+   * loop breaker or the SMS pumping guard.
+   */
+  paused?: { keyId: string; retryAfterSec: number; reason?: 'loop' | 'pumping' }[];
   scopes: ScopeStatus[];
 }
 
@@ -68,32 +71,48 @@ export function Overview() {
           <a href="#/setup">Get started</a>
         </div>
       )}
-      {paused.length > 0 && (
-        <div className="callout">
-          <strong>Paused by the loop breaker.</strong> These keys sent the same request too many
-          times in a row, so Spend Brake refuses their calls (HTTP 429 loop_detected) for a while.
-          Stop the app repeating the request first: resuming clears the count, but the same repeats
-          trip it again.
-          <ul>
-            {paused.map((p) => (
-              <li key={p.keyId}>
-                <ScopeName scope={`key:${p.keyId}`} names={names} />: resumes by itself in{' '}
-                {minutes(p.retryAfterSec)}.{' '}
-                {can('admin') && (
-                  <button
-                    type="button"
-                    disabled={resume.isPending}
-                    onClick={() => resume.mutate(p.keyId)}
-                  >
-                    Resume now
-                  </button>
-                )}
-              </li>
-            ))}
-          </ul>
-          {resume.isError && <p className="error">{resume.error.message}</p>}
-        </div>
-      )}
+      {(['loop', 'pumping'] as const).map((reason) => {
+        const keys = paused.filter((p) => (p.reason ?? 'loop') === reason);
+        if (keys.length === 0) return null;
+        return (
+          <div className="callout" key={reason}>
+            {reason === 'loop' ? (
+              <>
+                <strong>Paused by the loop breaker.</strong> These keys sent the same request too
+                many times in a row, so Spend Brake refuses their calls (HTTP 429 loop_detected) for
+                a while, for all providers on the key. Stop the app repeating the request first:
+                resuming clears the count, but the same repeats trip it again.
+              </>
+            ) : (
+              <>
+                <strong>Paused for possible SMS pumping.</strong> These keys sent too many messages
+                to one number or number range, which is how SMS pumping fraud looks. Spend Brake
+                refuses their calls (HTTP 429 loop_detected) for a while, for all providers on the
+                key. Resuming keeps the per-number counts for the hour: messages to other numbers go
+                through, and the flagged numbers pause the key again.
+              </>
+            )}
+            <ul>
+              {keys.map((p) => (
+                <li key={p.keyId}>
+                  <ScopeName scope={`key:${p.keyId}`} names={names} />: resumes by itself in{' '}
+                  {minutes(p.retryAfterSec)}.{' '}
+                  {can('admin') && (
+                    <button
+                      type="button"
+                      disabled={resume.isPending}
+                      onClick={() => resume.mutate(p.keyId)}
+                    >
+                      Resume now
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+            {resume.isError && <p className="error">{resume.error.message}</p>}
+          </div>
+        );
+      })}
       <h2>Live budget</h2>
       <p className="muted">Refreshes every 5 seconds. Held = reserved by requests in flight.</p>
       <Table
@@ -116,12 +135,17 @@ export function Overview() {
       <ul className="kills">
         {targets.map((t) => {
           const isKilled = killed.has(t);
-          const isPaused = paused.some((p) => `key:${p.keyId}` === t);
+          const pause = paused.find((p) => `key:${p.keyId}` === t);
+          const isPaused = pause !== undefined;
           return (
             <li key={t}>
               <ScopeName scope={t} names={names} />
               <span className={isKilled || isPaused ? 'badge danger' : 'badge'}>
-                {isKilled ? 'killed' : isPaused ? 'paused (loop)' : 'live'}
+                {isKilled
+                  ? 'killed'
+                  : pause
+                    ? `paused (${pause.reason === 'pumping' ? 'SMS pumping' : 'loop'})`
+                    : 'live'}
               </span>
               {can('admin') && (
                 <button

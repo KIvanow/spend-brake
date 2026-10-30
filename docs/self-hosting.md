@@ -150,8 +150,8 @@ Separate from the operator metrics above, every org gets telemetry for its own c
 - **OpenTelemetry:** under Telemetry, an org sets an OTLP/HTTP endpoint and headers (stored
   encrypted); the worker sends every call as a span, inside the caller's trace when the request
   carried a `traceparent` header. A collector that is down delays spans (up to 10,000 wait per
-  org); private addresses are refused (`ALLOW_PRIVATE_COLLECTORS=true` on the worker allows them,
-  for development). On the hosted service this comes with the Team and Agents plans.
+  org); private addresses are refused (`ALLOW_PRIVATE_COLLECTORS=true` on the worker and the API
+  allows them, and a local `http://` collector, for development). On the hosted service this comes with the Team and Agents plans.
 
 Neither ever includes query strings or request bodies: those hold addresses, phone numbers and
 search terms.

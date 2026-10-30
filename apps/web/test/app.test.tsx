@@ -188,7 +188,7 @@ describe('dashboard', () => {
   it('edits caps in exact micros and rejects malformed amounts', async () => {
     const user = await signIn();
     await user.click(screen.getByRole('button', { name: 'Caps' }));
-    await screen.findByRole('heading', { name: 'Caps' });
+    await screen.findByRole('heading', { name: 'Caps', level: 2 });
     const form = screen.getByRole('form', { name: 'Set a cap' });
     const scope = within(form).getByLabelText('Scope');
     await user.clear(scope);
@@ -392,6 +392,34 @@ describe('dashboard', () => {
     window.location.hash = '';
   });
 
+  it('folds the pages into a Menu button that names the page and works from the keyboard', async () => {
+    const user = await signIn();
+    expect(document.title).toBe('Overview · Spend Brake');
+    expect(screen.getByRole('heading', { level: 1, name: 'Overview' })).toBeTruthy();
+    const menu = screen.getByRole('button', { name: 'Menu, current page: Overview' });
+    const nav = screen.getByRole('navigation', { name: 'Pages' });
+    expect(menu.getAttribute('aria-expanded')).toBe('false');
+    expect(nav.className).not.toContain('open');
+
+    await user.click(menu);
+    expect(menu.getAttribute('aria-expanded')).toBe('true');
+    expect(nav.className).toContain('open');
+    // Focus moves onto the current page; Escape closes and returns to the button.
+    expect(document.activeElement?.textContent).toBe('Overview');
+    await user.keyboard('{Escape}');
+    expect(menu.getAttribute('aria-expanded')).toBe('false');
+    expect(document.activeElement).toBe(menu);
+
+    await user.keyboard('{Enter}');
+    expect(menu.getAttribute('aria-expanded')).toBe('true');
+    await user.click(within(nav).getByRole('button', { name: 'Caps' }));
+    expect(await screen.findByRole('heading', { name: 'Caps', level: 2 })).toBeTruthy();
+    expect(nav.className).not.toContain('open');
+    expect(screen.getByRole('button', { name: 'Menu, current page: Caps' })).toBeTruthy();
+    expect(document.title).toBe('Caps · Spend Brake');
+    window.location.hash = '';
+  });
+
   it('charts spend and totals the period', async () => {
     routes['GET /v1/reconciliation'] = () => [
       200,
@@ -434,5 +462,34 @@ describe('dashboard', () => {
     await user.click(screen.getByRole('button', { name: 'Spend' }));
     expect(await screen.findByText('9.1%')).toBeTruthy();
     expect(screen.getByText('9.1%').className).toContain('danger');
+  });
+
+  it('leaves the bill comparison out on the hosted service, without asking for it', async () => {
+    routes['GET /v1/auth/options'] = () => [
+      200,
+      { emailSignIn: true, signup: true, proxyUrl: null, egressIps: [] },
+    ];
+    window.location.hash = '#/spend';
+    sessionStorage.setItem('brake.adminToken', 'sbt_good');
+    render(<App client={client()} />);
+    expect(await screen.findByText('$0.0420')).toBeTruthy();
+    await waitFor(() => expect(calls.some((c) => c.url === '/v1/auth/options')).toBe(true));
+    expect(screen.queryByRole('heading', { name: "Compared with Google's bill" })).toBeNull();
+    expect(calls.some((c) => c.url.startsWith('/v1/reconciliation'))).toBe(false);
+    window.location.hash = '';
+  });
+
+  it('does not ask again for a bill comparison the edition lacks', async () => {
+    routes['GET /v1/auth/options'] = () => [
+      200,
+      { emailSignIn: false, signup: false, proxyUrl: null, egressIps: [] },
+    ];
+    window.location.hash = '#/spend';
+    sessionStorage.setItem('brake.adminToken', 'sbt_good');
+    // A client that retries failed queries, as the app's own does.
+    render(<App client={new QueryClient()} />);
+    expect(await screen.findByText(/part of the Business and Enterprise editions/)).toBeTruthy();
+    expect(calls.filter((c) => c.url === '/v1/reconciliation')).toHaveLength(1);
+    window.location.hash = '';
   });
 });

@@ -45,6 +45,7 @@ const app = buildServer({
   db,
   apiUrl: env.BRAKE_API_URL,
   actionSecret: env.BRAKE_ACTION_SECRET,
+  dashboardUrl: env.BRAKE_DASHBOARD_URL,
   logger: notifierLoggerOptions(env.LOG_LEVEL),
 });
 

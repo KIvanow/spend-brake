@@ -8,6 +8,7 @@ import {
   type KeyRecord,
   type KillTarget,
   type OrgRecord,
+  type PauseReason,
   Registry,
   type ReservationHandle,
   type Scope,
@@ -84,6 +85,12 @@ const SESSION_ID = /^[A-Za-z0-9_.-]{1,128}$/;
 const DEFAULT_COUNTRIES = ['US', 'CA'];
 const CONFIG_STALE_MS = 10 * 60_000;
 const DEFAULT_SKU = 'unpriced';
+/** 429 loop_detected messages by what opened the key's circuit (it pauses the whole key). */
+const PAUSED_MESSAGE: Record<PauseReason, string> = {
+  loop: 'Repeated requests detected; this key is paused for all providers. Stop and ask the user.',
+  pumping:
+    'Too many messages to one number or number range (possible SMS pumping); this key is paused for all providers. Stop and ask the user.',
+};
 // Where a provider's own key goes, so a virtual key can take its place: Google `key`, Mapbox
 // `access_token`, HERE `apiKey`.
 const DROP_IN_PARAMS = ['key', 'access_token', 'apiKey', 'api_key'];
@@ -524,19 +531,17 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
           emit(org.id, {
             ...call,
             type: pump.tripped ? 'loop' : 'blocked',
-            reason: 'pumping',
+            reason: pump.reason === 'pumping' ? 'pumping' : 'loop_detected',
             reqId: request.id,
             keyId: key.id,
             provider: adapter.id,
             prefix: dest.prefix,
           });
           reply.header('retry-after', String(pump.retryAfterSec));
-          return sendError(
-            reply,
-            'loop_detected',
-            'Too many messages to one number or number range; this key is paused. Stop and ask the user.',
-            { retryAfter: pump.retryAfterSec, reason: 'pumping' },
-          );
+          return sendError(reply, 'loop_detected', PAUSED_MESSAGE[pump.reason], {
+            retryAfter: pump.retryAfterSec,
+            reason: pump.reason,
+          });
         }
       } catch {
         if (!key.failOpenMicros) {
@@ -624,24 +629,26 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
             target: r.target,
             ...base,
           });
-          return sendError(reply, 'killed', `Spending is switched off for ${r.target}. Stop.`, {
-            target: r.target,
-          });
+          // The proxy's key record carries no name; "this key" at least reads as the caller's.
+          return sendError(
+            reply,
+            'killed',
+            `Spending is switched off for ${r.target === `key:${key.id}` ? `this key (${r.target})` : r.target}. Stop.`,
+            { target: r.target },
+          );
         case 'loop_detected':
           emit(org.id, {
             ...call,
             type: r.tripped ? 'loop' : 'blocked',
-            reason: 'loop_detected',
+            reason: r.reason === 'pumping' ? 'pumping' : 'loop_detected',
             hash: priced.hash,
             ...base,
           });
           reply.header('retry-after', String(r.retryAfterSec));
-          return sendError(
-            reply,
-            'loop_detected',
-            'Repeated requests detected; this key is paused. Stop and ask the user.',
-            { retryAfter: r.retryAfterSec },
-          );
+          return sendError(reply, 'loop_detected', PAUSED_MESSAGE[r.reason], {
+            retryAfter: r.retryAfterSec,
+            reason: r.reason,
+          });
         case 'budget_exceeded':
           reply.header('x-brake-remaining-micros', String(r.cap > r.used ? r.cap - r.used : 0n));
           emit(org.id, {

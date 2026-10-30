@@ -1,7 +1,7 @@
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api, usd } from '../api.js';
-import { Table } from '../ui.js';
+import { TIME_LABEL, Table, Time } from '../ui.js';
 import { useKeys } from './Keys.js';
 
 interface Page {
@@ -53,7 +53,7 @@ export function Events() {
         <Table
           rows={rows}
           columns={[
-            { label: 'Time', render: (r) => s(r.ts).replace('T', ' ').slice(0, 19) },
+            { label: TIME_LABEL, render: (r) => <Time iso={s(r.ts)} /> },
             { label: 'Type', render: (r) => s(r.type) },
             {
               label: 'Key',
@@ -70,7 +70,7 @@ export function Events() {
         <Table
           rows={rows}
           columns={[
-            { label: 'Time', render: (r) => s(r.at).replace('T', ' ').slice(0, 19) },
+            { label: TIME_LABEL, render: (r) => <Time iso={s(r.at)} /> },
             { label: 'Actor', render: (r) => <code>{s(r.actor)}</code> },
             { label: 'Action', render: (r) => s(r.action) },
             { label: 'Target', render: (r) => <code>{s(r.target)}</code> },

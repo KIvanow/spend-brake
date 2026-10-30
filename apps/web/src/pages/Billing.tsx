@@ -1,7 +1,7 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { api, usd } from '../api.js';
 import { useRole } from '../role.js';
-import { Table } from '../ui.js';
+import { Table, Time } from '../ui.js';
 
 interface BillingView {
   plan: string | null;
@@ -81,10 +81,16 @@ export function Billing() {
   return (
     <section>
       <h2>Billing</h2>
-      <p className="stat">
+      <p className="stat plan">
         {b.planName ?? 'No plan'}{' '}
         <span className="muted">
-          {b.currentPeriodEnd ? `renews ${new Date(b.currentPeriodEnd).toLocaleDateString()}` : ''}
+          {b.currentPeriodEnd ? (
+            <>
+              renews <Time iso={b.currentPeriodEnd} date />
+            </>
+          ) : (
+            ''
+          )}
         </span>
       </p>
       {b.status === 'past_due' && (
@@ -118,7 +124,7 @@ export function Billing() {
         />
       )}
       {!can('owner') && <p className="muted">Owners manage billing.</p>}
-      <div className="row">
+      <div className="row actions">
         {!can('owner') ? null : b.hasSubscription ? (
           <button type="button" disabled={go.isPending} onClick={() => go.mutate('portal')}>
             Manage billing
@@ -147,7 +153,7 @@ export function Billing() {
             rows={b.licenses}
             columns={[
               { label: 'Edition', render: (l) => l.edition },
-              { label: 'Valid until', render: (l) => new Date(l.expiresAt).toLocaleDateString() },
+              { label: 'Valid until', render: (l) => <Time iso={l.expiresAt} date /> },
             ]}
           />
           {can('owner') && (

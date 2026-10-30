@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, api, usd } from '../api.js';
-import { Table } from '../ui.js';
+import { TIME_LABEL, Table, Time } from '../ui.js';
 
 interface Approval {
   id: string;
@@ -71,7 +71,7 @@ export function Approvals() {
         columns={[
           { label: 'Change', render: (a) => change(a) },
           { label: 'Asked by', render: (a) => <code>{a.requestedBy}</code> },
-          { label: 'When', render: (a) => new Date(a.requestedAt).toLocaleString() },
+          { label: TIME_LABEL, render: (a) => <Time iso={a.requestedAt} /> },
           {
             label: '',
             render: (a) => (

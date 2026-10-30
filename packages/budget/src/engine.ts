@@ -141,6 +141,16 @@ export const DEFAULT_LOOP_POLICY: LoopPolicy = {
   cooldownSec: 600,
 };
 
+/**
+ * Why a key's circuit is open: the loop breaker (repeated requests) or the SMS pumping guard.
+ * Either way the whole key is paused, for every provider it can call.
+ */
+export type PauseReason = 'loop' | 'pumping';
+
+/** The circuit's value tells who opened it: the pumping guard stores 'pump'. */
+export const pauseReason = (circuit: unknown): PauseReason =>
+  circuit === 'pump' ? 'pumping' : 'loop';
+
 export type ReserveResult =
   | {
       outcome: 'ok';
@@ -152,7 +162,7 @@ export type ReserveResult =
       handle: ReservationHandle;
     }
   | { outcome: 'killed'; target: string }
-  | { outcome: 'loop_detected'; retryAfterSec: number; tripped: boolean }
+  | { outcome: 'loop_detected'; retryAfterSec: number; tripped: boolean; reason: PauseReason }
   | {
       outcome: 'budget_exceeded';
       scope: string;
@@ -310,6 +320,7 @@ export class BudgetEngine {
           outcome: 'loop_detected',
           retryAfterSec: Number(reply[1]),
           tripped: reply[2] === 1,
+          reason: pauseReason(reply[3]),
         };
       case 'DENY': {
         const window = reply[2] as string;
@@ -484,16 +495,23 @@ export class BudgetEngine {
     keyId: string,
     dest: { numberHash: string; prefix: string },
     limits: PumpingPolicy,
-  ): Promise<{ ok: true } | { ok: false; retryAfterSec: number; tripped: boolean }> {
+  ): Promise<
+    { ok: true } | { ok: false; retryAfterSec: number; tripped: boolean; reason: PauseReason }
+  > {
     const k = orgKeys(orgId);
     const reply = (await runScript(
       this.client,
       scripts.pump,
       [k.circuit(keyId), k.pumpNumber(keyId, dest.numberHash), k.pumpPrefix(keyId, dest.prefix)],
       [limits.perNumberPerHour, limits.perPrefixPerHour, limits.cooldownSec],
-    )) as [string, number?, number?];
+    )) as [string, number?, number?, string?];
     if (reply[0] === 'OK') return { ok: true };
-    return { ok: false, retryAfterSec: Number(reply[1]), tripped: reply[2] === 1 };
+    return {
+      ok: false,
+      retryAfterSec: Number(reply[1]),
+      tripped: reply[2] === 1,
+      reason: pauseReason(reply[3]),
+    };
   }
 
   /**
@@ -603,22 +621,29 @@ export class BudgetEngine {
     return [...found];
   }
 
-  /** Keys whose loop circuit is open, with the seconds until it closes by itself. */
+  /**
+   * Keys whose circuit is open, with the seconds until it closes by itself and what opened it
+   * (the loop breaker or the SMS pumping guard).
+   */
   async pausedKeys(
     orgId: string,
     keyIds: readonly string[],
-  ): Promise<{ keyId: string; retryAfterSec: number }[]> {
+  ): Promise<{ keyId: string; retryAfterSec: number; reason: PauseReason }[]> {
     if (keyIds.length === 0) return [];
     const k = orgKeys(orgId);
     const tx = this.client.multi();
-    for (const id of keyIds) tx.pttl(k.circuit(id));
+    for (const id of keyIds) tx.pttl(k.circuit(id)).get(k.circuit(id));
     const res = (await tx.exec()) ?? [];
-    const out: { keyId: string; retryAfterSec: number }[] = [];
+    const out: { keyId: string; retryAfterSec: number; reason: PauseReason }[] = [];
     keyIds.forEach((keyId, i) => {
-      const ms = Number(res[i]?.[1] ?? -2);
+      const ms = Number(res[2 * i]?.[1] ?? -2);
       // -2: no circuit; -1: open with no expiry (never set that way, but still paused).
       if (ms === -2) return;
-      out.push({ keyId, retryAfterSec: ms < 0 ? 0 : Math.ceil(ms / 1000) });
+      out.push({
+        keyId,
+        retryAfterSec: ms < 0 ? 0 : Math.ceil(ms / 1000),
+        reason: pauseReason(res[2 * i + 1]?.[1]),
+      });
     });
     return out;
   }

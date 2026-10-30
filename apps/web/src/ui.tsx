@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react';
-import { usd } from './api.js';
+import { type ReactNode, useState } from 'react';
+import { localDate, localDateTime, localZone, usd } from './api.js';
 
 /** The brand mark and name, as on spendbrake.dev: a brake pad across a ring. */
 export function Brand() {
@@ -11,6 +11,34 @@ export function Brand() {
       </svg>
       Spend Brake
     </>
+  );
+}
+
+/**
+ * A time as the dashboard shows every time: in the browser's time zone, named in the tooltip
+ * with the UTC original.
+ */
+export function Time({ iso, date = false }: { iso: string; date?: boolean }) {
+  return (
+    <time dateTime={iso} title={`Your time zone (${localZone()}); UTC: ${iso}`}>
+      {date ? localDate(iso) : localDateTime(iso)}
+    </time>
+  );
+}
+
+/** Column label for times, so every table says the same thing. */
+export const TIME_LABEL = 'Time (local)';
+
+/** Copies a token or secret shown once. */
+export function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={() => void navigator.clipboard?.writeText(text).then(() => setCopied(true))}
+    >
+      {copied ? 'Copied' : 'Copy'}
+    </button>
   );
 }
 

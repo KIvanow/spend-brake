@@ -3,7 +3,7 @@ import { type FormEvent, useState } from 'react';
 import { type AuthOptions, type Key, api } from '../api.js';
 import { PROVIDERS, providerById } from '../providers.js';
 import { useRole } from '../role.js';
-import { Table } from '../ui.js';
+import { CopyButton, Table } from '../ui.js';
 
 export interface Credential {
   id: string;
@@ -109,18 +109,6 @@ export function AddProviderKey({
       )}
       {check && !onAdded && <KeyAdvice check={check} />}
     </>
-  );
-}
-
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <button
-      type="button"
-      onClick={() => void navigator.clipboard?.writeText(text).then(() => setCopied(true))}
-    >
-      {copied ? 'Copied' : 'Copy'}
-    </button>
   );
 }
 

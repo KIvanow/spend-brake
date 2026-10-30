@@ -223,6 +223,9 @@ describe('error contract', () => {
     const res = await textSearch(token);
     expect(res.statusCode).toBe(403);
     expect(res.json()).toMatchObject({ error: 'killed', target: `key:${id}` });
+    expect(res.json<{ message: string }>().message).toBe(
+      `Spending is switched off for this key (key:${id}). Stop.`,
+    );
     await engine.unkill(org, { kind: 'key', id });
     await engine.kill(org, { kind: 'sess', id: 'bad-run' });
     expect((await textSearch(token, { 'x-brake-session': 'bad-run' })).statusCode).toBe(403);
@@ -251,7 +254,8 @@ describe('error contract', () => {
     const res = await same();
     expect(res.statusCode).toBe(429);
     expect(res.headers['retry-after']).toBe('600');
-    expect(res.json()).toMatchObject({ error: 'loop_detected', retryAfter: 600 });
+    expect(res.json()).toMatchObject({ error: 'loop_detected', retryAfter: 600, reason: 'loop' });
+    expect(res.json<{ message: string }>().message).toMatch(/Repeated requests.*all providers/);
     expect((await events(org)).some((e) => e.type === 'loop')).toBe(true);
   });
 

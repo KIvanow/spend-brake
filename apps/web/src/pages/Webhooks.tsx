@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
 import { api } from '../api.js';
 import { useRole } from '../role.js';
-import { Table } from '../ui.js';
+import { CopyButton, TIME_LABEL, Table, Time } from '../ui.js';
 
 interface Webhook {
   id: string;
@@ -90,8 +90,11 @@ const PRESETS = [
   { id: 'raw', name: 'Any URL (signed JSON)', hint: 'https://example.com/spend-brake' },
 ] as const;
 
-/** Add a webhook (admins and owners). Its signing secret is shown once. */
-function AddWebhook() {
+/**
+ * Add a webhook (admins and owners). Its signing secret is shown once, until the webhook is
+ * deleted (`removed`).
+ */
+function AddWebhook({ removed }: { removed: ReadonlySet<string> }) {
   const qc = useQueryClient();
   const [preset, setPreset] = useState<(typeof PRESETS)[number]['id']>('slack');
   const [name, setName] = useState('');
@@ -150,10 +153,13 @@ function AddWebhook() {
         <button type="submit" className="primary" disabled={add.isPending}>
           Add webhook
         </button>
-        <p className="muted full">It gets every alert. The URL is stored encrypted.</p>
+        <p className="muted full">
+          It gets every alert instead of the alert email: while any webhook takes an alert, that
+          alert is not emailed. The URL is stored encrypted.
+        </p>
       </form>
       {add.isError && <p className="error">{add.error.message}</p>}
-      {add.data && (
+      {add.data && !removed.has(add.data.id) && (
         <div className="callout">
           <p>
             <strong>Added {add.data.name}.</strong> Each post is signed with this secret, so your
@@ -161,6 +167,7 @@ function AddWebhook() {
           </p>
           <p className="secret">
             <code>{add.data.secret}</code>
+            <CopyButton text={add.data.secret} />
           </p>
         </div>
       )}
@@ -173,10 +180,12 @@ export function Webhooks() {
   const qc = useQueryClient();
   const { can } = useRole();
   const [open, setOpen] = useState<string | null>(null);
+  const [removed, setRemoved] = useState<ReadonlySet<string>>(new Set());
   const remove = useMutation({
     mutationFn: (id: string) => api(`/v1/webhooks/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     onSuccess: (_data, id) => {
       setOpen((o) => (o === id ? null : o));
+      setRemoved((r) => new Set(r).add(id));
       void qc.invalidateQueries({ queryKey: ['webhooks'] });
     },
   });
@@ -228,7 +237,11 @@ export function Webhooks() {
                       aria-label={`Delete webhook ${w.name}`}
                       disabled={remove.isPending}
                       onClick={() => {
-                        if (window.confirm(`Delete the webhook "${w.name}"? Its alerts stop.`)) {
+                        const last = (hooks.data?.items.length ?? 0) <= 1;
+                        const next = last
+                          ? 'Alerts go back to the alert email.'
+                          : 'Alerts no other webhook takes go back to the alert email.';
+                        if (window.confirm(`Delete the webhook "${w.name}"? ${next}`)) {
                           remove.mutate(w.id);
                         }
                       }}
@@ -244,7 +257,7 @@ export function Webhooks() {
       />
       {remove.isError && <p className="error">{remove.error.message}</p>}
       {can('admin') ? (
-        <AddWebhook />
+        <AddWebhook removed={removed} />
       ) : (
         <p className="muted">Admins and owners can add and delete webhooks.</p>
       )}
@@ -256,7 +269,7 @@ export function Webhooks() {
             rows={log.data?.items ?? []}
             empty="Nothing delivered yet."
             columns={[
-              { label: 'Time', render: (d) => d.at.replace('T', ' ').slice(0, 19) },
+              { label: TIME_LABEL, render: (d) => <Time iso={d.at} /> },
               { label: 'Alert', render: (d) => d.type },
               { label: 'Attempt', render: (d) => d.attempt, numeric: true },
               {

@@ -417,6 +417,9 @@ describe('webhooks', () => {
     );
     await user.click(within(form).getByRole('button', { name: 'Add webhook' }));
     expect(await screen.findByText('whsec_once')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Copy' })).toBeTruthy();
+    // Adding one takes alerts away from the alert email, and the form says so.
+    expect(within(form).getByText(/instead of the alert email/)).toBeTruthy();
     expect(calls.find((c) => c.method === 'POST' && c.url === '/v1/webhooks')!.body).toEqual({
       name: 'Slack',
       url: 'https://hooks.slack.com/services/T0/B0/x',
@@ -424,9 +427,14 @@ describe('webhooks', () => {
     });
     expect(await screen.findByText('https://hooks.slack.com')).toBeTruthy();
 
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     await user.click(screen.getByRole('button', { name: 'Delete webhook Slack' }));
+    expect(confirm).toHaveBeenCalledWith(
+      'Delete the webhook "Slack"? Alerts go back to the alert email.',
+    );
     expect(await screen.findByText(/No webhooks/)).toBeTruthy();
+    // The deleted webhook's secret is no longer on screen.
+    expect(screen.queryByText('whsec_once')).toBeNull();
   });
 
   it('shows viewers the webhooks without the add form or delete buttons', async () => {
@@ -520,7 +528,11 @@ describe('roles', () => {
     ];
     routes['GET /v1/status'] = () => [
       200,
-      { killed: [], paused: [{ keyId: 'key_1', retryAfterSec: 540 }], scopes: [] },
+      {
+        killed: [],
+        paused: [{ keyId: 'key_1', retryAfterSec: 540, reason: 'pumping' }],
+        scopes: [],
+      },
     ];
     routes['POST /v1/keys/key_1/resume'] = () => [200, { keyId: 'key_1', resumed: true }];
     routes['PATCH /v1/keys/key_1'] = () => [200, {}];
@@ -564,6 +576,9 @@ describe('roles', () => {
     ];
     signedInByEmail();
     const user = userEvent.setup();
+    // An SMS pumping pause says so, not that the app repeated a request.
+    expect(await screen.findByText(/Paused for possible SMS pumping/)).toBeTruthy();
+    expect(screen.queryByText(/Paused by the loop breaker/)).toBeNull();
     await user.click(await screen.findByRole('button', { name: 'Resume now' }));
     await waitFor(() =>
       expect(calls.some((c) => c.method === 'POST' && c.url === '/v1/keys/key_1/resume')).toBe(
@@ -782,7 +797,7 @@ describe('getting started', () => {
     window.location.hash = '/setup';
     signedInByEmail();
     const user = userEvent.setup();
-    await screen.findByRole('heading', { name: 'Get started' });
+    await screen.findByRole('heading', { name: 'Get started', level: 2 });
 
     await user.type(
       await screen.findByLabelText(/Your Google Maps Platform API key/),

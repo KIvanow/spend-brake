@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { useRole } from '../role.js';
+import { Time } from '../ui.js';
 
 interface OtlpView {
   endpoint: string;
@@ -15,7 +16,14 @@ interface OtlpView {
   queued: number;
 }
 
-const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString() : 'never');
+const when = (iso: string | null) =>
+  iso ? (
+    <>
+      <Time iso={iso} /> (local)
+    </>
+  ) : (
+    'never'
+  );
 
 function CopyBlock({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);

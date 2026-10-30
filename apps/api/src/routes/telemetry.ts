@@ -30,19 +30,34 @@ const headerName = z
   .regex(/^[A-Za-z0-9-]{1,64}$/, 'Header names are letters, digits and dashes.')
   .refine((h) => !RESERVED.has(h.toLowerCase()), 'Spend Brake sets this header itself.');
 
-const endpoint = z
-  .url()
-  .max(500)
-  .refine((u) => {
-    const url = new URL(u);
-    // Plain HTTP only to this machine (a local collector in development).
-    return (
-      !url.username &&
-      !url.password &&
-      (url.protocol === 'https:' ||
-        (url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)))
+const LOCAL_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
+const HTTPS_ONLY = 'Use an https:// URL; plain http:// is only for a collector on this machine.';
+const PRIVATE_HINT =
+  'A local http:// collector needs ALLOW_PRIVATE_COLLECTORS=true on the API and the worker.';
+
+/**
+ * Collector URLs: https:// without credentials. Plain http:// only to this machine (a local
+ * collector in development), and only where private collectors are allowed
+ * (ALLOW_PRIVATE_COLLECTORS): elsewhere neither the worker nor a test span could reach it.
+ */
+const endpointSchema = (allowPrivate: boolean) =>
+  z
+    .url()
+    .max(500)
+    .refine((u) => {
+      const url = new URL(u);
+      return !url.username && !url.password;
+    }, 'Use a URL without credentials (put API keys in headers).')
+    .refine(
+      (u) => {
+        const url = new URL(u);
+        return (
+          url.protocol === 'https:' ||
+          (allowPrivate && url.protocol === 'http:' && LOCAL_HOSTS.includes(url.hostname))
+        );
+      },
+      allowPrivate ? HTTPS_ONLY : `Use an https:// URL. ${PRIVATE_HINT}`,
     );
-  }, 'Use an https:// URL without credentials (put API keys in headers).');
 
 const otlpView = z.object({
   endpoint: z.string(),
@@ -62,6 +77,7 @@ const otlpView = z.object({
  * spans (sent by the worker).
  */
 export function telemetryRoutes(r: Router, ctx: Ctx, dispatcher: GuardedClient): void {
+  const endpoint = endpointSchema(dispatcher.allowPrivate);
   r.add({
     method: 'get',
     path: '/v1/metrics',
@@ -236,6 +252,10 @@ export function telemetryRoutes(r: Router, ctx: Ctx, dispatcher: GuardedClient):
           otlpHeadersContext(auth.orgId),
         ),
       ) as Record<string, string>;
+      // Saved while private collectors were allowed: say what to change, not just "private".
+      if (!dispatcher.allowPrivate && new URL(row.endpoint).protocol === 'http:') {
+        return { ok: false, status: null, error: PRIVATE_HINT };
+      }
       return postSpans(row.endpoint, headers, auth.orgId, [testSpan(auth.orgId, ctx.now())], {
         dispatcher,
         timeoutMs: 8_000,

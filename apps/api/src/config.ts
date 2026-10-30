@@ -32,6 +32,11 @@ const envSchema = z.object({
         .filter(Boolean),
     )
     .pipe(z.array(z.union([z.ipv4(), z.ipv6()]))),
+  /**
+   * Test spans may go to private addresses, and OTLP endpoints may be a local http:// collector
+   * (development). Set it on the worker too, which sends the real spans.
+   */
+  ALLOW_PRIVATE_COLLECTORS: z.stringbool().default(false),
   /** Hosted sign-up is open (the billing service serves it). */
   BRAKE_HOSTED_SIGNUP: z.stringbool().default(false),
 });

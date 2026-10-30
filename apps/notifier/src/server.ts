@@ -8,6 +8,8 @@ export interface ServerDeps {
   db: Db;
   apiUrl: string;
   actionSecret: string;
+  /** Where the dashboard is (BRAKE_DASHBOARD_URL): action pages link back to it. */
+  dashboardUrl?: string | undefined;
   logger?: FastifyServerOptions['logger'];
   now?: () => Date;
 }
@@ -71,7 +73,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     );
     if (!check.ok) {
       const msg = check.reason === 'expired' ? 'This link has expired.' : 'This link is not valid.';
-      return reply.code(check.reason === 'expired' ? 410 : 400).send(resultPage(false, msg));
+      return reply
+        .code(check.reason === 'expired' ? 410 : 400)
+        .send(resultPage(false, msg, deps.dashboardUrl));
     }
     let loginRequired = false;
     if (check.claims.act === 'raise') {
@@ -81,7 +85,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       );
     }
     return reply.send(
-      confirmPage(check.claims, { loginRequired, keyName: await keyName(deps.db, check.claims) }),
+      confirmPage(check.claims, {
+        loginRequired,
+        keyName: await keyName(deps.db, check.claims),
+        dashboardUrl: deps.dashboardUrl,
+      }),
     );
   });
 
@@ -112,6 +120,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
               : body.pendingApproval
                 ? 'The raise is waiting for a second person to approve it in the dashboard; the cap is unchanged until then.'
                 : (DONE[body.action ?? ''] ?? 'Done.'),
+            deps.dashboardUrl,
           ),
         );
     },

@@ -9,6 +9,8 @@
   --text: #1b1b19;
   --muted: #6b6b66;
   --border: #e2e2dc;
+  /* Form field outlines: 3:1 or more against the field and the page (WCAG 1.4.11). */
+  --border-strong: #8a8a84;
   --accent: #1d4ed8;
   --accent-ink: #ffffff;
   --brake: #c92a1f;
@@ -16,6 +18,8 @@
   --danger: var(--brake);
   --warn: #b45309;
   --ok: #15803d;
+  /* Green text on a green tint (badges, done steps): 4.5:1 or more. */
+  --ok-ink: #166534;
   --code-bg: #1d1d1b;
   --code-text: #ececea;
   --code-muted: #8f8f88;
@@ -31,12 +35,14 @@
     --text: #ececea;
     --muted: #9b9b95;
     --border: #33332f;
+    --border-strong: #70706a;
     --accent: #7aa2ff;
     --accent-ink: #0f1a33;
     --brake: #ff7a6e;
     --brake-soft: #3a1d1a;
     --warn: #f5a524;
     --ok: #4ade80;
+    --ok-ink: #4ade80;
     --code-bg: #0e0e0d;
     --code-text: #ececea;
     --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 12px 32px -16px rgb(0 0 0 / 0.6);
@@ -50,12 +56,14 @@
   --text: #ececea;
   --muted: #9b9b95;
   --border: #33332f;
+  --border-strong: #70706a;
   --accent: #7aa2ff;
   --accent-ink: #0f1a33;
   --brake: #ff7a6e;
   --brake-soft: #3a1d1a;
   --warn: #f5a524;
   --ok: #4ade80;
+  --ok-ink: #4ade80;
   --code-bg: #0e0e0d;
   --code-text: #ececea;
   --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 12px 32px -16px rgb(0 0 0 / 0.6);
@@ -151,29 +159,80 @@ header.top {
 .mark .pad {
   fill: var(--brake);
 }
-header.top nav {
-  display: flex;
-  gap: 2px;
-  /* Narrow screens: one row of pages that scrolls sideways, under the brand. */
-  order: 3;
-  flex: 1 0 100%;
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  margin: 0 -16px;
-  padding: 0 16px 8px;
-  scrollbar-width: none;
+/* Narrow screens: the pages fold into a menu under a Menu button that names the current page,
+   as on the website. Wide screens show them all in the bar. */
+header.top .menu-toggle {
+  order: 2;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-weight: 500;
 }
-header.top nav::-webkit-scrollbar {
+header.top .menu-toggle .label {
+  color: var(--muted);
+}
+header.top .menu-toggle .here {
+  font-weight: 600;
+}
+header.top .menu-toggle .here::before {
+  content: '·';
+  margin-right: 8px;
+  color: var(--muted);
+  font-weight: 500;
+}
+header.top .menu-toggle::after {
+  content: '';
+  width: 6px;
+  height: 6px;
+  margin: 0 2px 3px 2px;
+  border: solid var(--muted);
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}
+header.top .menu-toggle[aria-expanded='true'] {
+  background: var(--surface-2);
+}
+header.top .menu-toggle[aria-expanded='true']::after {
+  margin: 3px 2px 0 2px;
+  transform: rotate(-135deg);
+}
+/* Phones: brand, the current page and Sign out on one line. */
+@media (max-width: 479px) {
+  header.top {
+    column-gap: 8px;
+  }
+  header.top .menu-toggle .label {
+    display: none;
+  }
+  header.top .menu-toggle .here::before {
+    content: none;
+  }
+}
+header.top nav {
   display: none;
+  flex-direction: column;
+  gap: 2px;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  padding: 8px 16px 12px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+header.top nav.open {
+  display: flex;
 }
 header.top nav button {
   flex: none;
+  justify-content: flex-start;
   background: none;
   border: 0;
   border-radius: 6px;
   color: var(--muted);
-  padding: 6px 10px;
-  font-size: 14px;
+  padding: 10px;
+  font-size: 15px;
   font-weight: 500;
 }
 header.top nav button:hover {
@@ -186,6 +245,7 @@ header.top nav button[aria-current='page'] {
   font-weight: 600;
 }
 header.top .signout {
+  order: 3;
   margin-left: auto;
   padding: 6px 10px;
   color: var(--muted);
@@ -201,8 +261,7 @@ header.top .signout:hover {
     padding: 0 24px;
   }
   header.top nav {
-    margin: 0 -24px;
-    padding: 0 24px 8px;
+    padding: 8px 24px 12px;
   }
 }
 @media (min-width: 1180px) {
@@ -210,15 +269,41 @@ header.top .signout:hover {
     flex-wrap: nowrap;
     height: 58px;
   }
-  header.top nav {
+  header.top .menu-toggle {
+    display: none;
+  }
+  header.top nav,
+  header.top nav.open {
+    display: flex;
+    flex-direction: row;
+    position: static;
     order: 0;
     flex: 1 1 auto;
-    margin: 0;
     padding: 0;
+    background: none;
+    border: 0;
+    box-shadow: none;
+  }
+  header.top nav button {
+    padding: 6px 10px;
+    font-size: 14px;
   }
   header.top .signout {
+    order: 0;
     margin-left: 0;
   }
+}
+/* For screen readers only (the page's h1: each page shows its own heading). */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* Page */
@@ -296,6 +381,16 @@ section > p.muted {
   font-weight: 400;
   letter-spacing: 0;
 }
+/* Billing's plan name sits under the page heading: a size below it. */
+.stat.plan {
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+.row.actions {
+  justify-content: flex-start;
+  margin-top: 16px;
+}
 
 /* Buttons: the website's .btn, a size down for dense pages. */
 button {
@@ -360,7 +455,7 @@ textarea {
   font-size: 15px;
   padding: 7px 10px;
   border-radius: 8px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   background: var(--surface);
   color: var(--text);
   min-width: 0;
@@ -368,7 +463,7 @@ textarea {
 }
 input:hover,
 select:hover {
-  border-color: color-mix(in srgb, var(--muted) 60%, var(--border));
+  border-color: var(--muted);
 }
 input:focus,
 select:focus,
@@ -391,8 +486,10 @@ input[type='checkbox']:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+/* Placeholders carry real hints ("AIza…", URL shapes): full muted text, 4.5:1 or more. */
 ::placeholder {
-  color: color-mix(in srgb, var(--muted) 75%, transparent);
+  color: var(--muted);
+  opacity: 1;
 }
 fieldset {
   border: 0;
@@ -446,8 +543,11 @@ fieldset legend {
   .form {
     padding: 16px;
   }
+  /* One field per line; flex-basis, not just width, or `.grow` (flex: 1) still shares a line. */
   .form > label,
+  .form > fieldset,
   .form .grow {
+    flex: 1 1 100%;
     width: 100%;
     min-width: 0;
   }
@@ -556,6 +656,10 @@ td button {
   border: 1px dashed var(--border);
   border-radius: 12px;
 }
+/* As wide as the tables and forms around it, not the 72ch of a paragraph. */
+section > p.muted.empty {
+  max-width: none;
+}
 
 /* Badges and meters */
 .badge {
@@ -565,7 +669,7 @@ td button {
   line-height: 1.5;
   padding: 1px 9px;
   border-radius: 999px;
-  color: var(--ok);
+  color: var(--ok-ink);
   background: color-mix(in srgb, var(--ok) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--ok) 30%, transparent);
   font-variant-numeric: tabular-nums;
@@ -743,35 +847,35 @@ td code {
 .step.done .step-n {
   border-color: color-mix(in srgb, var(--ok) 40%, transparent);
   background: color-mix(in srgb, var(--ok) 12%, transparent);
-  color: var(--ok);
+  color: var(--ok-ink);
 }
 .step.done h3 {
   color: var(--muted);
 }
 
-/* Sign in, sign up and welcome: one card on the website's hero wash. */
-.signin {
-  position: relative;
-  max-width: 440px;
-  padding-top: max(40px, 10vh);
-}
-.signin::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  z-index: -1;
+/* Sign in, sign up and welcome: one card on the website's hero wash. The wash is the page's own
+   background, so it runs the full length of a long page (sign-up at 375px), with a glow at the
+   top and one at the bottom. */
+body:has(main.signin) {
+  min-height: 100vh;
   background:
     radial-gradient(
-      60% 50% at 80% 0%,
-      color-mix(in srgb, var(--accent) 12%, transparent),
-      transparent 70%
-    ),
+        60% 50% at 80% 0%,
+        color-mix(in srgb, var(--accent) 12%, transparent),
+        transparent 70%
+      )
+      top / 100% 100vh no-repeat,
     radial-gradient(
-      40% 40% at 10% 100%,
-      color-mix(in srgb, var(--brake) 8%, transparent),
-      transparent 70%
-    );
-  pointer-events: none;
+        40% 40% at 10% 100%,
+        color-mix(in srgb, var(--brake) 8%, transparent),
+        transparent 70%
+      )
+      bottom / 100% 100vh no-repeat,
+    var(--bg);
+}
+.signin {
+  max-width: 440px;
+  padding-top: max(40px, 10vh);
 }
 .signin h1.brand {
   justify-content: center;
@@ -843,8 +947,10 @@ td code {
   box-shadow: 0 0 0 1px var(--accent) inset;
   background: color-mix(in srgb, var(--accent) 5%, var(--surface));
 }
+/* No shrinking: a long description must not squeeze one plan's radio out of line. */
 .plans .plan input {
-  margin-top: 4px;
+  flex: none;
+  margin: 4px 0 0;
 }
 .plans .plan .muted {
   font-size: 13px;

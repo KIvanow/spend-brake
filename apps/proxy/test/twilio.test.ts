@@ -114,5 +114,10 @@ describe('Twilio through the proxy', () => {
     for (let i = 0; i < 7; i++)
       codes.push((await sms(token, '+14155550199', `msg ${i}`)).statusCode);
     expect(codes).toEqual([201, 201, 201, 201, 201, 429, 429]);
+    // The pause covers the whole key and says it is for pumping, not repeated requests.
+    const other = await sms(token, '+14155550123', 'hello');
+    expect(other.statusCode).toBe(429);
+    expect(other.json()).toMatchObject({ error: 'loop_detected', reason: 'pumping' });
+    expect(other.json<{ message: string }>().message).toMatch(/SMS pumping.*all providers/);
   });
 });

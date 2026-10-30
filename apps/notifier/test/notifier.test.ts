@@ -105,7 +105,12 @@ beforeAll(async () => {
     rateLimitPerMinute: 100_000,
   });
   const apiUrl = await api.listen({ port: 0, host: '127.0.0.1' });
-  pages = buildServer({ db, apiUrl, actionSecret: ACTION_SECRET });
+  pages = buildServer({
+    db,
+    apiUrl,
+    actionSecret: ACTION_SECRET,
+    dashboardUrl: 'https://app.example.test',
+  });
   await pages.ready();
 
   const transport = createTransport({ jsonTransport: true });
@@ -431,9 +436,17 @@ describe('action links', () => {
     expect(page.body).toContain('<form method="post">');
     expect(await engine.killed(o.id)).toEqual([]);
 
+    // Styled as the dashboard, with a way back to it; the CSP still allows nothing else.
+    expect(page.body).toContain('<title>Stop all spending for key:k1? · Spend Brake</title>');
+    expect(page.body).toContain('<a href="https://app.example.test">Back to the dashboard</a>');
+    expect(page.headers['content-security-policy']).toBe(
+      "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'",
+    );
+
     const done = await pages.inject({ method: 'POST', url: `/a/${t}` });
     expect(done.statusCode).toBe(200);
     expect(done.body).toContain('Spending is stopped');
+    expect(done.body).toContain('Back to the dashboard');
     expect(await engine.killed(o.id)).toEqual(['key:k1']);
     const again = await pages.inject({ method: 'POST', url: `/a/${t}` });
     expect(again.statusCode).toBe(409);

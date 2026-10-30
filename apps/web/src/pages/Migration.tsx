@@ -36,7 +36,12 @@ export function Migration() {
         do stays on Google. Prices verified {e.verifiedAt}.
       </p>
       <Table
-        rows={e.alternatives}
+        // Cheapest first; "contact sales" (no price) last.
+        rows={[...e.alternatives].sort(
+          (a, b) =>
+            Number(a.totalMicros === null) - Number(b.totalMicros === null) ||
+            (a.totalMicros ?? 0) - (b.totalMicros ?? 0),
+        )}
         columns={[
           {
             label: 'Provider',

@@ -132,9 +132,15 @@ export function Team() {
       {!owner && <p className="muted">Owners can invite people and change roles.</p>}
       <form className="form" onSubmit={submit} hidden={!owner}>
         <h3>Invite someone</h3>
-        <label>
+        <label className="grow">
           Email
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="name@example.com"
+            required
+          />
         </label>
         <label>
           Role

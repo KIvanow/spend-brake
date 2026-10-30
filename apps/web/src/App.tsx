@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   type AuthOptions,
   SIGNED_OUT,
@@ -42,29 +42,73 @@ const PAGES = {
 } as const;
 type PageName = keyof typeof PAGES;
 const LABELS: Partial<Record<PageName, string>> = { Setup: 'Get started' };
+const pageLabel = (p: PageName) => LABELS[p] ?? p;
 
 /**
  * The page links. Approvals need a self-hosted Business or Enterprise license, so the hosted
  * service (where sign-up is open) leaves them out.
+ *
+ * Below 1180px the links fold into a menu, as on the website: the Menu button names the current
+ * page, opens the list, and Escape or picking a page closes it.
  */
 function Nav({ page, setPage }: { page: PageName; setPage: (p: PageName) => void }) {
   const options = useAuthOptions();
   const hidden = new Set<PageName>(options.data?.signup ? ['Approvals'] : []);
+  const [open, setOpen] = useState(false);
+  const toggle = useRef<HTMLButtonElement>(null);
+  const list = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    // Move focus into the list, onto the current page; Tab goes on from there.
+    list.current?.querySelector<HTMLButtonElement>('[aria-current="page"]')?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      setOpen(false);
+      toggle.current?.focus();
+    };
+    const onClick = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (!list.current?.contains(t) && !toggle.current?.contains(t)) setOpen(false);
+    };
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('click', onClick);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('click', onClick);
+    };
+  }, [open]);
   return (
-    <nav aria-label="Pages">
-      {(Object.keys(PAGES) as PageName[])
-        .filter((p) => !hidden.has(p) || p === page)
-        .map((p) => (
-          <button
-            key={p}
-            type="button"
-            aria-current={p === page ? 'page' : undefined}
-            onClick={() => setPage(p)}
-          >
-            {LABELS[p] ?? p}
-          </button>
-        ))}
-    </nav>
+    <>
+      <button
+        ref={toggle}
+        type="button"
+        className="menu-toggle"
+        aria-expanded={open}
+        aria-controls="pages"
+        aria-label={`Menu, current page: ${pageLabel(page)}`}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <span className="label">Menu</span>
+        <span className="here">{pageLabel(page)}</span>
+      </button>
+      <nav id="pages" ref={list} aria-label="Pages" className={open ? 'open' : undefined}>
+        {(Object.keys(PAGES) as PageName[])
+          .filter((p) => !hidden.has(p) || p === page)
+          .map((p) => (
+            <button
+              key={p}
+              type="button"
+              aria-current={p === page ? 'page' : undefined}
+              onClick={() => {
+                setOpen(false);
+                setPage(p);
+              }}
+            >
+              {pageLabel(p)}
+            </button>
+          ))}
+      </nav>
+    </>
   );
 }
 
@@ -96,6 +140,11 @@ export function App({
   // Bumped when another tab signs in as someone else: every page mounts afresh, so nothing the
   // previous person's queries loaded (their role, their org's tables) stays on screen.
   const [session, setSession] = useState(0);
+
+  // One title per page, so tabs and history entries say where they are.
+  useEffect(() => {
+    document.title = signedIn && !pending ? `${pageLabel(page)} · Spend Brake` : 'Spend Brake';
+  }, [page, signedIn, pending]);
 
   useEffect(() => {
     const onHash = () => {
@@ -220,6 +269,8 @@ export function App({
         </button>
       </header>
       <main>
+        {/* Each page's own headings start at h2; this names the page for the outline. */}
+        <h1 className="visually-hidden">{pageLabel(page)}</h1>
         <Page />
       </main>
     </QueryClientProvider>

@@ -1958,14 +1958,23 @@
                           },
                           "retryAfterSec": {
                             "type": "number"
+                          },
+                          "reason": {
+                            "type": "string",
+                            "enum": [
+                              "loop",
+                              "pumping"
+                            ],
+                            "description": "What opened the circuit: the loop breaker (repeated requests) or the SMS pumping guard"
                           }
                         },
                         "required": [
                           "keyId",
-                          "retryAfterSec"
+                          "retryAfterSec",
+                          "reason"
                         ]
                       },
-                      "description": "Keys refused for a loop (429 loop_detected) until the circuit closes"
+                      "description": "Keys refused for every provider (429 loop_detected) until their circuit closes"
                     },
                     "scopes": {
                       "type": "array",
