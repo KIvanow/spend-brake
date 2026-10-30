@@ -1,0 +1,530 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Privacy Policy - Spend Brake</title>
+    <meta
+      name="description"
+      content="How Spend Brake handles personal information: account emails, encrypted provider keys, per-call metadata, and the service providers involved."
+    />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#f7f7f5" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#141413" media="(prefers-color-scheme: dark)" />
+    <link rel="canonical" href="https://spendbrake.dev/privacy" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/site.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div class="wrap">
+        <a class="brand" href="/">
+          <svg viewBox="0 0 32 32" aria-hidden="true">
+            <circle cx="16" cy="16" r="12.5" fill="none" stroke="var(--accent)" stroke-width="3" />
+            <rect x="8" y="14" width="16" height="4" rx="1" fill="var(--brake)" />
+          </svg>
+          Spend Brake
+        </a>
+        <nav aria-label="Sections">
+          <a href="/#how">How it works</a>
+          <a href="/#pricing">Pricing</a>
+          <a href="/#self-host">Self-host</a>
+          <a href="https://github.com/KIvanow/spend-brake">Docs</a>
+        </nav>
+        <div class="cta">
+          <a class="btn ghost" href="https://app.spendbrake.dev/">Sign in</a>
+          <a class="btn primary" href="https://app.spendbrake.dev/#/signup">Start free</a>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="legal">
+        <div class="wrap">
+          <h1>Privacy Policy</h1>
+          <p class="meta">Effective as of <span class="todo">[TODO: effective date]</span></p>
+
+          <div class="summary">
+            <h2>In short</h2>
+            <ul>
+              <li>Spend Brake is run by me, Kristiyan Ivanov, an individual, not a company.</li>
+              <li>
+                I store your account email, your provider API keys (encrypted), and metadata about
+                each proxied call: what it cost, not what it said. Request and response bodies and
+                query strings are never stored.
+              </li>
+              <li>
+                Payments go through Stripe. Transactional email goes through Resend. The service
+                runs on DigitalOcean; this website is served by Vercel.
+              </li>
+              <li>
+                I do not sell personal information and this website sets no cookies and runs no
+                analytics.
+              </li>
+              <li>A self-hosted install sends nothing to me.</li>
+            </ul>
+          </div>
+
+          <p>
+            Spend Brake (&ldquo;Spend Brake,&rdquo; &ldquo;I,&rdquo; &ldquo;me,&rdquo; or
+            &ldquo;we&rdquo;) is a proxy that enforces spend caps on paid APIs. It is operated by
+            Kristiyan Ivanov, an individual (&ldquo;the operator&rdquo;). This Privacy Policy
+            describes how I process personal information collected through the website at
+            <a href="https://spendbrake.dev">spendbrake.dev</a>, the hosted service at
+            <a href="https://app.spendbrake.dev">app.spendbrake.dev</a> and its proxy endpoints, the
+            <code>brake</code> command-line tool when it talks to the hosted service, and emails I
+            send (collectively, the &ldquo;Service&rdquo;).
+          </p>
+          <p>
+            The Service is intended for businesses and developers. When an organization
+            (&ldquo;org&rdquo;) on the Service invites you as a team member, or routes its
+            applications and agents through its account, that org decides what is sent through the
+            proxy. If you have concerns about information an org processes through Spend Brake,
+            please direct them to that org first.
+          </p>
+          <p>
+            <strong>Self-hosted installs.</strong> If you run Spend Brake on your own servers, the
+            software stores everything described below on your infrastructure, not mine. It does not
+            report usage, telemetry or account data to me; license files are verified offline. Only
+            the following reach anything outside your install: price checks fetch public provider
+            price pages; the optional signed catalog feed downloads price bundles from the feed URL
+            you configure; and any alert, email, OpenTelemetry or webhook destinations you set up
+            receive what you send them. This policy therefore applies to self-hosted installs only
+            to the extent you contact me, buy a license, or use the website.
+          </p>
+
+          <h2>Personal Information I Collect</h2>
+
+          <h3>Information you provide</h3>
+          <ul>
+            <li>
+              <strong>Account data</strong>: the email address you sign up with, the name you give
+              your org or project, your role in the org (owner, admin or viewer), and the email
+              addresses of people you invite. Emails are stored lower-case so sign-in can find them.
+              Sign-in uses one-time emailed links, so there is no password; instead the Service
+              stores hashed sign-in and API tokens.
+            </li>
+            <li>
+              <strong>Provider credentials</strong>: the API keys you store for providers such as
+              Google Maps Platform, Twilio, Mapbox, HERE, Tavily, Exa, Brave or SerpApi. They are
+              encrypted at rest with envelope encryption under a master key, decrypted in memory
+              only to forward your requests, and never written to logs or traces.
+            </li>
+            <li>
+              <strong>Configuration</strong>: your Spend Brake keys, caps, environments, agent and
+              session labels, loop rules, IP allowlists you set on keys, alert thresholds, and the
+              destinations you configure for alerts and telemetry (webhook URLs, Slack, Discord or
+              Teams webhooks, alert email addresses, OpenTelemetry endpoints and headers). Webhook
+              URLs and OpenTelemetry headers are stored encrypted.
+            </li>
+            <li>
+              <strong>Payment data</strong>. If you buy a plan or a license, your payment
+              information (card number, billing address and related details) is collected and
+              processed directly by my payment processor, Stripe. I do not receive or store your
+              full card number. I receive limited data from Stripe such as your Stripe customer id,
+              plan, subscription and invoice status, and may see the card type and last four digits,
+              billing name and address in Stripe's dashboard for support and accounting. See
+              <a href="https://stripe.com/privacy" target="_blank" rel="noopener noreferrer"
+                >Stripe's Privacy Policy</a
+              >.
+            </li>
+            <li>
+              <strong>Communications data</strong> from our exchanges, such as when you email me for
+              support.
+            </li>
+          </ul>
+
+          <h3>Information collected when requests go through the proxy</h3>
+          <p>
+            For every call made with one of your Spend Brake keys, the Service records a
+            <strong>usage event</strong> containing:
+          </p>
+          <ul>
+            <li>timestamp, org, key, environment, agent and session labels;</li>
+            <li>provider, route and SKU(s) the request was priced as;</li>
+            <li>
+              worst-case and actual cost in micro-dollars, whether the route was underpriced, and
+              the outcome (allowed, blocked, loop detected, upstream error);
+            </li>
+            <li>the provider's HTTP status and latency;</li>
+            <li>
+              the caller's trace context (<code>traceparent</code>), user agent, and request and
+              response sizes in bytes;
+            </li>
+            <li>
+              a one-way hash of the request used to detect identical repeated calls; it cannot be
+              turned back into the request.
+            </li>
+          </ul>
+          <p>
+            <strong>What is never stored:</strong> request bodies, response bodies, query strings,
+            the places, addresses or messages your requests were about, and the provider's
+            responses. Responses are streamed through to your application and not cached. The
+            dashboard, the ledger, Prometheus metrics and OpenTelemetry spans are all built from the
+            metadata above.
+          </p>
+
+          <h3>Automatic data collection</h3>
+          <ul>
+            <li>
+              <strong>Server logs.</strong> The proxy and admin API write request logs containing
+              the HTTP method, the URL with secret query parameters redacted, the client IP address
+              as seen by the proxy (behind the HTTPS front, the forwarded address), status code and
+              timing. Credential headers are censored before anything is written. Logs are kept for
+              <span class="todo">[TODO: log retention period]</span>.
+            </li>
+            <li>
+              <strong>IP addresses</strong> are also used transiently to rate-limit sign-in and
+              admin endpoints, and are compared against an IP allowlist if you set one on a key.
+              They are not part of usage events.
+            </li>
+            <li>
+              <strong>Audit log.</strong> Changes to caps, keys, credentials, team members and kill
+              switches are recorded with who made them and when, so your org can see what happened.
+            </li>
+            <li>
+              <strong>This website</strong> (spendbrake.dev) is static. It sets no cookies, loads no
+              third-party scripts and runs no analytics. Vercel, which serves it, keeps its own
+              request logs (including IP addresses) under
+              <a
+                href="https://vercel.com/legal/privacy-policy"
+                target="_blank"
+                rel="noopener noreferrer"
+                >Vercel's Privacy Policy</a
+              >.
+            </li>
+            <li>
+              <strong>The dashboard</strong> (app.spendbrake.dev) keeps your sign-in token in your
+              browser's local or session storage so you stay signed in. It uses no tracking cookies
+              and no analytics.
+            </li>
+            <li>
+              <strong>Email.</strong> Transactional emails (sign-in links, invitations, alerts,
+              license files, receipts) are sent through Resend. I do not embed tracking pixels, and
+              I do not use open or click tracking.
+            </li>
+          </ul>
+
+          <h2>How I Use Personal Information</h2>
+          <h3>Service delivery and operations</h3>
+          <ul>
+            <li>
+              Provide, operate and maintain the Service, including pricing and forwarding your
+              requests and enforcing your caps;
+            </li>
+            <li>
+              Create and manage your account and team, and send sign-in links and invitations;
+            </li>
+            <li>
+              Process payments through Stripe and send related information such as receipts and
+              license files;
+            </li>
+            <li>
+              Send the alerts you configure (thresholds, kills, loops, price changes, upstream key
+              errors) to the destinations you choose;
+            </li>
+            <li>
+              Enforce plan limits, detect loops and runaway spend, and keep the Service secure;
+            </li>
+            <li>
+              Communicate with you about the Service: security notices, changes to these policies,
+              support and administrative messages;
+            </li>
+            <li>Respond to your requests, questions and feedback.</li>
+          </ul>
+          <h3>Compliance and protection</h3>
+          <ul>
+            <li>Comply with applicable laws, lawful requests and legal process;</li>
+            <li>
+              Protect my, your or others' rights, privacy, safety or property, including by making
+              and defending legal claims;
+            </li>
+            <li>Enforce the <a href="/terms">Terms of Service</a>;</li>
+            <li>
+              Prevent, identify, investigate and deter fraudulent, harmful, unauthorized or illegal
+              activity, including abuse of the proxy or of the providers behind it.
+            </li>
+          </ul>
+          <p>
+            I do not use your data to train models, to build advertising profiles, or for marketing
+            to third parties.
+          </p>
+
+          <h2>How I Share Personal Information</h2>
+          <p>I do not sell personal information. I share it only as follows:</p>
+          <ul>
+            <li>
+              <strong>API providers.</strong> Every request you send through the proxy is forwarded
+              to the provider you addressed (for example Google Maps Platform) with your own
+              provider key, exactly as your application sent it. The provider's processing is
+              governed by your agreement with them, not by this policy.
+            </li>
+            <li>
+              <strong>Service providers</strong> that work on my behalf and may process personal
+              information only to provide their service to me:
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Provider</th>
+                      <th>Purpose</th>
+                      <th>What they see</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>Stripe</td>
+                      <td>Payments, subscriptions, invoices</td>
+                      <td>Billing details, email, plan</td>
+                    </tr>
+                    <tr>
+                      <td>Resend</td>
+                      <td>Transactional email</td>
+                      <td>
+                        Recipient email, message content (sign-in links, alerts, invitations,
+                        licenses)
+                      </td>
+                    </tr>
+                    <tr>
+                      <td>DigitalOcean</td>
+                      <td>Hosting the hosted service, its database and cache</td>
+                      <td>All data stored by the Service, on their infrastructure</td>
+                    </tr>
+                    <tr>
+                      <td>Vercel</td>
+                      <td>Hosting this website</td>
+                      <td>Web request logs for spendbrake.dev</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </li>
+            <li>
+              <strong>Destinations you configure.</strong> Alerts, webhooks, emails and
+              OpenTelemetry spans go to the Slack, Discord, Teams, webhook, email or OTLP endpoints
+              you set up. What those recipients do with the data is up to them and you.
+            </li>
+            <li>
+              <strong>Your org.</strong> Owners and admins of an org can see the org's team members,
+              keys, configuration, usage events and audit log.
+            </li>
+            <li>
+              <strong>Professional advisors</strong>, such as an accountant or lawyer, where
+              necessary in the course of their services to me.
+            </li>
+            <li>
+              <strong>Authorities and others</strong>, where I believe in good faith it is necessary
+              to comply with applicable law or to protect the rights, privacy, safety or property of
+              myself or others.
+            </li>
+            <li>
+              <strong>A successor operator.</strong> If I transfer Spend Brake to a company I form
+              or to another operator, or if the Service is otherwise sold or merged, personal
+              information may be transferred to the successor, who will be bound by this policy
+              until it is changed with notice to you.
+            </li>
+          </ul>
+
+          <h2>Data Retention</h2>
+          <ul>
+            <li>
+              <strong>Usage events</strong> are deleted automatically after your plan's retention
+              period: 7 days on Free and Indie, 30 days on Team, 365 days on Agents. The cleanup job
+              runs every six hours.
+            </li>
+            <li>
+              <strong>Account, team, keys and configuration</strong> are kept while your account
+              exists. Removed team members are marked removed and can no longer sign in, but their
+              entry is kept so the audit log still names who did what.
+            </li>
+            <li>
+              <strong>Provider credentials</strong> are deleted when you remove them or delete the
+              org.
+            </li>
+            <li>
+              <strong>Payment records</strong> at Stripe and in my accounting are kept as long as
+              tax and accounting law requires.
+            </li>
+            <li>
+              <strong>Server logs</strong>: <span class="todo">[TODO: log retention period]</span>.
+              <strong>Database backups</strong>:
+              <span class="todo">[TODO: backup retention period]</span>; deleted data may persist in
+              backups until they rotate.
+            </li>
+          </ul>
+          <p>
+            When I no longer need personal information, I delete or anonymize it. To delete your
+            account and its data, email me (see below).
+          </p>
+
+          <h2>Security</h2>
+          <p>
+            Provider keys, webhook URLs and telemetry headers are encrypted at rest; the real
+            provider key is decrypted only in the proxy's memory and never logged. Secrets are
+            stripped from log lines and traces. Traffic to and from the Service uses HTTPS. The
+            database and cache are reachable only from the Service's own containers. Still, security
+            risk is inherent in all internet and information technologies, and I cannot guarantee
+            the security of your personal information.
+          </p>
+
+          <h2>International Data Transfers</h2>
+          <p>
+            I am based in <span class="todo">[TODO: operator country]</span>. The hosted service
+            runs in DigitalOcean's <span class="todo">[TODO: hosting region]</span> region. Stripe,
+            Resend and Vercel are United States companies and may process data in the United States
+            and elsewhere. Your personal information may therefore be transferred to countries whose
+            privacy laws are not as protective as those where you live.
+          </p>
+          <p>
+            If you are located in the European Economic Area, the United Kingdom or Switzerland, I
+            will ensure that any transfer of your personal information is carried out in accordance
+            with applicable data protection law, including by relying on standard contractual
+            clauses approved by the European Commission or other appropriate safeguards offered by
+            the service providers above.
+          </p>
+
+          <h2>Information for European Users (GDPR)</h2>
+          <p>
+            If you are located in the EEA, the United Kingdom or Switzerland, the following
+            additional provisions apply.
+          </p>
+          <p>
+            <strong>Data controller.</strong> Kristiyan Ivanov, an individual established in
+            <span class="todo">[TODO: operator country]</span>, is the controller for account,
+            billing and website data. For data an org sends through the proxy on behalf of its own
+            users, the org is the controller and I act as its processor under the
+            <a href="/terms">Terms of Service</a>.
+          </p>
+          <p><strong>Legal bases for processing.</strong></p>
+          <ul>
+            <li>
+              <strong>Performance of a contract</strong>: processing needed to provide the Service
+              to you under the Terms of Service, including usage events, caps and billing.
+            </li>
+            <li>
+              <strong>Legitimate interests</strong>: operating, securing and improving the Service,
+              preventing abuse, and communicating with you, where those interests are not overridden
+              by your rights.
+            </li>
+            <li>
+              <strong>Compliance with legal obligations</strong>: for example keeping payment
+              records.
+            </li>
+            <li>
+              <strong>Consent</strong>: where you have given it for a specific purpose. You may
+              withdraw consent at any time by contacting me.
+            </li>
+          </ul>
+          <p>
+            <strong>Your rights under GDPR.</strong> In addition to the rights below, you may lodge
+            a complaint with your local data protection supervisory authority if you believe my
+            processing of your personal information violates applicable law.
+          </p>
+
+          <h2>Your Rights and Choices</h2>
+          <p>Regardless of where you are located, you may:</p>
+          <ul>
+            <li>Access the personal information I hold about you;</li>
+            <li>Update or correct inaccurate personal information;</li>
+            <li>Delete your personal information, including your account;</li>
+            <li>Export your personal information in a portable format;</li>
+            <li>Object to or restrict certain processing of your personal information.</li>
+          </ul>
+          <p>
+            Much of this you can do yourself in the dashboard: see and delete keys, credentials and
+            team members, and export usage events through the admin API. For anything else, email
+            <a href="mailto:kristiyan@spendbrake.dev">kristiyan@spendbrake.dev</a>. I will respond
+            in accordance with applicable law and within a reasonable time.
+          </p>
+          <p>
+            <strong>Emails.</strong> I send service emails only: sign-in links, invitations, the
+            alerts you configured, receipts and notices about the Service or these policies. You can
+            change or remove alert destinations in the dashboard. I do not currently run a marketing
+            list; if I start one, it will be opt-in with an unsubscribe link in every message.
+          </p>
+          <p>
+            <strong>Cookies and tracking.</strong> This website sets no cookies. The dashboard uses
+            your browser's local or session storage only to keep you signed in; clearing it signs
+            you out. There are no third-party trackers, so there is nothing to opt out of, and
+            &ldquo;Do Not Track&rdquo; signals change nothing because nothing is tracked.
+          </p>
+          <p>
+            <strong>Declining to provide information.</strong> I need certain information, such as
+            an email address and a provider key, to provide the Service. If you do not provide it, I
+            may not be able to provide the Service to you.
+          </p>
+
+          <h2>Other Sites and Services</h2>
+          <p>
+            The Service links to and forwards requests to services operated by third parties,
+            including the API providers whose keys you store, Stripe, and the alert destinations you
+            configure. These links and integrations are not an endorsement of, or a representation
+            that I am affiliated with, any third party. I do not control those services and am not
+            responsible for their actions. Please read their privacy policies.
+          </p>
+
+          <h2>Children</h2>
+          <p>
+            The Service is not intended for anyone under 16 years of age, and I do not knowingly
+            collect personal information from children under 16. If you believe a child has provided
+            me with personal information, please contact me and I will delete it as the law
+            requires.
+          </p>
+
+          <h2>Changes to This Privacy Policy</h2>
+          <p>
+            I may modify this Privacy Policy at any time. If I make material changes, I will notify
+            you by updating the date at the top, posting the new version on the website and, where
+            the change affects account holders, emailing the address on your account. Changes take
+            effect when posted unless stated otherwise. Your use of the Service after the effective
+            date of a modified policy means you accept it.
+          </p>
+
+          <h2 id="contact-us">How to Contact Me</h2>
+          <ul>
+            <li>Email: <a href="mailto:kristiyan@spendbrake.dev">kristiyan@spendbrake.dev</a></li>
+            <li>Operator: Kristiyan Ivanov, <span class="todo">[TODO: postal address]</span></li>
+          </ul>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="wrap">
+        <div>
+          <a class="brand" href="/">
+            <svg viewBox="0 0 32 32" aria-hidden="true">
+              <circle
+                cx="16"
+                cy="16"
+                r="12.5"
+                fill="none"
+                stroke="var(--accent)"
+                stroke-width="3"
+              />
+              <rect x="8" y="14" width="16" height="4" rx="1" fill="var(--brake)" />
+            </svg>
+            Spend Brake
+          </a>
+          <p>
+            Hard dollar caps for paid APIs. Run as a hosted service at
+            <a href="https://app.spendbrake.dev/">app.spendbrake.dev</a> or
+            <a href="https://github.com/KIvanow/spend-brake/blob/main/docs/self-hosting.md"
+              >self-hosted</a
+            >
+            under Apache-2.0.
+          </p>
+        </div>
+        <nav aria-label="Legal and contact">
+          <a href="/privacy">Privacy</a>
+          <a href="/terms">Terms</a>
+          <a href="mailto:kristiyan@spendbrake.dev">kristiyan@spendbrake.dev</a>
+          <a href="https://github.com/KIvanow/spend-brake">GitHub</a>
+          <a href="https://github.com/KIvanow/spend-brake/blob/main/docs/self-hosting.md"
+            >Self-hosting</a
+          >
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>

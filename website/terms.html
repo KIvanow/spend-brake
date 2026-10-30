@@ -1,0 +1,769 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Terms of Service - Spend Brake</title>
+    <meta
+      name="description"
+      content="The terms that govern the Spend Brake website, hosted service and licenses."
+    />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#f7f7f5" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#141413" media="(prefers-color-scheme: dark)" />
+    <link rel="canonical" href="https://spendbrake.dev/terms" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/site.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div class="wrap">
+        <a class="brand" href="/">
+          <svg viewBox="0 0 32 32" aria-hidden="true">
+            <circle cx="16" cy="16" r="12.5" fill="none" stroke="var(--accent)" stroke-width="3" />
+            <rect x="8" y="14" width="16" height="4" rx="1" fill="var(--brake)" />
+          </svg>
+          Spend Brake
+        </a>
+        <nav aria-label="Sections">
+          <a href="/#how">How it works</a>
+          <a href="/#pricing">Pricing</a>
+          <a href="/#self-host">Self-host</a>
+          <a href="https://github.com/KIvanow/spend-brake">Docs</a>
+        </nav>
+        <div class="cta">
+          <a class="btn ghost" href="https://app.spendbrake.dev/">Sign in</a>
+          <a class="btn primary" href="https://app.spendbrake.dev/#/signup">Start free</a>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="legal">
+        <div class="wrap">
+          <h1>Terms of Service</h1>
+          <p class="meta">Last updated: <span class="todo">[TODO: last updated date]</span></p>
+
+          <div class="summary">
+            <h2>In short</h2>
+            <ul>
+              <li>
+                Spend Brake is operated by Kristiyan Ivanov, an individual. These terms are an
+                agreement between you and me.
+              </li>
+              <li>
+                You bring your own provider accounts and keys and remain responsible for what the
+                providers bill you. Spend Brake enforces caps before requests leave, with overshoot
+                bounded by one request's worst case, but the provider's bill is the authoritative
+                record and caps only hold if the proxy is the only path to your key.
+              </li>
+              <li>
+                Paid plans renew monthly through Stripe until you cancel. Fees are non-refundable
+                except where the law says otherwise.
+              </li>
+              <li>
+                The Service is provided &ldquo;as is&rdquo;. My liability is limited to what you
+                paid me in the three months before a claim.
+              </li>
+            </ul>
+          </div>
+
+          <p class="caps">
+            Please read these Terms of Service (the &ldquo;Terms&rdquo;) carefully. The website at
+            spendbrake.dev and its subdomains (the &ldquo;Website&rdquo;), the hosted Spend Brake
+            service at app.spendbrake.dev including its proxy endpoints, dashboard, admin API and
+            command-line tool (the &ldquo;Hosted Service&rdquo;), and the Business and Enterprise
+            license files I issue (&ldquo;Licenses&rdquo;) (together, the &ldquo;Services&rdquo;)
+            are operated by Kristiyan Ivanov, an individual (&ldquo;I,&rdquo; &ldquo;me,&rdquo; or
+            &ldquo;Spend Brake&rdquo;). These Terms, together with the
+            <a href="/privacy">Privacy Policy</a> and any supplemental terms presented to you for
+            acceptance (together, the &ldquo;Agreement&rdquo;), govern your access to and use of the
+            Services. By creating an account, buying a plan or License, or otherwise accessing or
+            using any of the Services, you represent that (1) you have read, understand and agree to
+            be bound by the Agreement, (2) you are of legal age to form a binding contract with me,
+            and (3) you have the authority to enter into the Agreement personally or on behalf of
+            the organization you named when registering, and to bind that organization.
+            &ldquo;You&rdquo; refers to that individual or organization. If you do not agree, you
+            may not use the Services.
+          </p>
+          <p class="caps">
+            If you subscribe to a paid plan, your subscription renews automatically for successive
+            monthly periods at the then-current price until you cancel, as described in Section 7.5
+            (Automatic Renewal).
+          </p>
+          <p class="caps">
+            Section 12 (Disclaimer of Warranties) and Section 13 (Limitation of Liability) limit
+            what I am responsible for. Section 5 (How Caps Work) explains what Spend Brake does and
+            does not guarantee about your spend.
+          </p>
+          <p>
+            <strong>Changes.</strong> I may change the Agreement. When I do, I will post the updated
+            version on the Website and update the &ldquo;Last updated&rdquo; date. For material
+            changes I will also email the address on your account. Changes take effect immediately
+            for new users and, for existing account holders, 30 days after the new date unless you
+            accept them earlier through a mechanism I provide. If you do not agree to the updated
+            Agreement, stop using the Services before it takes effect; continued use after that date
+            is acceptance.
+          </p>
+
+          <ol class="toc">
+            <li><a href="#s1">1. The Services and the Software</a></li>
+            <li><a href="#s2">2. Accounts</a></li>
+            <li><a href="#s3">3. Your Provider Accounts and Keys</a></li>
+            <li><a href="#s4">4. Your Data</a></li>
+            <li><a href="#s5">5. How Caps Work and What Is Not Guaranteed</a></li>
+            <li><a href="#s6">6. Acceptable Use</a></li>
+            <li><a href="#s7">7. Fees and Purchase Terms</a></li>
+            <li><a href="#s8">8. Plan Limits, Retention and Changes to the Services</a></li>
+            <li><a href="#s9">9. Ownership and Feedback</a></li>
+            <li><a href="#s10">10. Communications</a></li>
+            <li><a href="#s11">11. Third-Party Services</a></li>
+            <li><a href="#s12">12. Disclaimer of Warranties</a></li>
+            <li><a href="#s13">13. Limitation of Liability</a></li>
+            <li><a href="#s14">14. Indemnification</a></li>
+            <li><a href="#s15">15. Term and Termination</a></li>
+            <li><a href="#s16">16. Dispute Resolution and Governing Law</a></li>
+            <li><a href="#s17">17. General Provisions</a></li>
+          </ol>
+
+          <h2 id="s1">1. The Services and the Software</h2>
+          <h3>1.1 What Spend Brake is</h3>
+          <p>
+            Spend Brake is a proxy for paid APIs. Your applications and agents send requests to it
+            instead of to the provider; it prices each request, checks it against the spend caps you
+            set, forwards it to the provider with your own provider key, and records metadata about
+            the call. The Hosted Service is my installation of that software, which you use through
+            your account.
+          </p>
+          <h3>1.2 Open-source software and self-hosting</h3>
+          <p>
+            The Spend Brake software is published at
+            <a href="https://github.com/KIvanow/spend-brake">github.com/KIvanow/spend-brake</a>.
+            Everything outside the <code>ee/</code> directory is licensed under the Apache License
+            2.0; the <code>ee/</code> directory is licensed under the separate LICENSE-EE and
+            requires a License to use beyond evaluation. Those software licenses, not these Terms,
+            govern your use of the software itself when you run it on your own infrastructure. These
+            Terms govern the Website, the Hosted Service and the issuing of Licenses. Where an
+            open-source license and these Terms conflict regarding the software, the open-source
+            license controls.
+          </p>
+          <h3>1.3 Licenses</h3>
+          <p>
+            A Business or Enterprise License is an Ed25519-signed file, verified offline by your
+            install, that enables the <code>ee/</code> features for the number of orgs and the
+            period it states. A License is issued or renewed each time the corresponding invoice is
+            paid and is valid to the end of the paid period. After it expires, its features keep
+            working for a 14-day grace period and then become read-only; the proxy, caps and all
+            Apache-2.0 features keep working regardless. You may not share, resell or alter a
+            License, or attempt to circumvent its verification.
+          </p>
+          <h3>1.4 Updates</h3>
+          <p>
+            The Services are evolving. I may update the Hosted Service at any time, with or without
+            notice. You may need to update the <code>brake</code> command-line tool or other
+            software from time to time to keep using the Hosted Service.
+          </p>
+
+          <h2 id="s2">2. Accounts</h2>
+          <h3>2.1 Registration</h3>
+          <p>
+            To use the Hosted Service you create an org and an owner account with an email address.
+            You agree to (a) provide true, accurate, current and complete information, and (b) keep
+            it that way. You represent that you are at least 18 years old, of legal age to form a
+            binding contract, and not barred from using the Services under any applicable law. If
+            you provide information that is untrue, inaccurate or incomplete, or I have reasonable
+            grounds to suspect so, I may suspend or terminate your account.
+          </p>
+          <h3>2.2 Sign-in links, tokens and keys</h3>
+          <p>
+            Sign-in uses one-time links sent to your email, API tokens, or single sign-on if your
+            org configured it. The owner token shown once at setup, your admin tokens, your Spend
+            Brake virtual keys and your session keys are credentials: anyone holding them can act as
+            you or spend against your caps. You are responsible for keeping them secret, for every
+            request made with them, and for everything that happens under your account, including
+            the actions of automated agents and of people you invite. Notify me immediately at
+            <a href="mailto:kristiyan@spendbrake.dev">kristiyan@spendbrake.dev</a> of any
+            unauthorized use, and revoke or rotate the affected keys in the dashboard.
+          </p>
+          <h3>2.3 Teams</h3>
+          <p>
+            An org's owner may invite people as owners, admins or viewers, change their roles and
+            remove them. The person inviting is responsible for having the right to share the org's
+            data with those invited. An org always keeps at least one owner.
+          </p>
+          <h3>2.4 Your account</h3>
+          <p>
+            You have no ownership or property interest in your account or org identifier; they exist
+            for the purpose of providing you the Services. You may close your account at any time
+            (Section 15.3).
+          </p>
+          <h3>2.5 Equipment</h3>
+          <p>
+            You must provide all equipment, software and connectivity necessary to use the Services,
+            and you are responsible for any fees you incur doing so.
+          </p>
+
+          <h2 id="s3">3. Your Provider Accounts and Keys</h2>
+          <p>
+            <strong>Bring your own key, always.</strong> Spend Brake does not sell, resell or share
+            access to any provider. To proxy a provider you must hold your own account and API key
+            with that provider (for example Google Maps Platform, Twilio, Mapbox, HERE, Tavily, Exa,
+            Brave or SerpApi). By storing a provider key in the Hosted Service you:
+          </p>
+          <ul>
+            <li>
+              represent that you are entitled to use that key and to let the Hosted Service forward
+              requests with it;
+            </li>
+            <li>
+              authorize me to store it encrypted and to use it only to forward the requests your
+              Spend Brake keys make;
+            </li>
+            <li>
+              remain bound by that provider's terms of service, acceptable-use rules and pricing,
+              and are solely responsible for complying with them, including any restrictions on
+              caching, storing or displaying their content;
+            </li>
+            <li>
+              remain solely responsible for all charges the provider bills to your provider account,
+              whether or not a request went through Spend Brake.
+            </li>
+          </ul>
+          <p>
+            Spend Brake is designed to stay within the Google Maps Platform Terms of Service:
+            responses are streamed through and never cached to answer later requests, only request
+            metadata is stored, and every request reaches Google with your key. That is not legal
+            advice; you are responsible for your own compliance.
+          </p>
+
+          <h2 id="s4">4. Your Data</h2>
+          <h3>4.1 What I store</h3>
+          <p>
+            The Hosted Service stores your account and team data, your encrypted provider keys, your
+            configuration, and a usage event for each proxied call containing the provider, route
+            and SKU, cost, status, latency, labels you set, trace context, user agent, request and
+            response sizes and a one-way request hash. It never stores request or response bodies or
+            query strings. The <a href="/privacy">Privacy Policy</a> has the details.
+          </p>
+          <h3>4.2 Ownership and license</h3>
+          <p>
+            You own your data. You grant me a non-exclusive, worldwide, royalty-free license to
+            host, store, process, transmit and display it only as needed to provide the Services to
+            you and your org, to send the alerts and telemetry you configure, and as described in
+            the Privacy Policy. Where you send personal data of your own users through the proxy,
+            you are the controller and I process it on your behalf under this Agreement; you are
+            responsible for having a lawful basis to do so.
+          </p>
+          <h3>4.3 Your responsibility for what you send</h3>
+          <p>
+            You, and not I, are responsible for everything your applications, agents and team
+            members send through the Hosted Service and for the destinations you configure for
+            alerts, webhooks and telemetry. I have no obligation to monitor your traffic, but I may
+            inspect metadata to operate the Services, enforce this Agreement and protect the
+            providers behind the proxy.
+          </p>
+
+          <h2 id="s5">5. How Caps Work and What Is Not Guaranteed</h2>
+          <p>
+            Spend caps are the point of Spend Brake, so this section states plainly what they do and
+            do not do.
+          </p>
+          <ul>
+            <li>
+              <strong>Enforced before forwarding.</strong> Each request is priced at its worst case
+              from Spend Brake's price catalog, reserved against every applicable cap in one atomic
+              step, and refused with HTTP 402 if any cap would be crossed. The actual cost is
+              settled afterwards. Overshoot past a cap is therefore bounded by one request's
+              worst-case price per concurrent request.
+            </li>
+            <li>
+              <strong>Prices come from the providers' public price lists</strong> and are maintained
+              by hand in data files that cite their source. Providers change prices, add SKUs and
+              apply discounts, free tiers, commitments and taxes that Spend Brake may not know
+              about. Spend Brake checks provider price pages for drift and alerts you, but a catalog
+              may lag or be wrong.
+              <strong>Your provider's bill is the authoritative record of what you spent.</strong>
+            </li>
+            <li>
+              <strong>Caps only hold if the proxy is the only path to spend.</strong> If a provider
+              key is used anywhere other than through Spend Brake, or is not restricted to the
+              proxy's egress addresses and the APIs you use, Spend Brake cannot see or stop that
+              spend. You are responsible for restricting your keys and for keeping the provider's
+              own budgets and quotas on as a backstop.
+            </li>
+            <li>
+              <strong>Unpriced routes are refused</strong>, not allowed. If a request cannot be
+              priced it is blocked with HTTP 402 <code>unpriced_route</code>.
+            </li>
+            <li>
+              <strong>Failure mode.</strong> If the budget store is unavailable, the proxy fails
+              closed and refuses requests with HTTP 503, unless a key has opted into a fail-open
+              allowance, in which case spend up to that allowance may occur without a live check.
+            </li>
+            <li>
+              <strong>Loop detection and kill switches</strong> act on patterns and commands you
+              configure. They are safeguards, not guarantees that an agent or application cannot
+              misbehave in other ways.
+            </li>
+            <li>
+              <strong>Availability.</strong> When the Hosted Service is down, requests through it
+              fail; they are not forwarded. Design your applications to handle 402, 429 and 503
+              responses.
+            </li>
+          </ul>
+          <p>
+            Accordingly,
+            <strong
+              >I do not guarantee that your provider bill will not exceed any cap you set</strong
+            >, and provider charges are excluded from my liability under Section 13.
+          </p>
+
+          <h2 id="s6">6. Acceptable Use</h2>
+          <p>
+            As a condition of use, you agree not to use the Services for any purpose prohibited by
+            this Agreement or by law. You shall not, and shall not permit any third party or
+            automated agent to:
+          </p>
+          <ul>
+            <li>
+              use the Services to access a provider in violation of that provider's terms, including
+              scraping, bulk extraction, caching or redistributing provider content beyond what the
+              provider allows;
+            </li>
+            <li>
+              resell, sublicense, rent or otherwise commercially exploit the Hosted Service itself,
+              or offer it to third parties as a service, without my written consent (running your
+              own self-hosted install under the software licenses is fine);
+            </li>
+            <li>
+              attempt to bypass, disable or interfere with caps, kill switches, loop detection, plan
+              limits, rate limits or License verification;
+            </li>
+            <li>
+              share one account between unrelated organizations, create accounts with false
+              information, or create a new account after I have terminated one for breach;
+            </li>
+            <li>
+              infringe or misappropriate anyone's intellectual property, privacy or other rights, or
+              send unlawful, threatening, defamatory, fraudulent or otherwise objectionable content
+              through the Services;
+            </li>
+            <li>
+              send unsolicited bulk messages through a proxied messaging provider, or use the
+              Services for unauthorized advertising, spam or any scheme that violates law;
+            </li>
+            <li>
+              probe, scan or test the vulnerability of the Services without permission, introduce
+              malware, or interfere with any other user's use of the Services, including by
+              overloading or flooding them;
+            </li>
+            <li>
+              use the Services for any purpose prohibited by applicable sanctions or export laws.
+            </li>
+          </ul>
+
+          <h2 id="s7">7. Fees and Purchase Terms</h2>
+          <h3>7.1 Plans</h3>
+          <p>
+            The Hosted Service offers a Free plan and paid monthly plans (currently Indie, Team and
+            Agents), and self-hosted Licenses (Business, by monthly subscription; Enterprise, by
+            invoice). Prices and what each plan includes are listed on the Website and in the
+            dashboard at the time you buy. Prices are in United States dollars and exclude taxes.
+          </p>
+          <h3>7.2 Payment</h3>
+          <p>
+            Payments are processed by Stripe (Section 11.2). To buy a paid plan or a subscription
+            License you must provide Stripe with a valid payment method. By doing so you authorize
+            me, through Stripe, to charge all fees as they become due without further notice or
+            consent. Your agreement with your card issuer or payment provider governs your use of
+            that payment method. Keep your billing details current in the Stripe Customer Portal,
+            reachable from the Billing page of the dashboard.
+          </p>
+          <h3>7.3 Price changes</h3>
+          <p>
+            I may change prices and billing methods. Price changes for an existing subscription take
+            effect at the start of the next billing period after I give you at least 30 days' notice
+            by email or in the dashboard.
+          </p>
+          <h3>7.4 Taxes</h3>
+          <p>
+            Fees do not include sales, use, value-added or similar taxes. If I am legally obliged to
+            collect such a tax from you, it will be added to the charge. You are responsible for any
+            taxes you owe on your purchases and for paying fees free of withholding; if withholding
+            is required, you will gross up the payment so that I receive the full fee.
+          </p>
+          <h3>7.5 Automatic renewal</h3>
+          <p>
+            <strong
+              >Your paid subscription continues until cancelled. At the end of each monthly period
+              it renews automatically for another month at the then-current price, and Stripe
+              charges your payment method.</strong
+            >
+            You can cancel at any time from the Billing page of the dashboard (Stripe Customer
+            Portal) or by emailing
+            <a href="mailto:kristiyan@spendbrake.dev">kristiyan@spendbrake.dev</a>. Cancellation
+            takes effect at the end of the current paid period; you keep the plan until then, and
+            there is no prorated refund for the remainder. If a renewal payment fails, Stripe will
+            retry; while payment is past due you cannot create new keys, providers or sessions,
+            though existing keys and caps keep enforcing. If Stripe's retries end without payment,
+            the subscription is cancelled and your org drops to the Free plan and its limits.
+          </p>
+          <h3>7.6 Refunds</h3>
+          <p>
+            Except where required by law or stated otherwise in writing, fees are non-refundable. If
+            you are charged in error, contact me and I will put it right.
+          </p>
+          <h3>7.7 Licenses and Enterprise</h3>
+          <p>
+            A Business License renews monthly with its subscription under Section 7.5. An Enterprise
+            License is sold by invoice for the period and org count the invoice states; it is issued
+            when the invoice is paid. Enterprise terms agreed in writing take precedence over this
+            Section 7 where they conflict.
+          </p>
+          <h3>7.8 Free plan and promotions</h3>
+          <p>
+            The Free plan and any trial or promotion are provided at my discretion and may be
+            changed or withdrawn with notice. Usage beyond the Free plan's limits requires a paid
+            plan.
+          </p>
+
+          <h2 id="s8">8. Plan Limits, Retention and Changes to the Services</h2>
+          <p>
+            Each plan has limits on keys, providers, agent sessions, requests per month, protected
+            spend and how long usage events are kept. Limits are enforced by the admin API when you
+            create things, never by the proxy while it is enforcing caps. Usage events older than
+            your plan's retention period are deleted automatically. Downgrading reduces your limits
+            and retention from the start of the next period, which may delete older usage events;
+            export what you need before downgrading. I may set reasonable limits on storage, request
+            rates and similar resources to keep the Services working for everyone. I may modify,
+            suspend or discontinue any part of the Services, and will give reasonable notice of
+            discontinuing a paid feature.
+          </p>
+
+          <h2 id="s9">9. Ownership and Feedback</h2>
+          <h3>9.1 The Services</h3>
+          <p>
+            Except for your data and the open-source software covered by its own licenses, I and my
+            licensors own all rights, title and interest in the Services, including the Website's
+            content and design, the Hosted Service and documentation. You agree not to remove or
+            obscure any proprietary notices.
+          </p>
+          <h3>9.2 Trademarks</h3>
+          <p>
+            &ldquo;Spend Brake&rdquo; and the Spend Brake logo may not be used in connection with
+            your or any third-party products or services without permission, except to say
+            truthfully that you use or are compatible with Spend Brake. Google Maps Platform and
+            other provider names are trademarks of their owners.
+          </p>
+          <h3>9.3 Feedback</h3>
+          <p>
+            If you send me ideas, suggestions or feedback about the Services, you do so at your own
+            risk, I have no obligation of confidentiality with respect to them, and you grant me a
+            perpetual, irrevocable, worldwide, royalty-free license to use them for any purpose
+            without obligation to you. Contributions to the open-source repository are governed by
+            its CONTRIBUTING file and DCO sign-off instead.
+          </p>
+
+          <h2 id="s10">10. Communications</h2>
+          <p>
+            By using the Services you agree to receive electronic communications from me related to
+            your account and the Services: sign-in links, invitations, the alerts you configure,
+            receipts, security notices and notices of changes to this Agreement. These are
+            operational, not promotional; you can stop them only by changing your alert settings or
+            closing your account. I do not currently send marketing email. If I start, it will be
+            opt-in with an unsubscribe link in every message.
+          </p>
+
+          <h2 id="s11">11. Third-Party Services</h2>
+          <h3>11.1 Providers and destinations</h3>
+          <p>
+            The Services forward your requests to API providers and send your alerts and telemetry
+            to destinations you configure (Slack, Discord, Microsoft Teams, webhooks, email,
+            OpenTelemetry collectors). Those services are not under my control, I am not responsible
+            for them, and your use of them is governed by their own terms and privacy policies.
+            Links on the Website to third-party sites are provided as a convenience and are not
+            endorsements.
+          </p>
+          <h3>11.2 Payment processor</h3>
+          <p>
+            I use Stripe, Inc. and its affiliates as the payment processor for the Services. By
+            buying anything through the Services you agree to be bound by
+            <a href="https://stripe.com/privacy" target="_blank" rel="noopener noreferrer"
+              >Stripe's Privacy Policy</a
+            >
+            and its
+            <a href="https://stripe.com/legal/consumer" target="_blank" rel="noopener noreferrer"
+              >terms</a
+            >, and you consent to Stripe and me sharing the information and payment instructions you
+            provide to the minimum extent required to complete your transactions.
+          </p>
+
+          <h2 id="s12">12. Disclaimer of Warranties</h2>
+          <h3>12.1 As is</h3>
+          <p class="caps">
+            You expressly understand and agree that, to the extent permitted by applicable law, your
+            use of the Services is at your sole risk, and the Services are provided on an &ldquo;as
+            is&rdquo; and &ldquo;as available&rdquo; basis, with all faults. I expressly disclaim
+            all warranties, representations and conditions of any kind, whether express or implied,
+            including the implied warranties or conditions of merchantability, fitness for a
+            particular purpose and non-infringement arising from use of the Services.
+          </p>
+          <p class="caps">
+            (a) I make no warranty, representation or condition that: (1) the Services will meet
+            your requirements; (2) your use of the Services will be uninterrupted, timely, secure or
+            error-free; (3) the results that may be obtained from use of the Services, including
+            prices, cost estimates, migration estimates, reconciliation results and spend figures,
+            will be accurate or reliable; or (4) your spend with any provider will not exceed a cap
+            you set.
+          </p>
+          <p class="caps">
+            (b) No advice or information, whether oral or written, obtained from me or through the
+            Services will create any warranty not expressly made herein.
+          </p>
+          <p class="caps">
+            (c) From time to time I may offer new &ldquo;beta&rdquo; or experimental features or
+            tools. Such features are offered solely for experimental purposes and without any
+            warranty of any kind, and may be modified or discontinued at my sole discretion. This
+            Section applies with full force to them.
+          </p>
+          <h3>12.2 No liability for conduct of third parties</h3>
+          <p class="caps">
+            You acknowledge and agree that I am not liable, and you agree not to seek to hold me
+            liable, for the conduct of third parties, including API providers, hosting and payment
+            providers, operators of destinations you configure, and other users of the Services, and
+            that the risk of harm from such third parties rests entirely with you.
+          </p>
+          <p>
+            Where the law of your country gives you consumer rights that cannot be excluded, nothing
+            in this Section limits them.
+          </p>
+
+          <h2 id="s13">13. Limitation of Liability</h2>
+          <h3>13.1 Disclaimer of certain damages</h3>
+          <p class="caps">
+            You understand and agree that, to the fullest extent provided by law, in no event shall
+            I be liable for any loss of profits, revenue or data, indirect, incidental, special,
+            exemplary or consequential damages, or damages or costs due to loss of production or
+            use, business interruption, or procurement of substitute goods or services, in each case
+            whether or not I have been advised of the possibility of such damages, arising out of or
+            in connection with the Agreement or the Services, on any theory of liability. Without
+            limiting the foregoing, I am not liable for charges billed to you by any API provider,
+            including charges that exceed a cap you set, whether due to a mispriced catalog, a
+            provider price change, use of a key outside the proxy, overshoot, fail-open spend, a
+            loop that was not detected, downtime or any other cause.
+          </p>
+          <h3>13.2 Cap on liability</h3>
+          <p class="caps">
+            To the fullest extent provided by law, my total liability to you for all claims arising
+            out of or relating to the Agreement or the Services will not exceed the greater of (a)
+            the total amount you paid me for the Services during the three (3) months before the
+            act, omission or occurrence giving rise to the liability, and (b) fifty United States
+            dollars (US$50).
+          </p>
+          <h3>13.3 Exceptions</h3>
+          <p class="caps">
+            The exclusions and limitations above do not apply to liability for death or personal
+            injury caused by my negligence, for my fraud or fraudulent misrepresentation, or for any
+            other liability that cannot be excluded or limited under applicable law. Some
+            jurisdictions do not allow the exclusion or limitation of certain damages; if those laws
+            apply to you, some or all of the above may not apply and you may have additional rights.
+          </p>
+          <h3>13.4 Basis of the bargain</h3>
+          <p class="caps">
+            The limitations of damages set forth above are fundamental elements of the basis of the
+            bargain between you and me. The Services would not be provided, at these prices or at
+            all, without them. This matters all the more because Spend Brake is run by an
+            individual, not a company.
+          </p>
+
+          <h2 id="s14">14. Indemnification</h2>
+          <p>
+            <strong
+              >You agree to indemnify and hold me harmless from any losses, costs, liabilities and
+              expenses (including reasonable attorneys' fees) relating to or arising out of: (a) the
+              data, requests and traffic you or your agents send through the Services; (b) your use
+              of the Services in violation of the Agreement; (c) your violation of any provider's
+              terms; (d) your violation of any rights of another party; or (e) your violation of any
+              applicable laws or regulations.</strong
+            >
+            I reserve the right, at my own cost, to assume the exclusive defense and control of any
+            matter otherwise subject to indemnification by you, in which case you agree to cooperate
+            with me in asserting any available defenses. This provision does not require you to
+            indemnify me for my own fraud, gross negligence or willful misconduct. This Section
+            survives termination of your account, the Agreement and your access to the Services.
+          </p>
+
+          <h2 id="s15">15. Term and Termination</h2>
+          <h3>15.1 Term</h3>
+          <p>
+            The Agreement starts on the earlier of the date you first use the Services or the date
+            you accept it, and remains in force while you use the Services, unless terminated
+            earlier in accordance with the Agreement.
+          </p>
+          <h3>15.2 Termination or suspension by me</h3>
+          <p>
+            I may suspend or terminate your access to all or part of the Services, immediately and
+            without notice, if timely payment cannot be charged, if you materially breach the
+            Agreement, if your use threatens the Services, other users or a provider relationship,
+            or if the law requires it. In other cases I will give you at least 30 days' notice by
+            email before terminating a paid account. I may also stop operating the Hosted Service
+            altogether; if so, I will give at least 60 days' notice and refund any prepaid fees for
+            the period after shutdown. Termination for cause is at my reasonable discretion and I am
+            not liable to you or any third party for it.
+          </p>
+          <h3>15.3 Termination by you</h3>
+          <p>
+            You may stop using the Services at any time. To close your account, cancel any
+            subscription (Section 7.5) and email
+            <a href="mailto:kristiyan@spendbrake.dev">kristiyan@spendbrake.dev</a> from the owner's
+            address asking me to delete the org.
+          </p>
+          <h3>15.4 Effect of termination</h3>
+          <p>
+            On termination your right to use the Services ends immediately, your Spend Brake keys
+            stop working, and requests through them are refused. I will delete your org's data,
+            including encrypted provider keys and usage events, within a reasonable time after
+            termination, except what I must keep for legal, tax or security reasons and copies in
+            backups until they rotate. Export anything you need before closing your account.
+            Sections that by their nature should survive, including Sections 4.2, 5, 9, 12, 13, 14,
+            16 and 17, survive termination.
+          </p>
+          <h3>15.5 No subsequent registration</h3>
+          <p>
+            If I terminate your account for breach, you agree not to re-register or access the
+            Services under another name without my consent, and you are not entitled to a refund of
+            fees for the terminated Services.
+          </p>
+
+          <h2 id="s16">16. Dispute Resolution and Governing Law</h2>
+          <h3>16.1 Talk to me first</h3>
+          <p>
+            If you have a dispute with me, email
+            <a href="mailto:kristiyan@spendbrake.dev">kristiyan@spendbrake.dev</a>
+            with your name, the email on your account and a description of the problem. I will do
+            the same before starting any proceeding against you. We each agree to try in good faith
+            to resolve the dispute informally for at least 45 days after that notice before starting
+            a court proceeding, except where urgent relief is needed to protect intellectual
+            property or confidential information.
+          </p>
+          <h3>16.2 Governing law</h3>
+          <p>
+            The Agreement and any dispute arising out of or relating to it or the Services are
+            governed by the laws of
+            <span class="todo">[TODO: governing law — country/state]</span>, without regard to its
+            conflict-of-law rules. The United Nations Convention on Contracts for the International
+            Sale of Goods does not apply.
+          </p>
+          <h3>16.3 Venue</h3>
+          <p>
+            Subject to Section 16.1, the courts of
+            <span class="todo">[TODO: venue — city/country]</span> have exclusive jurisdiction over
+            any dispute arising out of the Agreement or the Services, and each of us submits to
+            their jurisdiction. Either of us may bring an eligible claim in a small-claims court
+            where that is available. If you are a consumer in the European Union or the United
+            Kingdom, nothing in this Section deprives you of the protection of mandatory law of your
+            country of residence or of the right to bring proceedings there.
+          </p>
+
+          <h2 id="s17">17. General Provisions</h2>
+          <h3>17.1 Electronic communications</h3>
+          <p>
+            Communications between you and me take place electronically, whether you use the
+            Services, email me, or I email you or post notices on the Website or in the dashboard.
+            You consent to receive communications from me in electronic form and agree that all
+            agreements, notices, disclosures and other communications I provide electronically
+            satisfy any legal requirement that they be in writing.
+          </p>
+          <h3>17.2 Assignment</h3>
+          <p>
+            You may not assign or transfer the Agreement or your rights under it without my prior
+            written consent, and any attempt to do so is void. I may assign the Agreement without
+            your consent to a company I form to operate Spend Brake or to a successor that acquires
+            the Services, provided the assignee assumes my obligations; I will notify you of any
+            such assignment.
+          </p>
+          <h3>17.3 Force majeure</h3>
+          <p>
+            I am not liable for any delay or failure to perform resulting from causes outside my
+            reasonable control, including acts of God, pandemics, war, terrorism, riots, embargoes,
+            acts of civil or military authorities, fire, floods, accidents, strikes, failures of
+            hosting, network, payment or email providers, or shortages of transportation, fuel,
+            energy, labor or materials.
+          </p>
+          <h3>17.4 Notices</h3>
+          <p>
+            Notices to you will be sent to the email address on your account; you are responsible
+            for keeping it current, and a notice sent to the last address you provided is effective
+            even if it is not delivered. Notices to me go to
+            <a href="mailto:kristiyan@spendbrake.dev">kristiyan@spendbrake.dev</a> or by post to
+            Kristiyan Ivanov, <span class="todo">[TODO: postal address]</span>, and are effective
+            when received.
+          </p>
+          <h3>17.5 Export and sanctions</h3>
+          <p>
+            You may not use or export the Services in violation of applicable export control or
+            sanctions laws, and you represent that you are not located in a country or on a list
+            that would prohibit me from providing the Services to you.
+          </p>
+          <h3>17.6 Waiver and severability</h3>
+          <p>
+            Any waiver or failure to enforce any provision of the Agreement on one occasion is not a
+            waiver of any other provision or of that provision on another occasion. If any portion
+            of the Agreement is held invalid or unenforceable, it will be construed to reflect the
+            original intention as nearly as possible, and the rest remains in full force and effect.
+          </p>
+          <h3>17.7 Questions and complaints</h3>
+          <p>
+            If you have questions, complaints or claims about the Services, email
+            <a href="mailto:kristiyan@spendbrake.dev">kristiyan@spendbrake.dev</a>. I will do my
+            best to address them.
+          </p>
+          <h3>17.8 Entire agreement</h3>
+          <p>
+            The Agreement, including the Privacy Policy and any written Enterprise terms, is the
+            final, complete and exclusive agreement between you and me with respect to its subject
+            matter and supersedes all prior discussions between us about it.
+          </p>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="wrap">
+        <div>
+          <a class="brand" href="/">
+            <svg viewBox="0 0 32 32" aria-hidden="true">
+              <circle
+                cx="16"
+                cy="16"
+                r="12.5"
+                fill="none"
+                stroke="var(--accent)"
+                stroke-width="3"
+              />
+              <rect x="8" y="14" width="16" height="4" rx="1" fill="var(--brake)" />
+            </svg>
+            Spend Brake
+          </a>
+          <p>
+            Hard dollar caps for paid APIs. Run as a hosted service at
+            <a href="https://app.spendbrake.dev/">app.spendbrake.dev</a> or
+            <a href="https://github.com/KIvanow/spend-brake/blob/main/docs/self-hosting.md"
+              >self-hosted</a
+            >
+            under Apache-2.0.
+          </p>
+        </div>
+        <nav aria-label="Legal and contact">
+          <a href="/privacy">Privacy</a>
+          <a href="/terms">Terms</a>
+          <a href="mailto:kristiyan@spendbrake.dev">kristiyan@spendbrake.dev</a>
+          <a href="https://github.com/KIvanow/spend-brake">GitHub</a>
+          <a href="https://github.com/KIvanow/spend-brake/blob/main/docs/self-hosting.md"
+            >Self-hosting</a
+          >
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,718 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Spend Brake</title>
+    <meta
+      name="description"
+      content="Hard dollar caps, enforced in real time, for every paid API your apps, test suites and AI agents call. A proxy for Google Maps Platform and other paid APIs: swap one base URL and one key."
+    />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#f7f7f5" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#141413" media="(prefers-color-scheme: dark)" />
+    <link rel="canonical" href="https://spendbrake.dev/" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/site.css" />
+    <meta property="og:title" content="Spend Brake" />
+    <meta
+      property="og:description"
+      content="Hard dollar caps for every paid API your apps and AI agents call. Priced before the request leaves; refused with a 402 once a cap would be crossed."
+    />
+    <meta property="og:url" content="https://spendbrake.dev/" />
+    <meta property="og:type" content="website" />
+  </head>
+  <body>
+    <header class="top">
+      <div class="wrap">
+        <a class="brand" href="/">
+          <svg viewBox="0 0 32 32" aria-hidden="true">
+            <circle cx="16" cy="16" r="12.5" fill="none" stroke="var(--accent)" stroke-width="3" />
+            <rect x="8" y="14" width="16" height="4" rx="1" fill="var(--brake)" />
+          </svg>
+          Spend Brake
+        </a>
+        <nav aria-label="Sections">
+          <a href="#how">How it works</a>
+          <a href="#features">Features</a>
+          <a href="#agents">Agents</a>
+          <a href="#pricing">Pricing</a>
+          <a href="#self-host">Self-host</a>
+          <a href="https://github.com/KIvanow/spend-brake">Docs</a>
+        </nav>
+        <div class="cta">
+          <a class="btn ghost" href="https://app.spendbrake.dev/">Sign in</a>
+          <a class="btn primary" href="https://app.spendbrake.dev/#/signup">Start free</a>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="wrap">
+          <div>
+            <p class="eyebrow">A proxy for paid APIs</p>
+            <h1>
+              Hard dollar caps for every paid API your apps and agents call.
+              <em>Enforced before the request leaves.</em>
+            </h1>
+            <p class="lede">
+              Swap one base URL and one key. Every call is priced per SKU, checked against your caps
+              in one atomic step, and refused with a clear <code>402</code> once a cap would be
+              crossed. Google Maps Platform first; Twilio, Mapbox, HERE, Tavily, Exa, Brave and
+              SerpApi built in.
+            </p>
+            <div class="actions">
+              <a class="btn primary lg" href="https://app.spendbrake.dev/#/signup">Start free</a>
+              <a class="btn lg" href="#how">See how it works</a>
+            </div>
+            <p class="fine">
+              Free plan: 1 key and $50/month of protected spend, no card. Or
+              <a href="#self-host">self-host</a> the Apache-2.0 core with one
+              <code>docker compose</code>.
+            </p>
+          </div>
+
+          <div
+            class="term"
+            aria-label="Example: one line changes, and the proxy stops the spend at the cap"
+          >
+            <header><i></i><i></i><i></i><span>app.ts &rarr; through Spend Brake</span></header>
+            <pre><span class="del">- https://maps.googleapis.com/maps/api/geocode/json</span>
+<span class="add">+ https://proxy.spendbrake.dev/google-maps/maps/api/geocode/json</span>
+<span class="del">-   ?address=Sofia&amp;key=AIza…</span>
+<span class="add">+   ?address=Sofia&amp;key=sb_live_…</span>
+
+<span class="c">HTTP/1.1 200 OK</span>
+<span class="k">X-Brake-Cost-Micros:</span> 5000
+<span class="k">X-Brake-Remaining-Micros:</span> 10000
+
+<span class="c">… the next call would cross the cap:</span>
+<span class="stop"><span class="brake">HTTP/1.1 402 Payment Required</span>
+{"error":"budget_exceeded",
+ "message":"Spend cap reached for org. Stop and ask the user to raise the cap.",
+ "scope":"org","window":"d:20261029","cap":5000000,"spent":4990000,
+ "resetsAt":"2026-10-30T00:00:00.000Z"}</span></pre>
+          </div>
+        </div>
+      </section>
+
+      <section class="proof" aria-label="Guarantees">
+        <div class="wrap">
+          <div>
+            <b>Before, not after</b>
+            <span
+              >Priced and reserved against every cap before the request is forwarded. Not hours
+              later from billing data.</span
+            >
+          </div>
+          <div>
+            <b>Micro-dollar exact</b>
+            <span
+              >Google's SKU tiers and field masks are understood, so a $0.04 request is never
+              counted like a free one.</span
+            >
+          </div>
+          <div>
+            <b>One request of overshoot</b>
+            <span
+              >Worst-case cost is reserved first and settled after. Overshoot is bounded by a single
+              call's worst case.</span
+            >
+          </div>
+        </div>
+      </section>
+
+      <section id="how">
+        <div class="wrap">
+          <p class="eyebrow">How it works</p>
+          <h2>Your key never leaves the proxy. Clients only hold revocable virtual keys.</h2>
+          <p class="lede">
+            You keep your provider account and your own key. Spend Brake stores it encrypted,
+            forwards each request with it, and hands your apps and agents
+            <code>sb_live_…</code> keys you can cap, scope and kill.
+          </p>
+          <ol class="steps">
+            <li>
+              <h3>Authenticate</h3>
+              <p>
+                The virtual key is checked (cached 5 s) along with its environment, agent and
+                session.
+              </p>
+            </li>
+            <li>
+              <h3>Price</h3>
+              <p>
+                SKU from the path and field mask, worst case in micro-dollars, from price files that
+                cite their source.
+              </p>
+            </li>
+            <li>
+              <h3>Reserve</h3>
+              <p>
+                One Lua call on Valkey: kill switch, loop breaker, and a reservation against every
+                cap at once.
+              </p>
+            </li>
+            <li>
+              <h3>Forward</h3>
+              <p>
+                The real key is decrypted locally and never logged. Responses stream through;
+                nothing is cached.
+              </p>
+            </li>
+            <li>
+              <h3>Settle</h3>
+              <p>
+                The actual cost replaces the reservation and a usage event lands in the ledger, in
+                the background.
+              </p>
+            </li>
+          </ol>
+          <p class="flow">
+            <code>app / agent → proxy → provider</code>, then
+            <code>Valkey → worker → Postgres ledger → alerts → webhooks / email</code>. Valkey down
+            means fail closed (<code>503</code>) unless a key opts into a small fail-open allowance.
+          </p>
+        </div>
+      </section>
+
+      <section id="features">
+        <div class="wrap">
+          <p class="eyebrow">What you get</p>
+          <h2>Caps that hold, and everything around them.</h2>
+          <div class="grid">
+            <article class="card">
+              <h3>
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  aria-hidden="true"
+                >
+                  <path d="M4 12h16M4 6h16M4 18h10" />
+                </svg>
+                Hard caps at every scope
+              </h3>
+              <p>
+                Per org, key, SKU, environment, agent and agent session; per day and per month. All
+                checked atomically, so parallel requests cannot slip past together.
+              </p>
+            </article>
+            <article class="card">
+              <h3>
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  aria-hidden="true"
+                >
+                  <circle cx="12" cy="12" r="9" />
+                  <path d="M12 7v5l3 2" />
+                </svg>
+                Priced per SKU, in real time
+              </h3>
+              <p>
+                Google Maps Platform Places, Geocoding and Routes priced per field mask; Twilio
+                settled at its final price. A daily check watches provider price pages for drift.
+              </p>
+            </article>
+            <article class="card">
+              <h3>
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  aria-hidden="true"
+                >
+                  <path d="M12 3v9" />
+                  <path d="M6.3 7.3a8 8 0 1 0 11.4 0" />
+                </svg>
+                Kill switch
+              </h3>
+              <p>
+                One call, link or button stops a key, a provider, a session or the whole org
+                immediately. Alerts carry signed <em>Kill</em>, <em>Raise</em> and
+                <em>Mute</em> links so you can act from your phone.
+              </p>
+            </article>
+            <article class="card">
+              <h3>
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  aria-hidden="true"
+                >
+                  <path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3" />
+                  <path d="M18 3v4h-4M6 21v-4h4" />
+                </svg>
+                Loop detection
+              </h3>
+              <p>
+                A circuit trips when a key repeats identical requests, or a session pumps calls,
+                past your rule. The caller gets <code>429 loop_detected</code> with a retry time,
+                and you get an alert.
+              </p>
+            </article>
+            <article class="card">
+              <h3>
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  aria-hidden="true"
+                >
+                  <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+                  <path d="M10 21a2 2 0 0 0 4 0" />
+                </svg>
+                Budget alerts with actions
+              </h3>
+              <p>
+                Signed webhooks with Slack, Discord and Teams presets or raw JSON, plus email.
+                Thresholds, kills, loops and price changes, each with one-click actions.
+              </p>
+            </article>
+            <article class="card">
+              <h3>
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  aria-hidden="true"
+                >
+                  <path d="M4 19V5M4 19h16" />
+                  <path d="M8 15l3-4 3 2 5-7" />
+                </svg>
+                Telemetry for each org
+              </h3>
+              <p>
+                Your own Prometheus endpoint at <code>GET /v1/metrics</code>: requests by outcome,
+                cost, refunds, latency histograms and live budget. OpenTelemetry export sends every
+                call as a span to your collector, joined to the caller's trace.
+              </p>
+            </article>
+            <article class="card">
+              <h3>
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  aria-hidden="true"
+                >
+                  <rect x="3" y="4" width="18" height="16" rx="2" />
+                  <path d="M7 9l3 3-3 3M12 15h5" />
+                </svg>
+                The <code>brake</code> CLI
+              </h3>
+              <p>
+                <code>brake init</code> sets up an org, stores the provider key and prints the exact
+                Google Cloud steps to restrict it to the proxy. <code>brake session</code> runs any
+                agent inside its own budget.
+              </p>
+            </article>
+            <article class="card">
+              <h3>
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  aria-hidden="true"
+                >
+                  <path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z" />
+                </svg>
+                Built to stay inside provider terms
+              </h3>
+              <p>
+                Bring your own key, always. Responses are never cached to cut billing. Only request
+                metadata is stored, never bodies or query strings. Every request reaches the
+                provider with your key.
+              </p>
+            </article>
+            <article class="card">
+              <h3>
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  aria-hidden="true"
+                >
+                  <path d="M3 12h4l3-7 4 14 3-7h4" />
+                </svg>
+                Migration estimate
+              </h3>
+              <p>
+                <code>brake estimate</code> prices your last 30 days of Google usage on Geoapify,
+                Stadia Maps, Open Places API, Mapbox and HERE side by side, and shows what would
+                stay on Google.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="agents">
+        <div class="wrap">
+          <p class="eyebrow">For AI agents</p>
+          <div class="split">
+            <div>
+              <h2>Give every agent run a budget it cannot talk its way out of.</h2>
+              <p class="lede">
+                Run any agent or script inside a session with its own cap. When the money runs out,
+                the agent gets one line telling it to stop and ask you, not a quietly growing bill.
+              </p>
+              <ul>
+                <li>
+                  <b>Session keys</b> that can spend at most what you say, count against the agent's
+                  daily budget and the parent key's caps, and are revoked when the agent exits.
+                </li>
+                <li>
+                  <b>Capped calls from inside the agent</b>: <code>brake maps geocode</code>,
+                  <code>brake maps search</code> or
+                  <code>brake call &lt;provider&gt; &lt;method&gt; &lt;path&gt;</code>, each
+                  printing the cost.
+                </li>
+                <li>
+                  <b>Clear exit codes</b> (3 for a cap, 4 for the loop breaker) with one line the
+                  agent can act on.
+                </li>
+                <li>
+                  <b>Per-session loop rules</b> and, on the Agents plan, session analytics and
+                  custom loop rules.
+                </li>
+              </ul>
+            </div>
+            <div
+              class="term"
+              aria-label="Example: running Claude Code inside a five dollar session"
+            >
+              <header><i></i><i></i><i></i><span>shell</span></header>
+              <pre><span class="c">$</span> export BRAKE_KEY=sb_live_… BRAKE_URL=https://proxy.spendbrake.dev
+<span class="c">$</span> brake session --budget 5 --day-budget 20 --agent claude -- claude
+
+<span class="c"># inside the agent</span>
+<span class="c">$</span> brake maps geocode "Vitosha Blvd 1, Sofia" --pretty
+HTTP 200 · cost <span class="ok">$0.0050</span> · remaining $4.99
+{ "results": [ … ] }
+
+<span class="c">… the agent keeps going …</span>
+<span class="stop"><span class="brake">brake: STOP. Spend cap reached for sess:s_7f3a (cap $5.00).</span>
+<span class="brake">Do not retry; ask the user to raise the cap.</span>  <span class="c">exit 3</span></span></pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="compare">
+        <div class="wrap">
+          <p class="eyebrow">Compared with Google's own controls</p>
+          <h2>Budgets alert. Quotas count requests. Spend Brake stops dollars.</h2>
+          <p class="lede">
+            Keep Google's budgets and quotas on as a backstop. Spend Brake is the part that acts
+            before the money is spent.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th></th>
+                  <th>Google Cloud budgets</th>
+                  <th>Maps Platform quotas</th>
+                  <th class="sb">Spend Brake</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th>Stops spend</th>
+                  <td class="no">No, alerts only</td>
+                  <td>Yes</td>
+                  <td class="sb">Yes, before the request leaves</td>
+                </tr>
+                <tr>
+                  <th>Unit</th>
+                  <td>Dollars</td>
+                  <td>Requests per API per minute or day</td>
+                  <td class="sb">Dollars, micro-dollar exact</td>
+                </tr>
+                <tr>
+                  <th>Knows SKU tiers (field masks)</th>
+                  <td>After billing</td>
+                  <td class="no">No: a $0.04 request counts like a free one</td>
+                  <td class="sb">Yes, priced per field mask</td>
+                </tr>
+                <tr>
+                  <th>Delay</th>
+                  <td>Hours (billing data)</td>
+                  <td>Real time</td>
+                  <td class="sb">Real time</td>
+                </tr>
+                <tr>
+                  <th>Granularity</th>
+                  <td>Project / billing account</td>
+                  <td>Project, per API</td>
+                  <td class="sb">Org, key, SKU, environment, agent, session; day and month</td>
+                </tr>
+                <tr>
+                  <th>Loop / runaway detection</th>
+                  <td class="no">No</td>
+                  <td class="no">No</td>
+                  <td class="sb">Yes, trips a circuit</td>
+                </tr>
+                <tr>
+                  <th>Kill switch</th>
+                  <td class="no">No</td>
+                  <td>Set a quota to 0 by hand</td>
+                  <td class="sb">One call, link or button; immediate</td>
+                </tr>
+                <tr>
+                  <th>Alerts with actions</th>
+                  <td>Email, Pub/Sub</td>
+                  <td class="no">No</td>
+                  <td class="sb">
+                    Webhooks (Slack, Discord, Teams, raw) and email with Kill / Raise / Mute links
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="tablenote">
+            Client-side Maps (the Maps JavaScript API, tiles and widgets) is out of scope: Spend
+            Brake proxies server-side APIs.
+          </p>
+        </div>
+      </section>
+
+      <section id="pricing">
+        <div class="wrap">
+          <p class="eyebrow">Pricing</p>
+          <h2>Hosted plans, billed monthly through Stripe. Cancel any time.</h2>
+          <p class="lede">
+            Every plan enforces caps the same way. Plans differ in how many keys, providers and
+            agent sessions you run, and how long call history is kept.
+          </p>
+          <div class="plans">
+            <article class="plan">
+              <h3>Free</h3>
+              <p class="price">$0</p>
+              <p class="for">One project, one provider, a real cap.</p>
+              <ul>
+                <li>1 key, 1 provider</li>
+                <li>Up to $50/month of protected spend</li>
+                <li>10,000 requests/month</li>
+                <li>20 agent sessions/month</li>
+                <li>7 days of call history</li>
+              </ul>
+              <a class="btn" href="https://app.spendbrake.dev/#/signup?plan=free">Create account</a>
+            </article>
+            <article class="plan">
+              <h3>Indie</h3>
+              <p class="price">$9<small>/month</small></p>
+              <p class="for">Side projects and small apps with real traffic.</p>
+              <ul>
+                <li>Unlimited keys, 2 providers</li>
+                <li>No limit on protected spend</li>
+                <li>100,000 requests/month</li>
+                <li>100 agent sessions/month</li>
+                <li>7 days of call history</li>
+              </ul>
+              <a class="btn" href="https://app.spendbrake.dev/#/signup?plan=indie"
+                >Start with Indie</a
+              >
+            </article>
+            <article class="plan featured">
+              <h3>Team <small>Popular</small></h3>
+              <p class="price">$49<small>/month</small></p>
+              <p class="for">Several services and people, with telemetry you can keep.</p>
+              <ul>
+                <li>Unlimited keys, 5 providers</li>
+                <li>No limit on protected spend</li>
+                <li>1,000,000 requests/month</li>
+                <li>500 agent sessions/month</li>
+                <li>30 days of call history</li>
+                <li>OpenTelemetry export to your collector</li>
+              </ul>
+              <a class="btn primary" href="https://app.spendbrake.dev/#/signup?plan=team"
+                >Start with Team</a
+              >
+            </article>
+            <article class="plan">
+              <h3>Agents</h3>
+              <p class="price">$149<small>/month</small></p>
+              <p class="for">Fleets of agents, every provider, a year of history.</p>
+              <ul>
+                <li>Unlimited keys, every provider</li>
+                <li>No limit on protected spend</li>
+                <li>10,000,000 requests/month</li>
+                <li>Unlimited agent sessions</li>
+                <li>1 year of call history</li>
+                <li>Session analytics and custom loop rules</li>
+                <li>OpenTelemetry export to your collector</li>
+              </ul>
+              <a class="btn" href="https://app.spendbrake.dev/#/signup?plan=agents"
+                >Start with Agents</a
+              >
+            </article>
+          </div>
+
+          <div class="selfhost">
+            <div>
+              <h3>Self-hosted</h3>
+              <p>
+                The core is Apache-2.0 and never needs a license key: proxy, budget engine, caps,
+                kill switch, loop detection, CLI, catalog, dashboard and signed webhooks. Business
+                and Enterprise licenses add single sign-on (OIDC, SAML), more roles, two-person
+                approval for raising caps, audit export, several orgs per install, the signed
+                catalog feed and billing reconciliation. Licenses are checked offline.
+              </p>
+            </div>
+            <div>
+              <h3>Business</h3>
+              <p class="price">$299<small>/month</small></p>
+              <p>Self-hosted license, 3 orgs per install.</p>
+            </div>
+            <div>
+              <h3>Enterprise</h3>
+              <p class="price">from $10,000<small>/year</small></p>
+              <p>
+                Self-hosted license, 25 orgs per install, invoiced.
+                <a href="mailto:kristiyan@spendbrake.dev">Get in touch</a>.
+              </p>
+            </div>
+          </div>
+          <p class="pricenote">
+            Prices in USD, before tax. Downgrades and failed payments only block creating new keys,
+            providers and sessions: existing keys and caps keep enforcing.
+          </p>
+        </div>
+      </section>
+
+      <section id="self-host" class="selfhosting">
+        <div class="wrap">
+          <p class="eyebrow">Self-hosting</p>
+          <div class="split">
+            <div>
+              <h2>Run it on your own host in five minutes.</h2>
+              <p class="lede">
+                One Docker Compose file starts the proxy, admin API, notifier, dashboard, worker,
+                Valkey and Postgres. An HTTPS overlay adds Caddy with automatic certificates; proxy
+                replicas and Valkey Cluster are covered when you outgrow one box.
+              </p>
+              <ul>
+                <li>
+                  <b>Nothing phones home.</b> Licenses are Ed25519-signed files verified offline. A
+                  self-hosted install sends no data to Spend Brake.
+                </li>
+                <li>
+                  <b>Backups and upgrades</b> are scripted, and published images are pinned by
+                  version.
+                </li>
+                <li>
+                  <b>The same CLI</b> works against your install:
+                  <code>brake init --api-url … --proxy-url …</code>
+                </li>
+              </ul>
+              <p style="margin-top: 20px">
+                <a
+                  class="btn"
+                  href="https://github.com/KIvanow/spend-brake/blob/main/docs/self-hosting.md"
+                  >Read the self-hosting guide</a
+                >
+              </p>
+            </div>
+            <div class="term" aria-label="Quickstart commands">
+              <header><i></i><i></i><i></i><span>quickstart</span></header>
+              <pre><span class="c">$</span> git clone https://github.com/KIvanow/spend-brake &amp;&amp; cd spend-brake
+<span class="c">$</span> cp infra/.env.example infra/.env   <span class="c"># fill in the secrets</span>
+<span class="c">$</span> docker compose -f infra/docker-compose.yml up -d --build --wait
+
+<span class="c">$</span> npx @spend-brake/cli init --api-url http://localhost:8081 \
+    --proxy-url http://localhost:8080 --org acme --day-cap 5 --month-cap 50
+Org acme is ready. An admin token is saved to ~/.config/brake/config.json.
+
+Your virtual key (shown once, store it now):
+  <span class="ok">sb_live_…</span>
+
+Use it instead of the Google key, with the proxy as the base URL:
+  http://localhost:8080/google-maps/maps/api/geocode/json?address=Sofia&amp;key=sb_live_…
+<span class="c">… then the Google Cloud steps to restrict the real key to the proxy.</span></pre>
+            </div>
+          </div>
+
+          <div class="honest">
+            <h3>Caps only hold if the proxy is the only path to spend.</h3>
+            <p>
+              Restrict each provider key to the proxy's outbound IP addresses and the APIs you use;
+              <code>brake init</code> prints the exact steps. Keep the provider's own budgets and
+              quotas on as a backstop. Overshoot is bounded by one request's worst case, and your
+              provider's bill remains the authoritative record of what you spent.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="final">
+        <div class="wrap">
+          <p class="eyebrow" style="justify-content: center">Get started</p>
+          <h2>One base URL. One key. A cap that means it.</h2>
+          <p class="lede">
+            Create a free account, add a provider key, set a cap and make the first call from the
+            Get started page.
+          </p>
+          <div class="actions">
+            <a class="btn primary lg" href="https://app.spendbrake.dev/#/signup">Start free</a>
+            <a class="btn lg" href="https://app.spendbrake.dev/">Sign in</a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="wrap">
+        <div>
+          <a class="brand" href="/">
+            <svg viewBox="0 0 32 32" aria-hidden="true">
+              <circle
+                cx="16"
+                cy="16"
+                r="12.5"
+                fill="none"
+                stroke="var(--accent)"
+                stroke-width="3"
+              />
+              <rect x="8" y="14" width="16" height="4" rx="1" fill="var(--brake)" />
+            </svg>
+            Spend Brake
+          </a>
+          <p>
+            Hard dollar caps for paid APIs. Run as a hosted service at
+            <a href="https://app.spendbrake.dev/">app.spendbrake.dev</a> or
+            <a href="https://github.com/KIvanow/spend-brake/blob/main/docs/self-hosting.md"
+              >self-hosted</a
+            >
+            under Apache-2.0. Google Maps Platform is a trademark of Google LLC; other names belong
+            to their owners.
+          </p>
+        </div>
+        <nav aria-label="Legal and contact">
+          <a href="/privacy">Privacy</a>
+          <a href="/terms">Terms</a>
+          <a href="mailto:kristiyan@spendbrake.dev">kristiyan@spendbrake.dev</a>
+          <a href="https://github.com/KIvanow/spend-brake">GitHub</a>
+          <a href="https://github.com/KIvanow/spend-brake/blob/main/docs/self-hosting.md"
+            >Self-hosting</a
+          >
+          <a href="https://github.com/KIvanow/spend-brake/blob/main/CHANGELOG.md">Changelog</a>
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>
