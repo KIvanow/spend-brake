@@ -21,6 +21,17 @@ const envSchema = z.object({
   BRAKE_DASHBOARD_URL: z.url().optional(),
   /** Where apps send provider calls, shown in the dashboard's setup steps. */
   BRAKE_PUBLIC_PROXY_URL: z.url().optional(),
+  /** The proxy's outbound IP addresses (comma-separated): the dashboard tells people to allow them. */
+  BRAKE_PROXY_EGRESS_IPS: z
+    .string()
+    .default('')
+    .transform((v) =>
+      v
+        .split(',')
+        .map((ip) => ip.trim())
+        .filter(Boolean),
+    )
+    .pipe(z.array(z.union([z.ipv4(), z.ipv6()]))),
   /** Hosted sign-up is open (the billing service serves it). */
   BRAKE_HOSTED_SIGNUP: z.stringbool().default(false),
 });

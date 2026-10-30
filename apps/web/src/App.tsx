@@ -88,7 +88,9 @@ export function App({
     if (signedIn) return;
     api<AuthOptions>('/v1/auth/options')
       .then(setOptions)
-      .catch(() => setOptions({ emailSignIn: false, signup: false, proxyUrl: null }));
+      .catch(() =>
+        setOptions({ emailSignIn: false, signup: false, proxyUrl: null, egressIps: [] }),
+      );
   }, [signedIn]);
 
   const setPage = (p: PageName) => {

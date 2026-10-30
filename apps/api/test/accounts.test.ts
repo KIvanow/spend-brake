@@ -25,7 +25,11 @@ beforeAll(async () => {
       dashboardUrl: 'https://app.example.com/',
       mailer: { send: (m) => Promise.resolve(void sent.push(m)) },
     },
-    publicInfo: { signup: true, proxyUrl: 'https://proxy.example.com' },
+    publicInfo: {
+      signup: true,
+      proxyUrl: 'https://proxy.example.com',
+      egressIps: ['203.0.113.7'],
+    },
   });
   await app.ready();
 });
@@ -75,12 +79,14 @@ describe('sign-in options', () => {
       emailSignIn: true,
       signup: true,
       proxyUrl: 'https://proxy.example.com',
+      egressIps: ['203.0.113.7'],
     });
     const off = await buildApi({ db: env.db, valkey: env.valkey, wrapper: null });
     expect((await off.inject('/v1/auth/options')).json()).toEqual({
       emailSignIn: false,
       signup: false,
       proxyUrl: null,
+      egressIps: [],
     });
     expect(
       (await off.inject({ method: 'POST', url: '/v1/auth/email', payload: { email: 'a@b.co' } }))

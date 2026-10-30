@@ -135,6 +135,11 @@ describe('Google key restriction check', () => {
     expect(await checkGoogleKey('k', reply(400, 'API_KEY_INVALID'))).toMatchObject({
       valid: false,
     });
+    // With the proxy's addresses known, the advice names them.
+    const named = await checkGoogleKey('k', reply(403, 'API_KEY_SERVICE_BLOCKED'), ['203.0.113.7']);
+    expect(named.warnings).toEqual([
+      'Restrict the key to IP address 203.0.113.7 (where Spend Brake calls Google from), so a leaked copy of the key cannot be used anywhere else.',
+    ]);
     const down = await checkGoogleKey('k', () => Promise.reject(new Error('offline')));
     expect(down).toMatchObject({ apiRestricted: null, valid: null });
   });

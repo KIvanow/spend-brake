@@ -22,6 +22,8 @@ const PROBE = 'https://generativelanguage.googleapis.com/v1beta/models?pageSize=
 export async function checkGoogleKey(
   key: string,
   fetchFn: typeof fetch = fetch,
+  /** The addresses the proxy calls Google from, when the operator configured them. */
+  egressIps: readonly string[] = [],
 ): Promise<KeyCheck> {
   const check: KeyCheck = { apiRestricted: null, ipRestricted: null, valid: null, warnings: [] };
   let status: number;
@@ -56,7 +58,9 @@ export async function checkGoogleKey(
   }
   if (check.ipRestricted !== true) {
     check.warnings.push(
-      "Restrict the key to the proxy's egress IPs so the proxy is the only path to spend (brake init prints the steps).",
+      egressIps.length
+        ? `Restrict the key to IP address${egressIps.length > 1 ? 'es' : ''} ${egressIps.join(', ')} (where Spend Brake calls Google from), so a leaked copy of the key cannot be used anywhere else.`
+        : "Restrict the key to the proxy's egress IPs so the proxy is the only path to spend (brake init prints the steps).",
     );
   }
   return check;

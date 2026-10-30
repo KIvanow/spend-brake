@@ -35,12 +35,17 @@ export async function runApi(opts: RunApiOptions = {}): Promise<void> {
     trustProxy: env.TRUST_PROXY,
     ...(env.BRAKE_ACTION_SECRET ? { actionSecret: env.BRAKE_ACTION_SECRET } : {}),
     ...(env.BRAKE_SETUP_TOKEN ? { setupToken: env.BRAKE_SETUP_TOKEN } : {}),
-    ...(env.GOOGLE_KEY_CHECK ? { checkGoogleKey: (key: string) => checkGoogleKey(key) } : {}),
+    ...(env.GOOGLE_KEY_CHECK
+      ? {
+          checkGoogleKey: (key: string) => checkGoogleKey(key, fetch, env.BRAKE_PROXY_EGRESS_IPS),
+        }
+      : {}),
     ...(mailer && env.BRAKE_DASHBOARD_URL
       ? { emailSignIn: { dashboardUrl: env.BRAKE_DASHBOARD_URL, mailer } }
       : {}),
     publicInfo: {
       signup: env.BRAKE_HOSTED_SIGNUP,
+      egressIps: env.BRAKE_PROXY_EGRESS_IPS,
       ...(env.BRAKE_PUBLIC_PROXY_URL ? { proxyUrl: env.BRAKE_PUBLIC_PROXY_URL } : {}),
     },
     extensions: (await opts.extensions?.(db, valkey)) ?? [],

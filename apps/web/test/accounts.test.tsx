@@ -30,7 +30,12 @@ interface Call {
 let calls: Call[];
 let routes: Record<string, (c: Call) => [number, unknown]>;
 const CODE = 'c'.repeat(43);
-const options = { emailSignIn: true, signup: true, proxyUrl: 'https://proxy.example.com' };
+const options = {
+  emailSignIn: true,
+  signup: true,
+  proxyUrl: 'https://proxy.example.com',
+  egressIps: ['203.0.113.7'],
+};
 
 beforeEach(() => {
   calls = [];
@@ -286,7 +291,18 @@ describe('getting started', () => {
         createdAt: '2026-10-30T10:00:00Z',
       };
       creds.push(row);
-      return [201, row];
+      return [
+        201,
+        {
+          ...row,
+          check: {
+            apiRestricted: true,
+            ipRestricted: null,
+            valid: true,
+            warnings: ['restrict it'],
+          },
+        },
+      ];
     };
     routes['POST /v1/keys'] = () => [
       201,
@@ -315,6 +331,15 @@ describe('getting started', () => {
         secret: 'AIzaRealKey1234',
       }),
     );
+
+    // The step is done, and the advice names the proxy's address and stays on screen.
+    expect(await screen.findByText(/Connected: google-maps/)).toBeTruthy();
+    expect(screen.getByText('203.0.113.7')).toBeTruthy();
+    expect(screen.getByRole('link', { name: /Credentials/ }).getAttribute('href')).toBe(
+      'https://console.cloud.google.com/apis/credentials',
+    );
+    // The key already has API restrictions: no step for them.
+    expect(screen.queryByText(/API restrictions/)).toBeNull();
 
     await user.type(await screen.findByLabelText('Name'), 'web');
     await user.click(screen.getByRole('button', { name: 'Create key' }));

@@ -3441,12 +3441,19 @@
                         "string",
                         "null"
                       ]
+                    },
+                    "egressIps": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
                     }
                   },
                   "required": [
                     "emailSignIn",
                     "signup",
-                    "proxyUrl"
+                    "proxyUrl",
+                    "egressIps"
                   ]
                 }
               }

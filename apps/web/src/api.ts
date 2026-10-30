@@ -64,6 +64,8 @@ export interface AuthOptions {
   emailSignIn: boolean;
   signup: boolean;
   proxyUrl: string | null;
+  /** The proxy's outbound IPs: provider keys should be restricted to them. */
+  egressIps: string[];
 }
 
 export class ApiError extends Error {

@@ -12,7 +12,7 @@ export interface Credential {
   createdAt: string;
 }
 
-interface KeyCheck {
+export interface KeyCheck {
   apiRestricted: boolean | null;
   ipRestricted: boolean | null;
   valid: boolean | null;
@@ -36,7 +36,12 @@ export const useAuthOptions = () =>
   });
 
 /** Store a provider's real key (encrypted; never shown again). */
-export function AddProviderKey({ onAdded }: { onAdded?: () => void }) {
+export function AddProviderKey({
+  onAdded,
+}: {
+  /** Called with Google's verdict on the key, when it was checked. */
+  onAdded?: (check: KeyCheck | null) => void;
+}) {
   const qc = useQueryClient();
   const [provider, setProvider] = useState(PROVIDERS[0]!.id);
   const [secret, setSecret] = useState('');
@@ -52,7 +57,7 @@ export function AddProviderKey({ onAdded }: { onAdded?: () => void }) {
       setSecret('');
       setCheck(c.check ?? null);
       void qc.invalidateQueries({ queryKey: ['credentials'] });
-      onAdded?.();
+      onAdded?.(c.check ?? null);
     },
   });
   const submit = (e: FormEvent) => {
@@ -92,17 +97,96 @@ export function AddProviderKey({ onAdded }: { onAdded?: () => void }) {
         </p>
       </form>
       {add.isError && <p className="error">{add.error.message}</p>}
-      {check && check.warnings.length > 0 && (
-        <div className="callout">
-          <strong>Lock this key down so it only works through Spend Brake:</strong>
-          <ul>
-            {check.warnings.map((w) => (
-              <li key={w}>{w}</li>
-            ))}
-          </ul>
-        </div>
-      )}
+      {check && !onAdded && <KeyAdvice check={check} />}
     </>
+  );
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={() => void navigator.clipboard?.writeText(text).then(() => setCopied(true))}
+    >
+      {copied ? 'Copied' : 'Copy'}
+    </button>
+  );
+}
+
+/**
+ * After a Google key is added: the exact Google Cloud changes that leave Spend Brake the only way
+ * to spend with it (the proxy's addresses, the Maps APIs only).
+ */
+export function KeyAdvice({ check }: { check: KeyCheck }) {
+  const options = useAuthOptions();
+  const ips = options.data?.egressIps ?? [];
+  if (check.valid === false) {
+    return (
+      <p className="error">Google says this API key is not valid. Check it and add it again.</p>
+    );
+  }
+  const needIps = check.ipRestricted !== true;
+  const needApis = check.apiRestricted === false;
+  if (!needIps && !needApis) {
+    return check.warnings.length ? <p className="muted">{check.warnings.join(' ')}</p> : null;
+  }
+  if (needIps && ips.length === 0) {
+    return (
+      <div className="callout">
+        <strong>Lock this key down so it only works through Spend Brake:</strong>
+        <ul>
+          {check.warnings.map((w) => (
+            <li key={w}>{w}</li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+  return (
+    <div className="callout">
+      <strong>Lock this key down so it only works through Spend Brake.</strong> Anyone who gets a
+      copy of an unrestricted key can spend on your Google bill without passing any cap.
+      <p>
+        In Google Cloud, open{' '}
+        <a
+          href="https://console.cloud.google.com/apis/credentials"
+          target="_blank"
+          rel="noreferrer"
+        >
+          APIs &amp; Services → Credentials
+        </a>{' '}
+        and click this key. Then:
+      </p>
+      <ol>
+        {needIps && (
+          <li>
+            Under <strong>Application restrictions</strong>, choose <strong>IP addresses</strong>{' '}
+            and add {ips.length > 1 ? 'these addresses' : 'this address'} (where Spend Brake calls
+            Google from):
+            {ips.map((ip) => (
+              <p key={ip} className="secret">
+                <code>{ip}</code>
+                <CopyButton text={ip} />
+              </p>
+            ))}
+          </li>
+        )}
+        {needApis && (
+          <li>
+            Under <strong>API restrictions</strong>, choose <strong>Restrict key</strong> and tick
+            only the Maps APIs you use: Places API (New), Geocoding API, Routes API.
+          </li>
+        )}
+        <li>
+          Save. Google takes up to 5 minutes to apply it; until then, calls may still go through
+          from anywhere.
+        </li>
+      </ol>
+      <p className="muted">
+        Calls from your own servers will then fail: send them through Spend Brake.
+      </p>
+    </div>
   );
 }
 
@@ -197,7 +281,6 @@ export function NewKey({
   providers: string[];
   proxyUrl: string | null;
 }) {
-  const [copied, setCopied] = useState(false);
   const base = (proxyUrl ?? 'https://<your proxy>').replace(/\/$/, '');
   return (
     <div className="callout">
@@ -206,14 +289,7 @@ export function NewKey({
       </p>
       <p className="secret">
         <code>{token}</code>
-        <button
-          type="button"
-          onClick={() => {
-            void navigator.clipboard?.writeText(token).then(() => setCopied(true));
-          }}
-        >
-          {copied ? 'Copied' : 'Copy'}
-        </button>
+        <CopyButton text={token} />
       </p>
       <p>In your app, change two things for each provider:</p>
       {providers.map((id) => {

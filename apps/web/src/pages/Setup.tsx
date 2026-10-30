@@ -4,6 +4,8 @@ import { api, usd } from '../api.js';
 import {
   AddProviderKey,
   CreateKey,
+  KeyAdvice,
+  type KeyCheck,
   NewKey,
   useAuthOptions,
   useCredentials,
@@ -59,6 +61,8 @@ export function Setup() {
     refetchInterval: 10_000,
   });
   const [created, setCreated] = useState<{ token: string; providers: string[] } | null>(null);
+  // Google's verdict on the key just added: shown after the step completes, too.
+  const [check, setCheck] = useState<KeyCheck | null>(null);
 
   const creds = credentials.data?.items ?? [];
   const activeKeys = (keys.data?.items ?? []).filter((k) => k.status === 'active');
@@ -82,8 +86,9 @@ export function Setup() {
               </a>
             </p>
           ) : (
-            <AddProviderKey />
+            <AddProviderKey onAdded={setCheck} />
           )}
+          {check && <KeyAdvice check={check} />}
         </Step>
         <Step
           n={2}

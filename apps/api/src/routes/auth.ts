@@ -14,12 +14,15 @@ export interface PublicInfo {
   signup?: boolean;
   /** Where apps send provider calls, for the dashboard's setup steps. */
   proxyUrl?: string;
+  /** The proxy's outbound IPs: provider keys should be restricted to them. */
+  egressIps?: string[];
 }
 
 const options = z.object({
   emailSignIn: z.boolean(),
   signup: z.boolean(),
   proxyUrl: z.string().nullable(),
+  egressIps: z.array(z.string()),
 });
 const emailBody = z.object({ email: z.string().trim().pipe(z.email().max(320)) });
 const verifyBody = z.object({ code: z.string().max(100) });
@@ -53,6 +56,7 @@ export function authRoutes(
     emailSignIn: signIn !== undefined,
     signup: info.signup ?? false,
     proxyUrl: info.proxyUrl ?? null,
+    egressIps: info.egressIps ?? [],
   }));
 
   router.registry.registerPath({
