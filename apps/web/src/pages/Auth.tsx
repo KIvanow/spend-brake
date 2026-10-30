@@ -175,7 +175,7 @@ export function SignIn({
 }
 
 const money = (usd: number | null) =>
-  usd === null ? 'Contact us' : usd === 0 ? 'Free' : `$${usd}/month`;
+  usd === null ? 'Contact us' : usd === 0 ? '$0' : `$${usd}/month`;
 
 function planSummary(p: Plan): string {
   if (p.selfHosted)
