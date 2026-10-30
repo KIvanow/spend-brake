@@ -4,8 +4,11 @@ Hard dollar caps for every paid API your agents touch, from the shell. Coding ag
 shell commands, so a capped command needs no extra protocol.
 
 ```sh
-npx @spend-brake/cli --help          # or the single executable: dist/brake
+pnpm install && pnpm --filter @spend-brake/cli build   # from the repo root
+node apps/cli/dist/brake.cjs --help                   # or the single executable: dist/brake
 ```
+
+Build it from source for now; a published package (`npx @spend-brake/cli`) is coming.
 
 ## Agent sessions
 
@@ -75,6 +78,6 @@ On 3 and 4, stderr carries one line that tells the agent to stop and ask the use
 
 ## Building
 
-`pnpm build` writes `dist/brake.cjs` (one file, dependencies inlined: what npx runs).
+`pnpm build` writes `dist/brake.cjs` (one file, dependencies inlined).
 `pnpm build:sea` turns it into a single executable `dist/brake` that needs no Node install (Node's
 `--build-sea` where available, postject otherwise).

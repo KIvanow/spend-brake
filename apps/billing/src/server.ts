@@ -62,6 +62,11 @@ export interface BillingDeps {
    * with an owner API token instead.
    */
   signIn?: EmailSignIn;
+  /**
+   * Behind the dashboard's nginx (and Caddy with TLS): take the client's address from
+   * X-Forwarded-For, trusting only hops on private networks, so rate limits are per client.
+   */
+  trustProxy?: boolean;
   now?: () => Date;
   logger?: boolean | object;
 }
@@ -75,7 +80,13 @@ const ORG_ID = /^[A-Za-z0-9_-]{3,64}$/;
  */
 export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
   const now = deps.now ?? (() => new Date());
-  const app = Fastify({ logger: deps.logger ?? false, bodyLimit: 512 * 1024 });
+  const app = Fastify({
+    logger: deps.logger ?? false,
+    bodyLimit: 512 * 1024,
+    // The compose network's hops (Caddy, nginx) are private; the first public address is the
+    // client, so one sent in X-Forwarded-For by the client itself is ignored.
+    trustProxy: deps.trustProxy ? 'loopback, linklocal, uniquelocal' : false,
+  });
   const ctx = apiContext({ db: deps.db, valkey: deps.valkey, wrapper: null, now });
   const authenticator = new Authenticator(deps.db, now);
   const dashboard = deps.dashboardUrl.replace(/\/$/, '');
@@ -365,6 +376,11 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
         const result = deps.signIn
           ? { ownerToken: null, ...(await createOrg(orgDeps, org, { email })) }
           : { ownerToken: await bootstrapOrg(orgDeps, org), ownerId: null };
+        // Alerts go to the owner by email until the org sets up a webhook (or another address).
+        await tx
+          .update(orgs)
+          .set({ settings: { alertEmail: email } })
+          .where(eq(orgs.id, orgId));
         await setPlan(tx, orgId, { plan: 'free', billingEmail: email }, now());
         return result;
       });

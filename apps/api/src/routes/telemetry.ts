@@ -13,7 +13,7 @@ import {
 } from '@spend-brake/shared';
 import { z } from 'zod';
 import { type Ctx, audit, toScope } from '../common.js';
-import { requireFeature } from '../entitlements.js';
+import { entitlementsOf, requireFeature } from '../entitlements.js';
 import { ApiError, type Router } from '../route.js';
 import { orgTimeZone } from './budget.js';
 
@@ -48,6 +48,9 @@ const otlpView = z.object({
   endpoint: z.string(),
   headerNames: z.array(z.string()),
   enabled: z.boolean(),
+  planAllows: z.boolean().openapi({
+    description: "False when the org's plan no longer includes export: nothing is sent",
+  }),
   lastSuccessAt: z.string().nullable(),
   lastErrorAt: z.string().nullable(),
   lastError: z.string().nullable(),
@@ -114,6 +117,7 @@ export function telemetryRoutes(r: Router, ctx: Ctx, dispatcher: GuardedClient):
     endpoint: row.endpoint,
     headerNames: row.headerNames,
     enabled: row.enabled,
+    planAllows: (await entitlementsOf(ctx, row.orgId))?.otelExport ?? true,
     lastSuccessAt: row.lastSuccessAt?.toISOString() ?? null,
     lastErrorAt: row.lastErrorAt?.toISOString() ?? null,
     lastError: row.lastError,

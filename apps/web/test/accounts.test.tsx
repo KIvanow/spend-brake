@@ -191,6 +191,193 @@ describe('email sign-in', () => {
   });
 });
 
+describe('sessions', () => {
+  it('signs out on the server, not only in the browser', async () => {
+    routes['DELETE /v1/auth/session'] = () => [200, { revoked: true }];
+    signedInByEmail();
+    const user = userEvent.setup();
+    await screen.findByRole('heading', { name: 'Live budget' });
+    await user.click(screen.getByRole('button', { name: 'Sign out' }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === 'DELETE' && c.url === '/v1/auth/session')?.auth).toBe(
+        'Bearer sbt_email',
+      ),
+    );
+    expect(getToken()).toBeNull();
+    expect(await screen.findByLabelText('Email')).toBeTruthy();
+  });
+
+  it('spends a sign-in link opened in a tab that is already open', async () => {
+    render(<App client={client()} />);
+    await screen.findByLabelText('Email');
+    window.history.replaceState(null, '', `/#login=${CODE}`);
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+    expect(await screen.findByRole('heading', { name: 'Live budget' })).toBeTruthy();
+    expect(getToken()).toBe('sbt_email');
+    expect(window.location.hash).toBe('#/');
+  });
+
+  it('says why when the session ended', async () => {
+    signedInByEmail();
+    await screen.findByRole('heading', { name: 'Live budget' });
+    routes['GET /v1/users'] = () => [401, { message: 'Missing or invalid API token.' }];
+    window.location.hash = '/team';
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+    expect(await screen.findByText(/Your session ended/)).toBeTruthy();
+  });
+});
+
+describe('alerts', () => {
+  it('lets an owner choose where alerts are emailed', async () => {
+    let settings: Record<string, unknown> = {};
+    routes['GET /v1/org'] = () => [200, { id: 'acme', settings }];
+    routes['PUT /v1/org'] = (c) => {
+      settings = { ...settings, ...(c.body as object) };
+      return [200, { id: 'acme', settings }];
+    };
+    routes['GET /v1/webhooks'] = () => [200, { items: [] }];
+    window.location.hash = '/webhooks';
+    signedInByEmail();
+    const user = userEvent.setup();
+    expect(await screen.findByText(/No address set/)).toBeTruthy();
+    await user.type(screen.getByLabelText('Email alerts to'), 'ops@acme.test');
+    await user.click(
+      within(screen.getByRole('form', { name: 'Alert email' })).getByRole('button', {
+        name: 'Save',
+      }),
+    );
+    expect(await screen.findByText('ops@acme.test')).toBeTruthy();
+    expect(calls.find((c) => c.method === 'PUT' && c.url === '/v1/org')!.body).toEqual({
+      alertEmail: 'ops@acme.test',
+    });
+  });
+});
+
+describe('roles', () => {
+  it('shows viewers what they can see, without controls they cannot use', async () => {
+    routes['GET /v1/auth/session'] = () => [
+      200,
+      { orgId: 'acme', role: 'viewer', actor: 'user:usr_1', signIn: 'email' },
+    ];
+    routes['GET /v1/status'] = () => [
+      200,
+      {
+        killed: [],
+        paused: [{ keyId: 'key_1', retryAfterSec: 540 }],
+        scopes: [
+          {
+            scope: 'key:key_1',
+            window: 'd:20261030',
+            spent: 0,
+            held: 0,
+            hard: null,
+            soft: null,
+            remaining: null,
+          },
+        ],
+      },
+    ];
+    routes['GET /v1/keys'] = () => [
+      200,
+      {
+        items: [
+          {
+            id: 'key_1',
+            name: 'web app',
+            prefix: 'sb_live_abcd',
+            status: 'active',
+            createdAt: '2026-10-30T10:00:00Z',
+            expiresAt: null,
+            config: { credentials: { 'google-maps': 'cred_1' } },
+          },
+        ],
+      },
+    ];
+    signedInByEmail();
+    // Paused by the loop breaker, by name; no Kill or Resume for a viewer.
+    expect(await screen.findByText(/Paused by the loop breaker/)).toBeTruthy();
+    expect(await screen.findAllByText('web app')).not.toHaveLength(0);
+    expect(screen.getByText('paused (loop)')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Kill' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Resume now' })).toBeNull();
+
+    window.location.hash = '/keys';
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+    await screen.findByRole('heading', { name: 'Spend Brake keys' });
+    expect(screen.queryByRole('button', { name: /Revoke/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Add key' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Create key' })).toBeNull();
+  });
+
+  it('lets an admin resume a paused key and move it to another provider key', async () => {
+    routes['GET /v1/auth/session'] = () => [
+      200,
+      { orgId: 'acme', role: 'admin', actor: 'user:usr_1', signIn: 'email' },
+    ];
+    routes['GET /v1/status'] = () => [
+      200,
+      { killed: [], paused: [{ keyId: 'key_1', retryAfterSec: 540 }], scopes: [] },
+    ];
+    routes['POST /v1/keys/key_1/resume'] = () => [200, { keyId: 'key_1', resumed: true }];
+    routes['PATCH /v1/keys/key_1'] = () => [200, {}];
+    routes['GET /v1/keys'] = () => [
+      200,
+      {
+        items: [
+          {
+            id: 'key_1',
+            name: 'web app',
+            prefix: 'sb_live_abcd',
+            status: 'active',
+            createdAt: '2026-10-30T10:00:00Z',
+            expiresAt: null,
+            config: { credentials: { 'google-maps': 'cred_1' } },
+          },
+        ],
+      },
+    ];
+    routes['GET /v1/providers/credentials'] = () => [
+      200,
+      {
+        items: [
+          {
+            id: 'cred_1',
+            provider: 'google-maps',
+            name: 'Google Maps Platform',
+            hint: 'AAAA',
+            createdAt: '2026-10-30T10:00:00Z',
+          },
+          {
+            id: 'cred_2',
+            provider: 'google-maps',
+            name: 'Google Maps Platform',
+            hint: 'BBBB',
+            createdAt: '2026-10-30T11:00:00Z',
+          },
+        ],
+      },
+    ];
+    signedInByEmail();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Resume now' }));
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === 'POST' && c.url === '/v1/keys/key_1/resume')).toBe(
+        true,
+      ),
+    );
+
+    window.location.hash = '/keys';
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+    const select = await screen.findByLabelText('Google Maps Platform key used by web app');
+    await user.selectOptions(select, 'cred_2');
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({
+        credentials: { 'google-maps': 'cred_2' },
+      }),
+    );
+  });
+});
+
 describe('sign-up', () => {
   it('creates a Free account and says to check the inbox', async () => {
     window.location.hash = '/signup';
@@ -207,6 +394,23 @@ describe('sign-up', () => {
     const body = calls.find((c) => c.url === '/v1/billing/signup')!.body as Record<string, string>;
     expect(body).toMatchObject({ name: 'Acme', email: 'ana@acme.test', plan: 'free' });
     expect(body.timeZone).toBeTruthy();
+  });
+
+  it('falls back to Free for a plan that is not sold here', async () => {
+    window.location.hash = '/signup?plan=enterprise';
+    routes['POST /v1/billing/signup'] = () => [201, { orgId: 'acme-x1y2z3', emailSent: true }];
+    const user = userEvent.setup();
+    render(<App client={client()} />);
+    expect(await screen.findByText(/The plan in your link is not sold here/)).toBeTruthy();
+    expect(screen.getByRole('radio', { name: /Free/ })).toHaveProperty('checked', true);
+    await user.type(screen.getByLabelText('Work email'), 'ana@acme.test');
+    await user.type(screen.getByLabelText('Team or project name'), 'Acme');
+    await user.click(screen.getByRole('button', { name: 'Create account' }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.url === '/v1/billing/signup')!.body).toMatchObject({
+        plan: 'free',
+      }),
+    );
   });
 
   it('sends a paid plan to Stripe Checkout', async () => {
@@ -269,7 +473,7 @@ describe('team', () => {
     expect(await screen.findByText('The org needs another owner first.')).toBeTruthy();
 
     const row = screen.getByText('ana@acme.test').closest('tr')!;
-    await user.click(within(row).getByRole('button', { name: 'Remove' }));
+    await user.click(within(row).getByRole('button', { name: 'Remove ana@acme.test' }));
     await waitFor(() =>
       expect(calls.some((c) => c.method === 'DELETE' && c.url === '/v1/users/usr_1')).toBe(true),
     );
@@ -350,6 +554,36 @@ describe('getting started', () => {
     });
     expect(screen.getByText('https://proxy.example.com/google-maps')).toBeTruthy();
     expect(screen.getByText('https://maps.googleapis.com')).toBeTruthy();
+  });
+
+  it('ticks "make a call" only once a call succeeded', async () => {
+    const spend = { items: [{ key: 'key_1', costMicros: 0, requests: 9, succeeded: 0 }] };
+    routes['GET /v1/spend'] = () => [200, spend];
+    window.location.hash = '/setup';
+    signedInByEmail();
+    expect(await screen.findByText(/9 calls so far, none successful yet/)).toBeTruthy();
+    const step = screen.getByRole('heading', { name: /Make a call from your app/ });
+    expect(step.closest('li')!.className).toBe('step');
+  });
+
+  it('refuses a provider key Google says is invalid', async () => {
+    routes['POST /v1/providers/credentials'] = () => [
+      400,
+      {
+        error: 'invalid_credential',
+        message: 'Google says this API key is not valid. Check it and add it again.',
+      },
+    ];
+    window.location.hash = '/setup';
+    signedInByEmail();
+    const user = userEvent.setup();
+    await user.type(
+      await screen.findByLabelText(/Your Google Maps Platform API key/),
+      'not-a-real-key',
+    );
+    await user.click(screen.getByRole('button', { name: 'Add key' }));
+    expect(await screen.findByText(/Google says this API key is not valid/)).toBeTruthy();
+    expect(screen.queryByText(/Connected:/)).toBeNull();
   });
 
   it('points new orgs from the overview to the setup steps', async () => {

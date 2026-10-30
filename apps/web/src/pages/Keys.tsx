@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
 import { type AuthOptions, type Key, api } from '../api.js';
 import { PROVIDERS, providerById } from '../providers.js';
+import { useRole } from '../role.js';
 import { Table } from '../ui.js';
 
 export interface Credential {
@@ -47,16 +48,19 @@ export function AddProviderKey({
   const [secret, setSecret] = useState('');
   const [check, setCheck] = useState<KeyCheck | null>(null);
   const info = providerById(provider)!;
+  const [rebound, setRebound] = useState(0);
   const add = useMutation({
     mutationFn: () =>
-      api<Credential & { check?: KeyCheck }>('/v1/providers/credentials', {
+      api<Credential & { check?: KeyCheck; reboundKeys?: string[] }>('/v1/providers/credentials', {
         method: 'POST',
         body: { provider, name: info.name, secret: secret.trim() },
       }),
     onSuccess: (c) => {
       setSecret('');
       setCheck(c.check ?? null);
+      setRebound(c.reboundKeys?.length ?? 0);
       void qc.invalidateQueries({ queryKey: ['credentials'] });
+      if (c.reboundKeys?.length) void qc.invalidateQueries({ queryKey: ['keys'] });
       onAdded?.(c.check ?? null);
     },
   });
@@ -97,6 +101,12 @@ export function AddProviderKey({
         </p>
       </form>
       {add.isError && <p className="error">{add.error.message}</p>}
+      {rebound > 0 && (
+        <p className="notice">
+          {rebound} Spend Brake key{rebound === 1 ? ' was' : 's were'} using a deleted {info.name}{' '}
+          key and now use{rebound === 1 ? 's' : ''} this one.
+        </p>
+      )}
       {check && !onAdded && <KeyAdvice check={check} />}
     </>
   );
@@ -319,11 +329,66 @@ export function NewKey({
   );
 }
 
+/** Which provider key a Spend Brake key calls with; admins can switch it to another one. */
+function KeyCredentials({ k, credentials }: { k: Key; credentials: Credential[] }) {
+  const qc = useQueryClient();
+  const { can } = useRole();
+  const bound = k.config.credentials ?? {};
+  const rebind = useMutation({
+    mutationFn: (next: Record<string, string>) =>
+      api(`/v1/keys/${encodeURIComponent(k.id)}`, {
+        method: 'PATCH',
+        body: { credentials: next },
+      }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['keys'] }),
+  });
+  // Session keys follow the key that minted them.
+  const editable = can('admin') && k.status === 'active' && !k.config.sessionId;
+  return (
+    <>
+      {Object.entries(bound).map(([provider, credId]) => {
+        const info = providerById(provider);
+        const label = (c: Credential) => `${info?.name ?? c.provider} …${c.hint}`;
+        const same = credentials.filter((c) => c.provider === provider);
+        const current = same.find((c) => c.id === credId);
+        if (editable && (same.length > 1 || !current)) {
+          return (
+            <select
+              key={provider}
+              aria-label={`${info?.name ?? provider} key used by ${k.name}`}
+              value={current ? credId : ''}
+              disabled={rebind.isPending}
+              onChange={(e) => rebind.mutate({ ...bound, [provider]: e.target.value })}
+            >
+              {!current && <option value="">deleted: pick another</option>}
+              {same.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {label(c)}
+                </option>
+              ))}
+            </select>
+          );
+        }
+        return (
+          <div key={provider} className={current ? undefined : 'error'}>
+            {current ? label(current) : `${info?.name ?? provider}: deleted`}
+          </div>
+        );
+      })}
+      {rebind.isError && <p className="error">{rebind.error.message}</p>}
+    </>
+  );
+}
+
 export function Keys() {
   const qc = useQueryClient();
   const keys = useKeys();
   const credentials = useCredentials();
   const options = useAuthOptions();
+  const { can } = useRole();
+  const activeKeys = (keys.data?.items ?? []).filter((k) => k.status === 'active');
+  const usedBy = (c: Credential) =>
+    activeKeys.filter((k) => !k.config.sessionId && k.config.credentials?.[c.provider] === c.id);
   const [created, setCreated] = useState<{ token: string; providers: string[] } | null>(null);
   const revoke = useMutation({
     mutationFn: (id: string) => api(`/v1/keys/${encodeURIComponent(id)}`, { method: 'DELETE' }),
@@ -332,7 +397,11 @@ export function Keys() {
   const removeCredential = useMutation({
     mutationFn: (id: string) =>
       api(`/v1/providers/credentials/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['credentials'] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['credentials'] });
+      // Keys that used it moved to another key of the provider.
+      void qc.invalidateQueries({ queryKey: ['keys'] });
+    },
   });
   return (
     <section>
@@ -346,23 +415,46 @@ export function Keys() {
         columns={[
           { label: 'Provider', render: (c) => providerById(c.provider)?.name ?? c.provider },
           { label: 'Key', render: (c) => <code>…{c.hint}</code> },
-          { label: 'Added', render: (c) => c.createdAt.slice(0, 10) },
           {
-            label: '',
-            render: (c) => (
-              <button
-                type="button"
-                className="danger"
-                disabled={removeCredential.isPending}
-                onClick={() => removeCredential.mutate(c.id)}
-              >
-                Delete
-              </button>
-            ),
+            label: 'Used by',
+            render: (c) =>
+              usedBy(c)
+                .map((k) => k.name)
+                .join(', '),
           },
+          { label: 'Added', render: (c) => c.createdAt.slice(0, 10) },
+          ...(can('admin')
+            ? [
+                {
+                  label: '',
+                  render: (c: Credential) => (
+                    <button
+                      type="button"
+                      className="danger"
+                      aria-label={`Delete ${providerById(c.provider)?.name ?? c.provider} key …${c.hint}`}
+                      disabled={removeCredential.isPending}
+                      onClick={() => {
+                        const users = usedBy(c);
+                        // The API moves its keys to another key of the provider, or refuses.
+                        if (
+                          users.length === 0 ||
+                          window.confirm(
+                            `${users.map((k) => k.name).join(', ')} use${users.length === 1 ? 's' : ''} this key. Delete it and move ${users.length === 1 ? 'that key' : 'those keys'} to your other ${providerById(c.provider)?.name ?? c.provider} key?`,
+                          )
+                        ) {
+                          removeCredential.mutate(c.id);
+                        }
+                      }}
+                    >
+                      Delete
+                    </button>
+                  ),
+                },
+              ]
+            : []),
         ]}
       />
-      <AddProviderKey />
+      {can('admin') && <AddProviderKey />}
       {removeCredential.isError && <p className="error">{removeCredential.error.message}</p>}
 
       <h2>Spend Brake keys</h2>
@@ -377,6 +469,10 @@ export function Keys() {
           { label: 'Name', render: (k) => k.name },
           { label: 'Id', render: (k) => <code>{k.id}</code> },
           { label: 'Token', render: (k) => <code>{k.prefix}…</code> },
+          {
+            label: 'Calls with',
+            render: (k) => <KeyCredentials k={k} credentials={credentials.data?.items ?? []} />,
+          },
           { label: 'Env', render: (k) => k.config.env ?? '' },
           { label: 'Agent', render: (k) => k.config.agentId ?? '' },
           {
@@ -385,23 +481,30 @@ export function Keys() {
               <span className={k.status === 'active' ? 'badge' : 'badge danger'}>{k.status}</span>
             ),
           },
-          {
-            label: '',
-            render: (k) =>
-              k.status === 'active' ? (
-                <button
-                  type="button"
-                  className="danger"
-                  onClick={() => revoke.mutate(k.id)}
-                  disabled={revoke.isPending}
-                >
-                  Revoke
-                </button>
-              ) : null,
-          },
+          ...(can('admin')
+            ? [
+                {
+                  label: '',
+                  render: (k: Key) =>
+                    k.status === 'active' ? (
+                      <button
+                        type="button"
+                        className="danger"
+                        aria-label={`Revoke ${k.name}`}
+                        onClick={() => revoke.mutate(k.id)}
+                        disabled={revoke.isPending}
+                      >
+                        Revoke
+                      </button>
+                    ) : null,
+                },
+              ]
+            : []),
         ]}
       />
-      {credentials.data && (
+      {revoke.isError && <p className="error">{revoke.error.message}</p>}
+      {!can('admin') && <p className="muted">Admins and owners can add, change and revoke keys.</p>}
+      {credentials.data && can('admin') && (
         <CreateKey
           key={credentials.data.items.map((c) => c.id).join()}
           credentials={credentials.data.items}

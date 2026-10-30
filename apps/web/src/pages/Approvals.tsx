@@ -39,6 +39,17 @@ export function Approvals() {
     },
   });
 
+  if (list.error instanceof ApiError && list.error.status === 404) {
+    return (
+      <section>
+        <h2>Approvals</h2>
+        <p className="muted">
+          Two-person approval of cap raises comes with a Business or Enterprise license on a
+          self-hosted install.
+        </p>
+      </section>
+    );
+  }
   if (list.error instanceof ApiError && list.error.status === 403) {
     return (
       <section>

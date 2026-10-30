@@ -22,6 +22,9 @@ export interface LoginMail {
   email: string;
   purpose: LoginPurpose;
   links: { orgId: string; orgName: string; url: string }[];
+  /** Invites: who sent it (their email, when a person did) and the role given. */
+  invitedBy?: string | null;
+  role?: string;
 }
 
 export interface LoginMailer {

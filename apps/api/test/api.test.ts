@@ -193,6 +193,51 @@ describe('provider credentials', () => {
     expect(del.statusCode).toBe(200);
     expect(await env.registry.getCredential(a.id, id)).toBeNull();
   });
+
+  it('moves keys to a replacement on delete, and never strands them', async () => {
+    const org = await newOrg(env);
+    const k = await key(org);
+    const first = (await env.registry.getKeyByToken(k.token))!.credentials['google-maps']!;
+    const refused = await call(org.admin, {
+      method: 'DELETE',
+      url: `/v1/providers/credentials/${first}`,
+    });
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json()).toMatchObject({ error: 'credential_in_use' });
+    expect(refused.json<{ message: string }>().message).toContain('"k"');
+    expect(await env.registry.getCredential(org.id, first)).not.toBeNull();
+
+    const second = await credential(org);
+    const del = await call(org.admin, {
+      method: 'DELETE',
+      url: `/v1/providers/credentials/${first}`,
+    });
+    expect(del.statusCode).toBe(200);
+    expect(del.json()).toMatchObject({ reboundKeys: [k.id] });
+    expect((await env.registry.getKeyByToken(k.token))!.credentials).toEqual({
+      'google-maps': second,
+    });
+    const listed = await call(org.viewer, { url: `/v1/keys/${k.id}` });
+    expect(listed.json()).toMatchObject({ config: { credentials: { 'google-maps': second } } });
+  });
+
+  it('points keys left on a deleted credential at the next one added', async () => {
+    const org = await newOrg(env);
+    const k = await key(org);
+    const old = (await env.registry.getKeyByToken(k.token))!.credentials['google-maps']!;
+    // A key stranded before deletes were guarded.
+    await env.db.execute(sql`update provider_credentials set revoked_at = now() where id = ${old}`);
+    await env.registry.deleteCredential(org.id, old);
+    const res = await call(org.admin, {
+      method: 'POST',
+      url: '/v1/providers/credentials',
+      payload: { provider: 'google-maps', name: 'fixed', secret: SECRET },
+    });
+    expect(res.statusCode).toBe(201);
+    const added = res.json<{ id: string; reboundKeys: string[] }>();
+    expect(added.reboundKeys).toEqual([k.id]);
+    expect((await env.registry.getKeyByToken(k.token))!.credentials['google-maps']).toBe(added.id);
+  });
 });
 
 describe('virtual keys', () => {
@@ -323,7 +368,7 @@ describe('cross-tenant access', () => {
     ]);
     const spend = await call(a.viewer, { url: '/v1/spend?groupBy=key' });
     expect(spend.json<{ items: unknown[] }>().items).toEqual([
-      { key: 'ka', costMicros: 100, requests: 1 },
+      { key: 'ka', costMicros: 100, requests: 1, succeeded: 0 },
     ]);
     const events = await call(a.viewer, { url: '/v1/events' });
     expect(events.body).not.toContain('kb');
@@ -362,15 +407,47 @@ describe('caps, kill switch and status', () => {
     );
   });
 
+  it('shows keys paused by the loop breaker and lets an admin resume them', async () => {
+    const org = await newOrg(env);
+    const k = await key(org);
+    await env.valkey.set(`bk:{o:${org.id}}:circuit:key:${k.id}`, '1', 'EX', 600);
+    const status = await call(org.viewer, { url: '/v1/status' });
+    const paused = status.json<{ paused: { keyId: string; retryAfterSec: number }[] }>().paused;
+    expect(paused).toHaveLength(1);
+    expect(paused[0]!.keyId).toBe(k.id);
+    expect(paused[0]!.retryAfterSec).toBeGreaterThan(590);
+
+    const url = `/v1/keys/${k.id}/resume`;
+    expect((await call(org.viewer, { method: 'POST', url })).statusCode).toBe(403);
+    expect((await call(b.admin, { method: 'POST', url })).statusCode).toBe(404);
+    const resumed = await call(org.admin, { method: 'POST', url });
+    expect(resumed.json()).toEqual({ keyId: k.id, resumed: true });
+    expect(
+      (await call(org.viewer, { url: '/v1/status' })).json<{ paused: unknown[] }>().paused,
+    ).toEqual([]);
+    const audit = await call(org.viewer, { url: '/v1/events?source=audit&type=circuit.reset' });
+    expect(audit.json<{ items: unknown[] }>().items).toHaveLength(1);
+  });
+
   it('rejects malformed scopes and amounts', async () => {
     for (const [url, payload] of [
       ['/v1/caps/everything', { day: { hard: 1 } }],
       ['/v1/caps/org', { day: { hard: -1 } }],
       ['/v1/caps/org', { day: { hard: 2 ** 60 } }],
       ['/v1/caps/org', {}],
+      // An alert above the hard cap could never fire.
+      ['/v1/caps/org', { day: { hard: 1000, soft: 2000 } }],
     ] as const) {
       expect((await call(a.admin, { method: 'PUT', url, payload })).statusCode, url).toBe(400);
     }
+    // A typo in a key id would cap nothing.
+    const missing = await call(a.admin, {
+      method: 'PUT',
+      url: '/v1/caps/key:key_doesnotexist',
+      payload: { day: { hard: 1000 } },
+    });
+    expect(missing.statusCode).toBe(404);
+    expect(missing.json()).toMatchObject({ error: 'not_found', message: 'Key not found.' });
   });
 
   it('kills and unkills immediately and records who and why', async () => {
@@ -414,10 +491,15 @@ describe('ledger queries', () => {
       keyId,
       sku,
       costMicros: cost,
+      status: 200,
     });
     await env.db.insert(usageEvents).values([
       row('2026-10-29T06:00:00Z', '1-0', 'k1', 'geocoding', 5000n), // Oct 28 in LA
-      row('2026-10-29T18:00:00Z', '2-0', 'k1', 'geocoding', 5000n),
+      // Google answered 200 but refused the call in its JSON status.
+      {
+        ...row('2026-10-29T18:00:00Z', '2-0', 'k1', 'geocoding', 5000n),
+        data: { providerError: 'OVER_QUERY_LIMIT' },
+      },
       row('2026-10-29T19:00:00Z', '3-0', 'k2', 'places.text_search.pro', 32000n),
       { ...row('2026-10-29T19:00:01Z', '4-0', 'k2', 'x', 1n), type: 'blocked' },
       // A settlement adjustment moves the cost but is not a request.
@@ -429,14 +511,29 @@ describe('ledger queries', () => {
     const res = await call(org.viewer, { url: '/v1/spend?groupBy=key,sku,day' });
     expect(res.json()).toEqual({
       items: [
-        { key: 'k1', sku: 'geocoding', day: '2026-10-28', costMicros: 5000, requests: 1 },
-        { key: 'k1', sku: 'geocoding', day: '2026-10-29', costMicros: 5000, requests: 1 },
+        {
+          key: 'k1',
+          sku: 'geocoding',
+          day: '2026-10-28',
+          costMicros: 5000,
+          requests: 1,
+          succeeded: 1,
+        },
+        {
+          key: 'k1',
+          sku: 'geocoding',
+          day: '2026-10-29',
+          costMicros: 5000,
+          requests: 1,
+          succeeded: 0,
+        },
         {
           key: 'k2',
           sku: 'places.text_search.pro',
           day: '2026-10-29',
           costMicros: 30000,
           requests: 1,
+          succeeded: 1,
         },
       ],
     });
@@ -444,7 +541,7 @@ describe('ledger queries', () => {
       url: '/v1/spend?groupBy=day&from=2026-10-29T12:00:00Z&to=2026-10-30T00:00:00Z',
     });
     expect(ranged.json()).toEqual({
-      items: [{ day: '2026-10-29', costMicros: 35000, requests: 2 }],
+      items: [{ day: '2026-10-29', costMicros: 35000, requests: 2, succeeded: 1 }],
     });
     expect((await call(org.viewer, { url: '/v1/spend?groupBy=nope' })).statusCode).toBe(400);
 
@@ -452,9 +549,10 @@ describe('ledger queries', () => {
     const p1 = page1.json<{ items: { streamId: string }[]; nextCursor: string }>();
     expect(p1.items.map((i) => i.streamId)).toEqual(['5-0', '4-0']);
     const page2 = await call(org.viewer, { url: `/v1/events?limit=2&cursor=${p1.nextCursor}` });
-    expect(page2.json<{ items: { streamId: string }[] }>().items.map((i) => i.streamId)).toEqual([
-      '3-0',
-      '2-0',
+    const p2 = page2.json<{ items: { streamId: string; outcome: string }[] }>();
+    expect(p2.items.map((i) => [i.streamId, i.outcome])).toEqual([
+      ['3-0', 'ok'],
+      ['2-0', 'provider_error'],
     ]);
     const blocked = await call(org.viewer, { url: '/v1/events?type=blocked' });
     expect(blocked.json<{ items: unknown[] }>().items).toHaveLength(1);

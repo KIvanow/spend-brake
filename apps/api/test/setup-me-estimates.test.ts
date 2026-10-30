@@ -177,6 +177,31 @@ describe('Google key restriction check', () => {
     expect(seen).toHaveLength(1);
     await app.close();
   });
+
+  it('refuses a key Google says is invalid, and stores nothing', async () => {
+    const app = await buildApi({
+      db: env.db,
+      valkey: env.valkey,
+      wrapper: new LocalKeyWrapper(randomBytes(32).toString('base64')),
+      rateLimitPerMinute: 100_000,
+      checkGoogleKey: (key) => checkGoogleKey(key, reply(400, 'API_KEY_INVALID')),
+    });
+    const org = await newOrg(env);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/providers/credentials',
+      headers: bearer(org.admin),
+      payload: { provider: 'google-maps', name: 'g', secret: 'not-a-real-key' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: 'invalid_credential' });
+    const list = await app.inject({
+      url: '/v1/providers/credentials',
+      headers: bearer(org.viewer),
+    });
+    expect(list.json()).toEqual({ items: [] });
+    await app.close();
+  });
 });
 
 describe('POST /v1/estimates/migration', () => {

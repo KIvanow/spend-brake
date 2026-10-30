@@ -240,6 +240,28 @@ describe('google-maps adapter', () => {
     expect(rejected(500, undefined)).toBe(false);
   });
 
+  it('reports an error status inside a 200 from the legacy APIs and Geocoding', () => {
+    const geocode = adapter.classify(
+      req('GET', 'https://maps.googleapis.com/maps/api/geocode/json?address=x'),
+    );
+    const places = adapter.classify(
+      req('GET', 'https://places.googleapis.com/v1/places/ChIJ1', {
+        headers: { 'X-Goog-FieldMask': 'id' },
+      }),
+    );
+    if (!geocode.priced || !places.priced) throw new Error();
+    const error = (c: typeof geocode, status: number, body: unknown) =>
+      adapter.providerError(c, { status, headers: {}, body });
+    expect(error(geocode, 200, { status: 'REQUEST_DENIED' })).toBe('REQUEST_DENIED');
+    expect(error(geocode, 200, { status: 'OVER_QUERY_LIMIT' })).toBe('OVER_QUERY_LIMIT');
+    expect(error(geocode, 200, { status: 'INVALID_REQUEST' })).toBe('INVALID_REQUEST');
+    expect(error(geocode, 200, { status: 'OK' })).toBeNull();
+    expect(error(geocode, 200, { status: 'ZERO_RESULTS' })).toBeNull();
+    expect(error(geocode, 200, undefined)).toBeNull();
+    expect(error(geocode, 500, { status: 'UNKNOWN_ERROR' })).toBeNull();
+    expect(error(places, 200, { status: 'REQUEST_DENIED' })).toBeNull();
+  });
+
   it('settles a matrix on more elements than requested, never fewer', () => {
     const c = adapter.classify(
       req(

@@ -138,5 +138,11 @@ export interface Key {
   status: 'active' | 'revoked';
   createdAt: string;
   expiresAt: string | null;
-  config: { env?: string | null; agentId?: string | null; sessionId?: string | null };
+  config: {
+    env?: string | null;
+    agentId?: string | null;
+    sessionId?: string | null;
+    /** provider -> provider credential id */
+    credentials?: Record<string, string>;
+  };
 }

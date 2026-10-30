@@ -1,5 +1,6 @@
 import { auditLog, usageEvents } from '@spend-brake/db';
 import { type SQL, and, desc, eq, gte, lt, or, sql } from '@spend-brake/db';
+import { outcomeOf } from '@spend-brake/shared';
 import { z } from 'zod';
 import { type Ctx, id, n } from '../common.js';
 import { ApiError, type Router } from '../route.js';
@@ -78,6 +79,12 @@ export function ledgerRoutes(r: Router, ctx: Ctx): void {
           ...Object.fromEntries(Object.entries(cols).map(([k, v]) => [k, v.mapWith(String)])),
           costMicros: sql<string>`coalesce(sum(${usageEvents.costMicros}), 0)::text`,
           requests: sql<string>`(count(*) filter (where ${usageEvents.type} = 'usage'))::text`,
+          // Calls the provider answered without an error (the outcome "ok" of /v1/metrics).
+          succeeded: sql<string>`(count(*) filter (where ${usageEvents.type} = 'usage'
+            and ${usageEvents.status} between 200 and 399
+            and ${usageEvents.data}->>'error' is null
+            and ${usageEvents.data}->>'keyError' is null
+            and ${usageEvents.data}->>'providerError' is null))::text`,
         })
         .from(usageEvents)
         .where(and(...where))
@@ -88,6 +95,7 @@ export function ledgerRoutes(r: Router, ctx: Ctx): void {
           ...row,
           costMicros: Number(row.costMicros),
           requests: Number(row.requests),
+          succeeded: Number(row.succeeded),
         })),
       };
     },
@@ -157,6 +165,11 @@ export function ledgerRoutes(r: Router, ctx: Ctx): void {
       return {
         items: rows.map((e) => ({
           ...e,
+          outcome: outcomeOf({
+            type: e.type,
+            status: e.status,
+            data: e.data as Record<string, unknown>,
+          }),
           ts: e.ts.toISOString(),
           worstMicros: n(e.worstMicros),
           costMicros: n(e.costMicros),

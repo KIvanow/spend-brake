@@ -14,6 +14,7 @@ import type {
   UpstreamRes,
 } from '../types.js';
 import {
+  LEGACY_OK_STATUSES,
   LEGACY_UNBILLED_STATUSES,
   directionsSku,
   distanceMatrixItem,
@@ -329,6 +330,15 @@ export class GoogleMapsAdapter implements ProviderAdapter {
       return /api key/i.test(body.error.message);
     }
     return res.status === 401 || res.status === 403;
+  }
+
+  /** Legacy APIs and Geocoding answer 200 even when they refuse: the JSON status says so. */
+  providerError(c: PricedClassified, res: UpstreamRes): string | null {
+    if (!c.route.startsWith('legacy.') && c.route !== 'geocoding') return null;
+    if (res.status < 200 || res.status >= 300) return null;
+    const status = (res.body as { status?: unknown } | undefined)?.status;
+    if (typeof status !== 'string' || LEGACY_OK_STATUSES.has(status)) return null;
+    return status.slice(0, 64);
   }
 
   billedOnStatus(status: number, c?: PricedClassified): boolean {

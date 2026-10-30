@@ -198,10 +198,9 @@ function planSummary(p: Plan): string {
 /** Create an account: an org and its owner; paid plans continue to Stripe Checkout. */
 export function Signup() {
   const [plans, setPlans] = useState<Plan[] | null>(null);
-  const [plan, setPlan] = useState(() => {
-    const wanted = /[?&]plan=([a-z]+)/.exec(window.location.hash)?.[1];
-    return wanted ?? 'free';
-  });
+  const [wanted] = useState(() => /[?&]plan=([a-z]+)/.exec(window.location.hash)?.[1] ?? null);
+  const [plan, setPlan] = useState(wanted ?? 'free');
+  const [unknownPlan, setUnknownPlan] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [busy, setBusy] = useState(false);
@@ -210,9 +209,19 @@ export function Signup() {
 
   useEffect(() => {
     api<{ plans: Plan[] }>('/v1/billing/plans')
-      .then((r) => setPlans(r.plans.filter((p) => p.purchasable)))
+      .then((r) => {
+        // Self-hosted licenses are offered only to people who came for one (?plan=business):
+        // the hosted org they create stays on Free limits.
+        const offered = r.plans.filter((p) => p.purchasable && (!p.selfHosted || p.id === wanted));
+        setPlans(offered);
+        // A link naming a plan that is not sold here: fall back to Free and say so.
+        if (!offered.some((p) => p.id === wanted)) {
+          setUnknownPlan(wanted !== null);
+          setPlan('free');
+        }
+      })
       .catch(() => setPlans([]));
-  }, []);
+  }, [wanted]);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -279,6 +288,11 @@ export function Signup() {
         <fieldset className="plans">
           <legend>Plan</legend>
           {plans === null && <p className="muted">Loading plans…</p>}
+          {unknownPlan && (
+            <p className="notice">
+              The plan in your link is not sold here, so Free is selected. Pick another below.
+            </p>
+          )}
           {plans?.map((p) => (
             <label key={p.id} className={p.id === plan ? 'plan selected' : 'plan'}>
               <input

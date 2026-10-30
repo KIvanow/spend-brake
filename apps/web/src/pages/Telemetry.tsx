@@ -1,11 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { useRole } from '../role.js';
 
 interface OtlpView {
   endpoint: string;
   headerNames: string[];
   enabled: boolean;
+  /** False when the plan no longer includes export: nothing is sent. */
+  planAllows?: boolean;
   lastSuccessAt: string | null;
   lastErrorAt: string | null;
   lastError: string | null;
@@ -32,6 +35,7 @@ function CopyBlock({ text }: { text: string }) {
 }
 
 function Prometheus() {
+  const { can } = useRole();
   const [token, setToken] = useState<string | null>(null);
   const create = useMutation({
     mutationFn: () =>
@@ -61,6 +65,8 @@ function Prometheus() {
       <CopyBlock text={config} />
       {token ? (
         <p className="notice">The token is in the config above. It is not shown again.</p>
+      ) : !can('owner') ? (
+        <p className="muted">An owner of the org can create the read-only token.</p>
       ) : (
         <button type="button" disabled={create.isPending} onClick={() => create.mutate()}>
           Create a read-only token for Prometheus
@@ -87,6 +93,7 @@ const EXAMPLES = [
 
 function OpenTelemetry() {
   const qc = useQueryClient();
+  const { can } = useRole();
   const current = useQuery({
     queryKey: ['otlp'],
     queryFn: () => api<{ otlp: OtlpView | null }>('/v1/telemetry/otlp'),
@@ -154,6 +161,12 @@ function OpenTelemetry() {
             Sending to <code>{otlp.endpoint}</code>
             {otlp.headerNames.length > 0 && <> with {otlp.headerNames.join(', ')}</>}.
           </p>
+          {otlp.planAllows === false && (
+            <p className="error">
+              Paused: your plan no longer includes OpenTelemetry export, so nothing is sent. Upgrade
+              on the Billing page to resume.
+            </p>
+          )}
           <p className="muted">
             Last delivered: {when(otlp.lastSuccessAt)}. Waiting: {otlp.queued}.
           </p>
@@ -162,7 +175,7 @@ function OpenTelemetry() {
               Last error ({when(otlp.lastErrorAt)}): {otlp.lastError}
             </p>
           )}
-          <div className="row">
+          <div className="row" hidden={!can('admin')}>
             <button type="button" disabled={test.isPending} onClick={() => test.mutate()}>
               Send test span
             </button>
@@ -185,7 +198,8 @@ function OpenTelemetry() {
           {test.isError && <p className="error">{test.error.message}</p>}
         </div>
       )}
-      <form className="form" onSubmit={submit}>
+      {!can('admin') && <p className="muted">Admins and owners can change where spans go.</p>}
+      <form className="form" onSubmit={submit} hidden={!can('admin')}>
         <h3>{otlp ? 'Change the destination' : 'Send spans to'}</h3>
         <label className="grow">
           OTLP/HTTP endpoint

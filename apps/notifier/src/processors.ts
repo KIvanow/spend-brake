@@ -62,7 +62,13 @@ export async function processAlert(
       return 'none';
     }
     const message = buildMessage(alertId, job, deps.links);
-    await sendMail(deps, job.email, message, [], LOGIN_FOOTER);
+    await sendMail(
+      deps,
+      job.email,
+      message,
+      [],
+      job.purpose === 'invite' ? INVITE_FOOTER : LOGIN_FOOTER,
+    );
     return 'email';
   }
   if (!job.orgId) {
@@ -124,6 +130,8 @@ export async function processAlert(
 
 const LOGIN_FOOTER =
   "Each link works once, for 15 minutes. If you didn't ask for it, ignore this email: nobody can sign in without it.";
+const INVITE_FOOTER =
+  'The link works once, for 15 minutes. If it has expired, enter this email address on the Spend Brake sign-in page to get a new one.';
 
 async function sendMail(
   deps: ProcessorDeps,

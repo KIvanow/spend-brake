@@ -133,6 +133,9 @@ export function distanceMatrixItem(q: URLSearchParams): LineItem {
   };
 }
 
+/** Legacy JSON statuses of a request that worked (with or without results). */
+export const LEGACY_OK_STATUSES = new Set(['OK', 'ZERO_RESULTS']);
+
 /** Legacy JSON statuses that are not a successful request, so Google does not bill them. */
 export const LEGACY_UNBILLED_STATUSES = new Set([
   'INVALID_REQUEST',

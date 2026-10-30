@@ -1,4 +1,4 @@
-import { type Db, and, apiTokens, eq, gt, isNull, ne, or, orgs, users } from '@spend-brake/db';
+import { type Db, and, apiTokens, eq, isNull, ne, orgs, users } from '@spend-brake/db';
 import { z } from 'zod';
 import { ROLES } from '../auth.js';
 import { type Ctx, audit, id } from '../common.js';
@@ -31,10 +31,11 @@ async function endSessions(db: Db, orgId: string, userId: string, now: Date): Pr
 }
 
 /**
- * Whether the org keeps an owner without this person: another owner who is a person, or a live
- * owner token not tied to anyone (`brake init`'s).
+ * Whether the org keeps an owner without this person: another owner who is a person, or an
+ * owner token not tied to anyone that never expires (`brake init`'s). A token that will expire
+ * does not count: once it does, nobody could manage the org.
  */
-async function ownerRemains(db: Db, orgId: string, userId: string, now: Date): Promise<boolean> {
+async function ownerRemains(db: Db, orgId: string, userId: string): Promise<boolean> {
   const [person] = await db
     .select({ id: users.id })
     .from(users)
@@ -57,7 +58,7 @@ async function ownerRemains(db: Db, orgId: string, userId: string, now: Date): P
         eq(apiTokens.role, 'owner'),
         isNull(apiTokens.userId),
         isNull(apiTokens.revokedAt),
-        or(isNull(apiTokens.expiresAt), gt(apiTokens.expiresAt, now)),
+        isNull(apiTokens.expiresAt),
       ),
     )
     .limit(1);
@@ -80,7 +81,7 @@ export function userRoutes(r: Router, ctx: Ctx, signIn: EmailSignIn | undefined)
   };
 
   const keepAnOwner = async (orgId: string, userId: string) => {
-    if (!(await ownerRemains(ctx.db, orgId, userId, ctx.now()))) {
+    if (!(await ownerRemains(ctx.db, orgId, userId))) {
       throw new ApiError(409, 'last_owner', 'The org needs another owner first.');
     }
   };
@@ -141,9 +142,19 @@ export function userRoutes(r: Router, ctx: Ctx, signIn: EmailSignIn | undefined)
       let invited = false;
       if (signIn && (await emailAllowed(auth.orgId)) && (await allowLinkTo(ctx.valkey, email))) {
         const [org] = await ctx.db.select().from(orgs).where(eq(orgs.id, auth.orgId)).limit(1);
+        // Name the inviter when a person sent it (an API token has no name to show).
+        const [inviter] = auth.actor.startsWith('user:')
+          ? await ctx.db
+              .select({ email: users.email })
+              .from(users)
+              .where(and(eq(users.id, auth.actor.slice(5)), eq(users.orgId, auth.orgId)))
+              .limit(1)
+          : [];
         await signIn.mailer.send({
           email,
           purpose: 'invite',
+          invitedBy: inviter?.email ?? null,
+          role: body.role,
           links: [
             {
               orgId: auth.orgId,

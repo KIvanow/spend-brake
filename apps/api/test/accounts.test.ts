@@ -229,6 +229,49 @@ describe('email sign-in', () => {
   });
 });
 
+describe('sign-out', () => {
+  it('says who the caller is, and ends a sign-in session on the server', async () => {
+    const org = await orgWithOwner('out@example.com');
+    const { token } = await signIn('out@example.com');
+    const who = await app.inject({ url: '/v1/auth/session', headers: bearer(token) });
+    expect(who.json()).toEqual({
+      orgId: org.id,
+      role: 'owner',
+      actor: `user:${org.ownerId}`,
+      signIn: 'email',
+    });
+    const out = await app.inject({
+      method: 'DELETE',
+      url: '/v1/auth/session',
+      headers: bearer(token),
+    });
+    expect(out.json()).toEqual({ revoked: true });
+    expect((await app.inject({ url: '/v1/users', headers: bearer(token) })).statusCode).toBe(401);
+    const audit = await env.db.select().from(auditLog).where(eq(auditLog.orgId, org.id));
+    expect(audit.map((a) => a.action)).toContain('auth.sign_out');
+  });
+
+  it('only forgets an API token in the browser: it may be used elsewhere', async () => {
+    const org = await orgWithOwner('tok@example.com');
+    const { token } = await signIn('tok@example.com');
+    const created = await app.inject({
+      method: 'POST',
+      url: '/v1/tokens',
+      headers: bearer(token),
+      payload: { name: 'ci', role: 'viewer' },
+    });
+    const apiToken = created.json<{ token: string }>().token;
+    const out = await app.inject({
+      method: 'DELETE',
+      url: '/v1/auth/session',
+      headers: bearer(apiToken),
+    });
+    expect(out.json()).toEqual({ revoked: false });
+    expect((await app.inject({ url: '/v1/org', headers: bearer(apiToken) })).statusCode).toBe(200);
+    expect(org.id).toBeTruthy();
+  });
+});
+
 describe('team', () => {
   it('invites a person, who signs in with the emailed link at their role', async () => {
     const org = await orgWithOwner('owner@example.com');
@@ -246,7 +289,12 @@ describe('team', () => {
       role: 'viewer',
       invited: true,
     });
-    expect(sent[0]).toMatchObject({ email: 'viewer@example.com', purpose: 'invite' });
+    expect(sent[0]).toMatchObject({
+      email: 'viewer@example.com',
+      purpose: 'invite',
+      invitedBy: 'owner@example.com',
+      role: 'viewer',
+    });
     expect(sent[0]!.links[0]!.orgId).toBe(org.id);
 
     const verify = await app.inject({
@@ -349,6 +397,26 @@ describe('team', () => {
         })
       ).statusCode,
     ).toBe(409);
+
+    // An owner token that will expire does not count: once it has, nobody could manage the org.
+    const temp = await app.inject({
+      method: 'POST',
+      url: '/v1/tokens',
+      headers: bearer(token),
+      payload: {
+        name: 'temp',
+        role: 'owner',
+        expiresAt: new Date(Date.now() + 120_000).toISOString(),
+      },
+    });
+    expect(temp.statusCode).toBe(201);
+    const stillLast = await app.inject({
+      method: 'PATCH',
+      url: `/v1/users/${org.ownerId}`,
+      headers: bearer(token),
+      payload: { role: 'viewer' },
+    });
+    expect(stillLast.statusCode).toBe(409);
 
     // With a second owner, the first may step down.
     await app.inject({

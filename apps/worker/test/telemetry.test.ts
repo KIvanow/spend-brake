@@ -1,7 +1,15 @@
 import { randomBytes } from 'node:crypto';
 import { type Server, createServer } from 'node:http';
 import { BudgetEngine } from '@spend-brake/budget';
-import { type Db, createDb, eq, migrate, orgs, telemetryExports } from '@spend-brake/db';
+import {
+  type Db,
+  createDb,
+  eq,
+  migrate,
+  orgEntitlements,
+  orgs,
+  telemetryExports,
+} from '@spend-brake/db';
 import {
   LocalKeyWrapper,
   encryptSecret,
@@ -226,6 +234,29 @@ describe('OpenTelemetry export', () => {
     await call(org, { reqId: 'r1' });
     await worker.ledgerOnce();
     expect(await valkey.llen(otlpQueueKey(org))).toBe(0);
+  });
+
+  it('stops exporting when the plan no longer includes it', async () => {
+    received = [];
+    const org = await newOrg();
+    await db
+      .insert(orgEntitlements)
+      .values({ orgId: org, plan: 'team', retentionDays: 30, otelExport: true });
+    await exportTo(org, {});
+    await call(org, { reqId: 'r1' });
+    await worker.ledgerOnce();
+    expect(await valkey.llen(otlpQueueKey(org))).toBe(1);
+    // Downgraded to Free before the queue was sent: nothing more is queued or sent.
+    await db
+      .update(orgEntitlements)
+      .set({ plan: 'free', otelExport: false })
+      .where(eq(orgEntitlements.orgId, org));
+    worker.otlp.reload();
+    await call(org, { reqId: 'r2' });
+    await worker.ledgerOnce();
+    expect(await valkey.llen(otlpQueueKey(org))).toBe(1);
+    expect(await worker.otlp.runOnce()).toBe(0);
+    expect(received).toHaveLength(0);
   });
 
   it('refuses private collectors unless told otherwise', async () => {

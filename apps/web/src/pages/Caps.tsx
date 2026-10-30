@@ -1,11 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
 import { type Cap, api, toMicros, usd } from '../api.js';
+import { useRole } from '../role.js';
 import { Table } from '../ui.js';
+import { useKeys } from './Keys.js';
+import { ScopeName } from './Overview.js';
 
 export function Caps() {
   const qc = useQueryClient();
   const caps = useQuery({ queryKey: ['caps'], queryFn: () => api<{ items: Cap[] }>('/v1/caps') });
+  const keys = useKeys();
+  const { can } = useRole();
+  const activeKeys = (keys.data?.items ?? []).filter((k) => k.status === 'active');
+  const names = new Map(activeKeys.map((k) => [k.id, k.name]));
   const [scope, setScope] = useState('org');
   const [kind, setKind] = useState<'d' | 'm'>('d');
   const [hard, setHard] = useState('');
@@ -67,64 +74,84 @@ export function Caps() {
         rows={caps.data?.items ?? []}
         empty="No caps yet."
         columns={[
-          { label: 'Scope', render: (c) => <code>{c.scope}</code> },
+          { label: 'Scope', render: (c) => <ScopeName scope={c.scope} names={names} /> },
           { label: 'Window', render: (c) => (c.kind === 'd' ? 'per day' : 'per month') },
           { label: 'Hard', render: (c) => usd(c.hard), numeric: true },
           { label: 'Soft', render: (c) => usd(c.soft), numeric: true },
-          {
-            label: '',
-            render: (c) => (
-              <button type="button" onClick={() => remove.mutate(c)} disabled={remove.isPending}>
-                Remove
-              </button>
-            ),
-          },
+          ...(can('admin')
+            ? [
+                {
+                  label: '',
+                  render: (c: Cap) => (
+                    <button
+                      type="button"
+                      onClick={() => remove.mutate(c)}
+                      disabled={remove.isPending}
+                    >
+                      Remove
+                    </button>
+                  ),
+                },
+              ]
+            : []),
         ]}
       />
-      <form className="form" onSubmit={submit} aria-label="Set a cap">
-        <h3>Set a cap</h3>
-        <label>
-          Scope
-          <input
-            value={scope}
-            onChange={(e) => setScope(e.target.value)}
-            placeholder="org, key:key_…, sku:google-maps:geocoding"
-            required
-          />
-        </label>
-        <label>
-          Window
-          <select value={kind} onChange={(e) => setKind(e.target.value as 'd' | 'm')}>
-            <option value="d">per day</option>
-            <option value="m">per month</option>
-          </select>
-        </label>
-        <label>
-          Hard cap ($)
-          <input
-            value={hard}
-            onChange={(e) => setHard(e.target.value)}
-            inputMode="decimal"
-            placeholder="none"
-          />
-        </label>
-        <label>
-          Soft limit ($)
-          <input
-            value={soft}
-            onChange={(e) => setSoft(e.target.value)}
-            inputMode="decimal"
-            placeholder="none"
-          />
-        </label>
-        <button type="submit" disabled={save.isPending}>
-          Save
-        </button>
-        {(formError ?? save.error?.message ?? remove.error?.message) && (
-          <p className="error">{formError ?? save.error?.message ?? remove.error?.message}</p>
-        )}
-        {notice && <p className="notice">{notice}</p>}
-      </form>
+      {!can('admin') && <p className="muted">Admins and owners can change caps.</p>}
+      {can('admin') && (
+        <form className="form" onSubmit={submit} aria-label="Set a cap">
+          <h3>Set a cap</h3>
+          <label>
+            Scope
+            <input
+              value={scope}
+              onChange={(e) => setScope(e.target.value)}
+              placeholder="org, key:key_…, sku:google-maps:geocoding"
+              list="cap-scopes"
+              required
+            />
+          </label>
+          <datalist id="cap-scopes">
+            <option value="org">the whole org</option>
+            {activeKeys.map((k) => (
+              <option key={k.id} value={`key:${k.id}`}>
+                key {k.name}
+              </option>
+            ))}
+          </datalist>
+          <label>
+            Window
+            <select value={kind} onChange={(e) => setKind(e.target.value as 'd' | 'm')}>
+              <option value="d">per day</option>
+              <option value="m">per month</option>
+            </select>
+          </label>
+          <label>
+            Hard cap ($)
+            <input
+              value={hard}
+              onChange={(e) => setHard(e.target.value)}
+              inputMode="decimal"
+              placeholder="none"
+            />
+          </label>
+          <label>
+            Soft limit ($)
+            <input
+              value={soft}
+              onChange={(e) => setSoft(e.target.value)}
+              inputMode="decimal"
+              placeholder="none"
+            />
+          </label>
+          <button type="submit" disabled={save.isPending}>
+            Save
+          </button>
+          {(formError ?? save.error?.message ?? remove.error?.message) && (
+            <p className="error">{formError ?? save.error?.message ?? remove.error?.message}</p>
+          )}
+          {notice && <p className="notice">{notice}</p>}
+        </form>
+      )}
     </section>
   );
 }

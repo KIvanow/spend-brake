@@ -140,7 +140,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   setupRoutes(app, router, ctx, deps.setupToken);
   meRoutes(app, router, ctx);
   estimateRoutes(router, ctx);
-  authRoutes(app, router, ctx, deps.emailSignIn, deps.publicInfo ?? {});
+  authRoutes(app, router, ctx, deps.emailSignIn, deps.publicInfo ?? {}, authenticator);
   userRoutes(router, ctx, deps.emailSignIn);
   telemetryRoutes(router, ctx, deps.collectorDispatcher ?? guardedAgent(false, 'collector'));
   for (const extend of deps.extensions ?? []) await extend({ app, router, ctx, authenticator });

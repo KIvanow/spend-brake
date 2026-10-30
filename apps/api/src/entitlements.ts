@@ -30,11 +30,12 @@ export async function entitlementsOf(ctx: Ctx, orgId: string): Promise<Entitleme
 
 const monthStart = (now: Date) => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 
-function limit(e: Entitlements, what: string, max: number): never {
+/** `what`: the thing counted, singular and plural ("key", "keys"). */
+function limit(e: Entitlements, what: [string, string], max: number): never {
   throw new ApiError(
     402,
     'plan_limit',
-    `The ${e.plan} plan allows ${max.toLocaleString('en-US')} ${what}. Upgrade the plan to add more.`,
+    `The ${e.plan} plan allows ${max.toLocaleString('en-US')} ${max === 1 ? what[0] : what[1]}. Upgrade the plan on the Billing page to add more.`,
   );
 }
 
@@ -71,7 +72,7 @@ export async function requireCapacity(
     );
   }
   if (e.requestsPerMonth !== null && (await requestsThisMonth(ctx, orgId)) >= e.requestsPerMonth) {
-    limit(e, 'proxied requests a month', e.requestsPerMonth);
+    limit(e, ['proxied request a month', 'proxied requests a month'], e.requestsPerMonth);
   }
   if (what === 'key' && e.maxKeys !== null) {
     const [row] = await ctx.db
@@ -84,7 +85,7 @@ export async function requireCapacity(
           sql`${virtualKeys.config}->>'sessionId' is null`,
         ),
       );
-    if (Number(row?.n ?? 0) >= e.maxKeys) limit(e, 'keys', e.maxKeys);
+    if (Number(row?.n ?? 0) >= e.maxKeys) limit(e, ['key', 'keys'], e.maxKeys);
   }
   if (what === 'session' && e.agentSessionsPerMonth !== null) {
     const [row] = await ctx.db
@@ -98,7 +99,7 @@ export async function requireCapacity(
         ),
       );
     if (Number(row?.n ?? 0) >= e.agentSessionsPerMonth) {
-      limit(e, 'agent sessions a month', e.agentSessionsPerMonth);
+      limit(e, ['agent session a month', 'agent sessions a month'], e.agentSessionsPerMonth);
     }
   }
   if (typeof what === 'object' && e.maxProviders !== null) {
@@ -108,7 +109,7 @@ export async function requireCapacity(
       .where(and(eq(providerCredentials.orgId, orgId), isNull(providerCredentials.revokedAt)));
     const providers = new Set(rows.map((r) => r.provider));
     if (!providers.has(what.provider) && providers.size >= e.maxProviders) {
-      limit(e, 'providers', e.maxProviders);
+      limit(e, ['provider', 'providers'], e.maxProviders);
     }
   }
 }

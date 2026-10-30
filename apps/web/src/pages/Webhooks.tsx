@@ -1,6 +1,7 @@
-import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { type FormEvent, useState } from 'react';
 import { api } from '../api.js';
+import { useRole } from '../role.js';
 import { Table } from '../ui.js';
 
 interface Webhook {
@@ -22,6 +23,66 @@ interface Delivery {
   at: string;
 }
 
+/** Where alerts go when no webhook takes them: the org's alert email (owners change it). */
+function AlertEmail() {
+  const qc = useQueryClient();
+  const { can } = useRole();
+  const org = useQuery({
+    queryKey: ['org'],
+    queryFn: () => api<{ settings?: { alertEmail?: string | null } }>('/v1/org'),
+  });
+  const current = org.data?.settings?.alertEmail ?? null;
+  const [email, setEmail] = useState<string | null>(null);
+  const save = useMutation({
+    mutationFn: (alertEmail: string | null) =>
+      api('/v1/org', { method: 'PUT', body: { alertEmail } }),
+    onSuccess: () => {
+      setEmail(null);
+      void qc.invalidateQueries({ queryKey: ['org'] });
+    },
+  });
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    const v = (email ?? current ?? '').trim();
+    save.mutate(v === '' ? null : v);
+  };
+  return (
+    <>
+      <h2>Alert email</h2>
+      <p className="muted">
+        Cap warnings, loop pauses and rejected provider keys are emailed here, with Kill, Raise and
+        Mute links, when no webhook takes them.{' '}
+        {current ? (
+          <>
+            Now: <strong>{current}</strong>.
+          </>
+        ) : (
+          <strong>No address set: alerts with no webhook are dropped.</strong>
+        )}
+      </p>
+      {can('owner') ? (
+        <form className="form" onSubmit={submit} aria-label="Alert email">
+          <label className="grow">
+            Email alerts to
+            <input
+              type="email"
+              value={email ?? current ?? ''}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="ops@example.com"
+            />
+          </label>
+          <button type="submit" className="primary" disabled={save.isPending}>
+            Save
+          </button>
+        </form>
+      ) : (
+        <p className="muted">Owners can change it.</p>
+      )}
+      {save.isError && <p className="error">{save.error.message}</p>}
+    </>
+  );
+}
+
 /** Alert webhooks and their delivery log. Webhooks are added with the API or CLI. */
 export function Webhooks() {
   const hooks = useQuery({
@@ -38,6 +99,7 @@ export function Webhooks() {
   });
   return (
     <section>
+      <AlertEmail />
       <h2>Alert webhooks</h2>
       <p className="muted">
         Signed JSON posts to Slack, Discord, Teams or any URL. URLs are stored encrypted; only the

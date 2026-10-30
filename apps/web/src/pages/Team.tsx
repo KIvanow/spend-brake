@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
 import { ApiError, api } from '../api.js';
+import { useRole } from '../role.js';
 import { Table } from '../ui.js';
 
 type Role = 'owner' | 'admin' | 'viewer';
@@ -21,6 +22,8 @@ const ROLES: { id: Role; about: string }[] = [
 /** The people in the org: invite by email, change roles, remove. */
 export function Team() {
   const qc = useQueryClient();
+  const { can } = useRole();
+  const owner = can('owner');
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<Role>('viewer');
   const [note, setNote] = useState<string | null>(null);
@@ -87,38 +90,47 @@ export function Team() {
           { label: 'Email', render: (p) => p.email },
           {
             label: 'Role',
-            render: (p) => (
-              <select
-                aria-label={`Role of ${p.email}`}
-                value={p.role}
-                disabled={change.isPending}
-                onChange={(e) => change.mutate({ id: p.id, role: e.target.value as Role })}
-              >
-                {ROLES.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.id}
-                  </option>
-                ))}
-              </select>
-            ),
+            render: (p) =>
+              !owner ? (
+                p.role
+              ) : (
+                <select
+                  aria-label={`Role of ${p.email}`}
+                  value={p.role}
+                  disabled={change.isPending}
+                  onChange={(e) => change.mutate({ id: p.id, role: e.target.value as Role })}
+                >
+                  {ROLES.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.id}
+                    </option>
+                  ))}
+                </select>
+              ),
           },
           { label: 'Added', render: (p) => p.createdAt.slice(0, 10) },
-          {
-            label: '',
-            render: (p) => (
-              <button
-                type="button"
-                className="danger"
-                disabled={remove.isPending}
-                onClick={() => remove.mutate(p.id)}
-              >
-                Remove
-              </button>
-            ),
-          },
+          ...(owner
+            ? [
+                {
+                  label: '',
+                  render: (p: Person) => (
+                    <button
+                      type="button"
+                      className="danger"
+                      aria-label={`Remove ${p.email}`}
+                      disabled={remove.isPending}
+                      onClick={() => remove.mutate(p.id)}
+                    >
+                      Remove
+                    </button>
+                  ),
+                },
+              ]
+            : []),
         ]}
       />
-      <form className="form" onSubmit={submit}>
+      {!owner && <p className="muted">Owners can invite people and change roles.</p>}
+      <form className="form" onSubmit={submit} hidden={!owner}>
         <h3>Invite someone</h3>
         <label>
           Email

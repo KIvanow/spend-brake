@@ -2,6 +2,7 @@ import { useInfiniteQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api, usd } from '../api.js';
 import { Table } from '../ui.js';
+import { useKeys } from './Keys.js';
 
 interface Page {
   items: Record<string, unknown>[];
@@ -20,6 +21,8 @@ export function Events() {
     getNextPageParam: (last) => last.nextCursor,
   });
   const rows = q.data?.pages.flatMap((p) => p.items) ?? [];
+  const keys = useKeys();
+  const keyName = new Map((keys.data?.items ?? []).map((k) => [k.id, k.name]));
   const s = (v: unknown): string => {
     if (v === null || v === undefined) return '';
     if (typeof v === 'string') return v;
@@ -52,9 +55,14 @@ export function Events() {
           columns={[
             { label: 'Time', render: (r) => s(r.ts).replace('T', ' ').slice(0, 19) },
             { label: 'Type', render: (r) => s(r.type) },
-            { label: 'Key', render: (r) => <code>{s(r.keyId)}</code> },
+            {
+              label: 'Key',
+              render: (r) => keyName.get(s(r.keyId)) ?? <code>{s(r.keyId)}</code>,
+            },
             { label: 'SKU', render: (r) => s(r.sku) },
-            { label: 'Status', render: (r) => s(r.status), numeric: true },
+            // ok, the provider's error, or why Spend Brake refused it (cap, kill, loop, ...).
+            { label: 'Outcome', render: (r) => s(r.outcome) },
+            { label: 'Status', render: (r) => (r.status ? s(r.status) : ''), numeric: true },
             { label: 'Cost', render: (r) => usd(r.costMicros as number | null, 4), numeric: true },
           ]}
         />

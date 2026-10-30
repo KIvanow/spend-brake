@@ -306,6 +306,39 @@ describe('upstream behaviour', () => {
     expect(flagged.map((e) => e.status)).toEqual(['400', '200']);
   });
 
+  it('names the missing provider key when a credential was deleted, and sends nothing', async () => {
+    const org = newOrg();
+    const { token } = await newKey(h, org, { credentials: { 'google-maps': 'cred-deleted' } });
+    let reached = false;
+    mock.respond = (_req, reply) => {
+      reached = true;
+      return reply.send({ results: [], status: 'OK' });
+    };
+    const res = await h.proxy.inject(`/google-maps/maps/api/geocode/json?address=x&key=${token}`);
+    expect(res.statusCode).toBe(502);
+    expect(res.json<{ message: string }>().message).toContain('provider key');
+    expect(reached).toBe(false);
+    const [usage] = (await events(org)).filter((e) => e.type === 'usage');
+    expect(usage).toMatchObject({ error: 'credential_unavailable', status: '0' });
+  });
+
+  it('marks a refusal inside a 200 (legacy JSON status) as a provider error', async () => {
+    const org = newOrg();
+    const { token } = await newKey(h, org);
+    for (const status of ['OVER_QUERY_LIMIT', 'INVALID_REQUEST', 'OK', 'ZERO_RESULTS']) {
+      mock.respond = (_req, reply) => reply.send({ results: [], status });
+      const res = await h.proxy.inject(`/google-maps/maps/api/geocode/json?address=x&key=${token}`);
+      expect(res.statusCode).toBe(200);
+    }
+    const usage = (await events(org)).filter((e) => e.type === 'usage');
+    expect(usage.map((e) => e.providerError ?? null)).toEqual([
+      'OVER_QUERY_LIMIT',
+      'INVALID_REQUEST',
+      null,
+      null,
+    ]);
+  });
+
   it('commits worst case on a timeout, since Google may have billed', async () => {
     const org = newOrg();
     const { token } = await newKey(h, org);

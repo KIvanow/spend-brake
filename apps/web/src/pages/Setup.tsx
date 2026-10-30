@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { type ReactNode, useState } from 'react';
 import { api, usd } from '../api.js';
+import { useRole } from '../role.js';
 import {
   AddProviderKey,
   CreateKey,
@@ -51,13 +52,15 @@ export function Setup() {
   const credentials = useCredentials();
   const keys = useKeys();
   const options = useAuthOptions();
+  const { can } = useRole();
   const caps = useQuery({
     queryKey: ['caps'],
     queryFn: () => api<{ items: CapRow[] }>('/v1/caps'),
   });
   const calls = useQuery({
     queryKey: ['spend', 'setup'],
-    queryFn: () => api<{ items: { requests: number }[] }>('/v1/spend?groupBy=key'),
+    queryFn: () =>
+      api<{ items: { requests: number; succeeded?: number }[] }>('/v1/spend?groupBy=key'),
     refetchInterval: 10_000,
   });
   const [created, setCreated] = useState<{ token: string; providers: string[] } | null>(null);
@@ -68,6 +71,8 @@ export function Setup() {
   const activeKeys = (keys.data?.items ?? []).filter((k) => k.status === 'active');
   const orgCaps = (caps.data?.items ?? []).filter((c) => c.scope === 'org' && c.hard !== null);
   const requests = (calls.data?.items ?? []).reduce((n, r) => n + r.requests, 0);
+  // Only a call the provider answered without an error proves the setup works.
+  const succeeded = (calls.data?.items ?? []).reduce((n, r) => n + (r.succeeded ?? 0), 0);
 
   return (
     <section>
@@ -85,8 +90,10 @@ export function Setup() {
                 Add another
               </a>
             </p>
-          ) : (
+          ) : can('admin') ? (
             <AddProviderKey onAdded={setCheck} />
+          ) : (
+            <p className="muted">Ask an admin or owner of the org to add one.</p>
           )}
           {check && <KeyAdvice check={check} />}
         </Step>
@@ -108,12 +115,14 @@ export function Setup() {
                 Manage keys
               </a>
             </p>
-          ) : (
+          ) : can('admin') ? (
             <CreateKey
               key={creds.map((c) => c.id).join()}
               credentials={creds}
               onCreated={setCreated}
             />
+          ) : (
+            <p className="muted">Ask an admin or owner of the org to create one.</p>
           )}
         </Step>
         <Step n={3} title="Set your spending caps" done={orgCaps.length > 0}>
@@ -128,11 +137,13 @@ export function Setup() {
             </a>
           </p>
         </Step>
-        <Step n={4} title="Make a call from your app" done={requests > 0}>
+        <Step n={4} title="Make a call from your app" done={succeeded > 0}>
           <p className="muted">
-            {requests > 0
-              ? `${requests.toLocaleString('en-US')} call${requests === 1 ? '' : 's'} so far. `
-              : 'Waiting for the first call through Spend Brake (this updates by itself). '}
+            {succeeded > 0
+              ? `${succeeded.toLocaleString('en-US')} successful call${succeeded === 1 ? '' : 's'} so far. `
+              : requests > 0
+                ? `${requests.toLocaleString('en-US')} call${requests === 1 ? '' : 's'} so far, none successful yet: check the provider key and see Events for the errors. `
+                : 'Waiting for the first call through Spend Brake (this updates by itself). '}
             <a href="#/spend" onClick={() => go('spend')}>
               See spend
             </a>

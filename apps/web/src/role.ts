@@ -1,0 +1,21 @@
+import { useQuery } from '@tanstack/react-query';
+import { api } from './api.js';
+
+export type Role = 'viewer' | 'admin' | 'owner';
+
+const RANK: Record<Role, number> = { viewer: 0, admin: 1, owner: 2 };
+
+/**
+ * The signed-in token's role, so pages show only the controls it can use. Until it is known (or
+ * if the API cannot say), everything shows and the API still refuses what the role cannot do.
+ */
+export function useRole(): { role: Role | null; can: (need: Role) => boolean } {
+  const q = useQuery({
+    queryKey: ['auth-session'],
+    queryFn: () => api<{ role: Role }>('/v1/auth/session'),
+    staleTime: Infinity,
+    retry: false,
+  });
+  const role = q.data?.role ?? null;
+  return { role, can: (need) => role === null || RANK[role] >= RANK[need] };
+}

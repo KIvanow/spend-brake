@@ -40,6 +40,18 @@
           <a href="#self-host">Self-host</a>
           <a href="https://github.com/KIvanow/spend-brake">Docs</a>
         </nav>
+        <details class="menu">
+          <summary>Menu</summary>
+          <nav aria-label="Sections (menu)">
+            <a href="#how">How it works</a>
+            <a href="#features">Features</a>
+            <a href="#agents">Agents</a>
+            <a href="#pricing">Pricing</a>
+            <a href="#self-host">Self-host</a>
+            <a href="https://github.com/KIvanow/spend-brake">Docs</a>
+            <a href="https://app.spendbrake.dev/">Sign in</a>
+          </nav>
+        </details>
         <div class="cta">
           <a class="btn ghost" href="https://app.spendbrake.dev/">Sign in</a>
           <a class="btn primary" href="https://app.spendbrake.dev/#/signup">Start free</a>
@@ -85,13 +97,13 @@
 
 <span class="c">HTTP/1.1 200 OK</span>
 <span class="k">X-Brake-Cost-Micros:</span> 5000
-<span class="k">X-Brake-Remaining-Micros:</span> 10000
+<span class="k">X-Brake-Remaining-Micros:</span> 3000
 
 <span class="c">… the next call would cross the cap:</span>
 <span class="stop"><span class="brake">HTTP/1.1 402 Payment Required</span>
 {"error":"budget_exceeded",
  "message":"Spend cap reached for org. Stop and ask the user to raise the cap.",
- "scope":"org","window":"d:20261029","cap":5000000,"spent":4990000,
+ "scope":"org","window":"d:20261029","cap":5000000,"spent":4997000,
  "resetsAt":"2026-10-30T00:00:00.000Z"}</span></pre>
           </div>
         </div>
@@ -612,8 +624,8 @@ HTTP 200 · cost <span class="ok">$0.0050</span> · remaining $4.99
                   self-hosted install sends no data to Spend Brake.
                 </li>
                 <li>
-                  <b>Backups and upgrades</b> are scripted, and published images are pinned by
-                  version.
+                  <b>Backups and upgrades</b> are scripted. For now you build the images and the CLI
+                  from source; published images and an npm package are coming.
                 </li>
                 <li>
                   <b>The same CLI</b> works against your install:
@@ -634,7 +646,8 @@ HTTP 200 · cost <span class="ok">$0.0050</span> · remaining $4.99
 <span class="c">$</span> cp infra/.env.example infra/.env   <span class="c"># fill in the secrets</span>
 <span class="c">$</span> docker compose -f infra/docker-compose.yml up -d --build --wait
 
-<span class="c">$</span> npx @spend-brake/cli init --api-url http://localhost:8081 \
+<span class="c">$</span> pnpm install &amp;&amp; pnpm --filter @spend-brake/cli build
+<span class="c">$</span> node apps/cli/dist/brake.cjs init --api-url http://localhost:8081 \
     --proxy-url http://localhost:8080 --org acme --day-cap 5 --month-cap 50
 Org acme is ready. An admin token is saved to ~/.config/brake/config.json.
 
@@ -703,8 +716,6 @@ Use it instead of the Google key, with the proxy as the base URL:
           </p>
         </div>
         <nav aria-label="Legal and contact">
-          <a href="/privacy">Privacy</a>
-          <a href="/terms">Terms</a>
           <a href="mailto:kristiyan@spendbrake.dev">kristiyan@spendbrake.dev</a>
           <a href="https://github.com/KIvanow/spend-brake">GitHub</a>
           <a href="https://github.com/KIvanow/spend-brake/blob/main/docs/self-hosting.md"

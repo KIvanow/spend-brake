@@ -563,6 +563,26 @@ export class BudgetEngine {
     await this.client.del(orgKeys(orgId).circuit(keyId));
   }
 
+  /** Keys whose loop circuit is open, with the seconds until it closes by itself. */
+  async pausedKeys(
+    orgId: string,
+    keyIds: readonly string[],
+  ): Promise<{ keyId: string; retryAfterSec: number }[]> {
+    if (keyIds.length === 0) return [];
+    const k = orgKeys(orgId);
+    const tx = this.client.multi();
+    for (const id of keyIds) tx.pttl(k.circuit(id));
+    const res = (await tx.exec()) ?? [];
+    const out: { keyId: string; retryAfterSec: number }[] = [];
+    keyIds.forEach((keyId, i) => {
+      const ms = Number(res[i]?.[1] ?? -2);
+      // -2: no circuit; -1: open with no expiry (never set that way, but still paused).
+      if (ms === -2) return;
+      out.push({ keyId, retryAfterSec: ms < 0 ? 0 : Math.ceil(ms / 1000) });
+    });
+    return out;
+  }
+
   /** Units of each SKU counted this month; selects volume bands and free allowances. */
   async monthlyUnits(
     orgId: string,

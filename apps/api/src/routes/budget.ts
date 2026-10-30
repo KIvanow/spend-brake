@@ -5,6 +5,7 @@ import { z } from 'zod';
 import {
   type Ctx,
   audit,
+  id,
   killLabel,
   micros,
   n,
@@ -17,7 +18,12 @@ import {
 import { type Router, notFound } from '../route.js';
 import { requireOrgCapWithinPlan } from '../entitlements.js';
 
-const capValues = z.object({ hard: micros.nullable(), soft: micros.nullable().optional() });
+const capValues = z
+  .object({ hard: micros.nullable(), soft: micros.nullable().optional() })
+  .refine(
+    (v) => v.hard === null || v.soft === null || v.soft === undefined || v.soft <= v.hard,
+    'The soft cap (alert) must not be above the hard cap.',
+  );
 
 const pendingView = z
   .object({ scope: z.string(), kind: z.enum(['d', 'm']), approvalId: z.string() })
@@ -53,6 +59,15 @@ export function budgetRoutes(r: Router, ctx: Ctx): void {
     response: z.object({ items: z.array(capView), pending: z.array(pendingView).optional() }),
     handler: async ({ auth, params, body }) => {
       const scope = toScope(params.scope);
+      // A typo would otherwise cap a key that does not exist and protect nothing.
+      if (scope.kind === 'key') {
+        const [key] = await ctx.db
+          .select({ id: virtualKeys.id })
+          .from(virtualKeys)
+          .where(and(eq(virtualKeys.id, scope.id), eq(virtualKeys.orgId, auth.orgId)))
+          .limit(1);
+        if (!key) throw notFound('Key');
+      }
       const items = [];
       const pending = [];
       for (const [kind, values] of [
@@ -202,6 +217,27 @@ export function budgetRoutes(r: Router, ctx: Ctx): void {
   });
 
   r.add({
+    method: 'post',
+    path: '/v1/keys/{id}/resume',
+    role: 'admin',
+    tag: 'Kill switch',
+    summary: 'Resume a key paused by the loop breaker (close its circuit before the cooldown ends)',
+    params: z.object({ id }),
+    response: z.object({ keyId: z.string(), resumed: z.literal(true) }),
+    handler: async ({ auth, params }) => {
+      const [key] = await ctx.db
+        .select({ id: virtualKeys.id })
+        .from(virtualKeys)
+        .where(and(eq(virtualKeys.id, params.id), eq(virtualKeys.orgId, auth.orgId)))
+        .limit(1);
+      if (!key) throw notFound('Key');
+      await ctx.engine.resetCircuit(auth.orgId, key.id);
+      await audit(ctx, auth, 'circuit.reset', `key:${key.id}`, { via: 'api' });
+      return { keyId: key.id, resumed: true as const };
+    },
+  });
+
+  r.add({
     method: 'get',
     path: '/v1/status',
     role: 'viewer',
@@ -215,6 +251,9 @@ export function budgetRoutes(r: Router, ctx: Ctx): void {
     }),
     response: z.object({
       killed: z.array(z.string()),
+      paused: z.array(z.object({ keyId: z.string(), retryAfterSec: z.number() })).openapi({
+        description: 'Keys refused for a loop (429 loop_detected) until the circuit closes',
+      }),
       scopes: z.array(
         z.object({
           scope: z.string(),
@@ -229,17 +268,19 @@ export function budgetRoutes(r: Router, ctx: Ctx): void {
     }),
     handler: async ({ auth, query }) => {
       let labels = query.scope === undefined ? [] : [query.scope].flat();
-      if (labels.length === 0) {
-        const keys = await ctx.db
-          .select({ id: virtualKeys.id })
-          .from(virtualKeys)
-          .where(and(eq(virtualKeys.orgId, auth.orgId), eq(virtualKeys.status, 'active')));
-        labels = ['org', ...keys.map((k) => `key:${k.id}`)];
-      }
+      const keys = await ctx.db
+        .select({ id: virtualKeys.id })
+        .from(virtualKeys)
+        .where(and(eq(virtualKeys.orgId, auth.orgId), eq(virtualKeys.status, 'active')));
+      if (labels.length === 0) labels = ['org', ...keys.map((k) => `key:${k.id}`)];
       const tz = await orgTimeZone(ctx, auth.orgId);
       const status = await ctx.engine.status(auth.orgId, labels.map(toScope), tz, ctx.now());
       return {
         killed: await ctx.engine.killed(auth.orgId),
+        paused: await ctx.engine.pausedKeys(
+          auth.orgId,
+          keys.map((k) => k.id),
+        ),
         scopes: status.map((s) => ({
           scope: s.scope,
           window: s.window,

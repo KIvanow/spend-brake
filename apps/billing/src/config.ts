@@ -5,6 +5,8 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().default(8083),
   HOST: z.string().default('0.0.0.0'),
   LOG_LEVEL: z.string().default('info'),
+  /** Behind the dashboard's nginx: rate limit by the client's X-Forwarded-For address. */
+  TRUST_PROXY: z.stringbool().default(false),
   DATABASE_URL: z.string().default('postgres://brake:brake@localhost:15432/brake'),
   VALKEY_URL: z.string().default('redis://localhost:16379'),
   /** Test mode only (sk_test_ / rk_test_); live keys are refused. */

@@ -711,6 +711,7 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
       error?: string,
       keyError = false,
       pendingRef: Record<string, string> | null = null,
+      providerError: string | null = null,
     ) => {
       metrics.cost.inc({ provider: adapter.id }, Number(actual));
       const event = compact({
@@ -734,6 +735,7 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
         crossings: billed && crossings.length ? JSON.stringify(crossings) : undefined,
         failOpen: failOpenDay ? '1' : undefined,
         keyError: keyError ? '1' : undefined,
+        providerError: providerError ?? undefined,
         error,
         ...call,
         resBytes: resBytes === undefined ? undefined : String(resBytes),
@@ -823,7 +825,12 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
       secret = await deps.secrets.get(org.id, adapter.id, credentialId);
     } catch {
       settle(0n, false, 0, 0, 'credential_unavailable');
-      return sendError(reply, 'upstream_unavailable', 'Provider credential is not available.');
+      // Not the provider's fault: the stored provider key is gone (deleted) or cannot be read.
+      return sendError(
+        reply,
+        'upstream_unavailable',
+        `The ${adapter.id} provider key this Spend Brake key uses was deleted or cannot be read; nothing was sent. Point the key at another provider key in the dashboard (Keys).`,
+      );
     }
     const headers = outgoingHeaders(request.headers);
     const outgoing = { origin: upstream.origin, headers, query };
@@ -935,7 +942,20 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
       const pendingRef = priced.classified
         ? (adapter.pendingSettlement?.(priced.classified, upstreamRes) ?? null)
         : null;
-      settle(actual, billed, res.statusCode, upstreamMs, undefined, keyError, pendingRef);
+      // A refusal inside a 200 (Google's legacy JSON status) is an error, not a success.
+      const providerError = priced.classified
+        ? (adapter.providerError?.(priced.classified, upstreamRes) ?? null)
+        : null;
+      settle(
+        actual,
+        billed,
+        res.statusCode,
+        upstreamMs,
+        undefined,
+        keyError,
+        pendingRef,
+        providerError,
+      );
       reply.code(res.statusCode).headers(passHeaders);
       costHeaders(actual);
       return reply.send(raw);

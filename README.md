@@ -34,7 +34,7 @@ That starts the proxy (`:8080`), admin API (`:8081`), notifier (`:8082`), dashbo
 worker, Valkey and Postgres. Then set up your org, store the Google key and get a virtual key:
 
 ```sh
-pnpm install && pnpm --filter @spend-brake/cli build      # or: npx @spend-brake/cli
+pnpm install && pnpm --filter @spend-brake/cli build
 alias brake="node $PWD/apps/cli/dist/brake.cjs"
 
 # Secrets from the environment (or omit them to be prompted): flags would land in shell history.
@@ -43,6 +43,9 @@ read -rs GOOGLE_MAPS_KEY && export GOOGLE_MAPS_KEY
 brake init --api-url http://localhost:8081 --proxy-url http://localhost:8080 \
   --org acme --day-cap 5 --month-cap 50
 ```
+
+The CLI and the Docker images are built from source for now; published packages (`npx
+@spend-brake/cli`) and images are coming.
 
 `init` prints the owner token once (keep it in a password manager) and saves an admin token for
 the CLI. Valkey and Postgres are only reachable from the other containers.

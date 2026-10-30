@@ -175,6 +175,19 @@ describe('spans', () => {
     expect(outcomeOf({ type: 'loop', status: null, data: { reason: 'loop_detected' } })).toBe(
       'loop_detected',
     );
+    expect(outcomeOf({ type: 'usage', status: 200, data: {} })).toBe('ok');
+    expect(outcomeOf({ type: 'usage', status: 200, data: { keyError: '1' } })).toBe(
+      'upstream_key_error',
+    );
+    expect(outcomeOf({ type: 'usage', status: 403, data: { keyError: '1' } })).toBe(
+      'upstream_key_error',
+    );
+    expect(
+      outcomeOf({ type: 'usage', status: 200, data: { providerError: 'OVER_QUERY_LIMIT' } }),
+    ).toBe('provider_error');
+    expect(outcomeOf({ type: 'usage', status: 0, data: { error: 'credential_unavailable' } })).toBe(
+      'credential_unavailable',
+    );
   });
 
   it('finds the traces URL', () => {

@@ -175,12 +175,53 @@ svg {
   gap: 8px;
   align-items: center;
 }
+/* Narrow screens: the sections fold into a menu (details/summary, no script). */
+.top .menu {
+  order: 3;
+}
+.top .menu summary {
+  list-style: none;
+  cursor: pointer;
+  color: var(--text);
+  font-size: 14px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.top .menu summary::-webkit-details-marker {
+  display: none;
+}
+.top .menu[open] summary {
+  background: var(--surface-2);
+}
+.top .menu nav {
+  display: flex;
+  flex-direction: column;
+  position: absolute;
+  top: 58px;
+  left: 0;
+  right: 0;
+  padding: 8px 16px 12px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+.top .menu nav a {
+  padding: 10px;
+}
+@media (max-width: 419px) {
+  .top .cta .ghost {
+    display: none;
+  }
+}
 @media (min-width: 860px) {
   .top nav {
     display: flex;
   }
   .top .cta {
     margin-left: 0;
+  }
+  .top .menu {
+    display: none;
   }
 }
 

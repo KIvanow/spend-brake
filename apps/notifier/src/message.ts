@@ -209,12 +209,16 @@ function loginMessage(job: AlertJob): Pick<Message, 'title' | 'text' | 'actions'
   }));
   const org = links[0]?.orgName ?? 'Spend Brake';
   switch (job.purpose) {
-    case 'invite':
+    case 'invite': {
+      const by = typeof job.invitedBy === 'string' && job.invitedBy ? job.invitedBy : null;
+      const role = typeof job.role === 'string' && job.role ? job.role : null;
+      const as = role ? ` as ${role === 'admin' || role === 'owner' ? 'an' : 'a'} ${role}` : '';
       return {
         title: `You're invited to ${org} on Spend Brake`,
-        text: `You were added to ${org} on Spend Brake, which caps what your apps and agents spend on paid APIs. Open the link to sign in.`,
+        text: `${by ?? 'Someone'} added you to ${org} on Spend Brake${as}. Spend Brake caps what your apps and agents spend on paid APIs. Open the link to sign in.`,
         actions,
       };
+    }
     case 'welcome':
       return {
         title: 'Welcome to Spend Brake',

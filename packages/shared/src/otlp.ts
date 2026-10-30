@@ -72,6 +72,12 @@ const usd = (micros: bigint | null) => (micros === null ? null : Number(micros) 
 /** Why a call ended the way it did: ok, the HTTP error, or what Spend Brake refused. */
 export function outcomeOf(c: Pick<CallRecord, 'type' | 'status' | 'data'>): string {
   if (c.type !== 'usage') return typeof c.data.reason === 'string' ? c.data.reason : c.type;
+  // The provider refused our real key (even inside a 200, as Google's legacy APIs do).
+  if (c.data.keyError === '1') return 'upstream_key_error';
+  // The provider answered 200 but reported an error in the body (e.g. OVER_QUERY_LIMIT).
+  if (typeof c.data.providerError === 'string' && c.data.providerError) return 'provider_error';
+  // The key's provider credential was deleted: nothing was sent.
+  if (c.data.error === 'credential_unavailable') return 'credential_unavailable';
   if (typeof c.data.error === 'string' && c.data.error) {
     return c.status ? `http_${Math.floor(c.status / 100)}xx` : 'upstream_error';
   }

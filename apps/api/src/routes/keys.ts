@@ -102,6 +102,55 @@ function record(keyId: string, orgId: string, f: Fields, base?: KeyRecord): KeyR
   };
 }
 
+/**
+ * Point every active key (session keys too, so they keep matching their parent) whose
+ * `provider` binding passes `from` at the credential `to`: Valkey first, then Postgres. Returns
+ * the keys moved.
+ */
+export async function rebindKeys(
+  ctx: Ctx,
+  orgId: string,
+  provider: string,
+  from: (credId: string) => boolean,
+  to: string,
+): Promise<{ id: string; name: string }[]> {
+  const rows = await ctx.db
+    .select()
+    .from(virtualKeys)
+    .where(and(eq(virtualKeys.orgId, orgId), eq(virtualKeys.status, 'active')));
+  const moved: { id: string; name: string }[] = [];
+  for (const row of rows) {
+    const rec = row.config as KeyRecord;
+    const current = rec.credentials?.[provider];
+    if (current === undefined || current === to || !from(current)) continue;
+    const next: KeyRecord = { ...rec, credentials: { ...rec.credentials, [provider]: to } };
+    await ctx.registry.putKeyByHash(row.tokenHash, next);
+    await ctx.db.update(virtualKeys).set({ config: next }).where(eq(virtualKeys.id, row.id));
+    moved.push({ id: row.id, name: row.name });
+  }
+  return moved;
+}
+
+/** Active keys bound to a credential. */
+export async function keysUsing(
+  ctx: Ctx,
+  orgId: string,
+  provider: string,
+  credId: string,
+): Promise<{ id: string; name: string }[]> {
+  const rows = await ctx.db
+    .select({ id: virtualKeys.id, name: virtualKeys.name })
+    .from(virtualKeys)
+    .where(
+      and(
+        eq(virtualKeys.orgId, orgId),
+        eq(virtualKeys.status, 'active'),
+        sql`${virtualKeys.config}->'credentials'->>${provider} = ${credId}`,
+      ),
+    );
+  return rows;
+}
+
 export function keyRoutes(r: Router, ctx: Ctx): void {
   async function checkCredentials(orgId: string, creds: Record<string, string>) {
     const ids = Object.values(creds);

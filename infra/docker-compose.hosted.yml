@@ -15,6 +15,9 @@ services:
       VALKEY_URL: redis://:${VALKEY_PASSWORD}@valkey:6379
       DATABASE_URL: postgres://brake:${POSTGRES_PASSWORD}@postgres:5432/brake
       PORT: '8083'
+      # Rate limits per client: the address comes from X-Forwarded-For, trusting only the private
+      # hops in front (the dashboard's nginx, and Caddy with docker-compose.tls.yml).
+      TRUST_PROXY: 'true'
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:?set STRIPE_SECRET_KEY (sk_test_...) in infra/.env}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:?set STRIPE_WEBHOOK_SECRET (whsec_...) in infra/.env}
       BRAKE_DASHBOARD_URL: ${BRAKE_DASHBOARD_URL:-http://localhost:3000}

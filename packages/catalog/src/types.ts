@@ -108,6 +108,12 @@ export interface ProviderAdapter {
    * The proxy buffers error responses so this can read their body.
    */
   credentialRejected(res: UpstreamRes): boolean;
+  /**
+   * An error the provider reported inside a successful HTTP answer (Google's legacy APIs answer
+   * 200 with a JSON `status` such as `OVER_QUERY_LIMIT`), or null. Read only from bodies the
+   * proxy already buffered (`needsBody`), so it never holds up a streamed response.
+   */
+  providerError?(c: PricedClassified, res: UpstreamRes): string | null;
   /** Whether the provider may have billed a request that timed out. */
   timeoutBilled: boolean;
   /**

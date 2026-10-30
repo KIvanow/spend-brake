@@ -331,13 +331,18 @@ describe('fallbacks and mutes', () => {
       orgId: null,
       email: 'pat@example.com',
       purpose: 'invite',
+      invitedBy: 'ana@example.com',
+      role: 'admin',
       links: [{ orgId: o.id, orgName: 'Acme', url: 'https://app.example.com/#login=abc' }],
     });
     await until(() => mails.some((m) => m.to === 'pat@example.com'));
     const m = mails.find((x) => x.to === 'pat@example.com')!;
     expect(m.subject).toBe("[Spend Brake] You're invited to Acme on Spend Brake");
     expect(m.text).toContain('Sign in: https://app.example.com/#login=abc');
+    expect(m.text).toContain('ana@example.com added you to Acme on Spend Brake as an admin.');
     expect(m.text).toContain('works once, for 15 minutes');
+    expect(m.text).toContain('sign-in page to get a new one');
+    expect(m.text).not.toContain("If you didn't ask for it");
     expect(m.text).not.toContain('Action links');
     await new Promise((res) => setTimeout(res, 200));
     expect(r.got).toHaveLength(0);
@@ -452,14 +457,14 @@ describe('action links', () => {
 
   it('raises a cap by a fixed or custom amount within the link limit', async () => {
     const o = await org();
-    await call(o.owner, 'PUT', '/v1/caps/key:k1', { day: { hard: 10_000_000 } });
-    const fixed = link(o.id, { act: 'raise', target: 'key:k1', kind: 'd', amount: '25000000' });
+    await call(o.owner, 'PUT', '/v1/caps/env:prod', { day: { hard: 10_000_000 } });
+    const fixed = link(o.id, { act: 'raise', target: 'env:prod', kind: 'd', amount: '25000000' });
     expect((await pages.inject({ method: 'POST', url: `/a/${fixed}` })).statusCode).toBe(200);
-    expect((await engine.getCap(o.id, { kind: 'key', id: 'k1' }, 'd'))?.hard).toBe(35_000_000n);
+    expect((await engine.getCap(o.id, { kind: 'env', name: 'prod' }, 'd'))?.hard).toBe(35_000_000n);
 
     const custom = link(o.id, {
       act: 'raise',
-      target: 'key:k1',
+      target: 'env:prod',
       kind: 'd',
       amount: 'custom',
       max: '100000000',
@@ -475,12 +480,12 @@ describe('action links', () => {
     expect(tooMuch.statusCode).toBe(400);
     const ok = await pages.inject({
       method: 'POST',
-      url: `/a/${link(o.id, { act: 'raise', target: 'key:k1', kind: 'd', amount: 'custom', max: '100000000' })}`,
+      url: `/a/${link(o.id, { act: 'raise', target: 'env:prod', kind: 'd', amount: 'custom', max: '100000000' })}`,
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       payload: 'amountUsd=30',
     });
     expect(ok.statusCode).toBe(200);
-    expect((await engine.getCap(o.id, { kind: 'key', id: 'k1' }, 'd'))?.hard).toBe(65_000_000n);
+    expect((await engine.getCap(o.id, { kind: 'env', name: 'prod' }, 'd'))?.hard).toBe(65_000_000n);
     const caps = await call(o.owner, 'GET', '/v1/caps');
     expect(caps.json<{ items: { hard: number }[] }>().items[0]!.hard).toBe(65_000_000);
   });

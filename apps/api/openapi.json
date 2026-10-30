@@ -769,8 +769,18 @@
                       "properties": {
                         "check": {
                           "$ref": "#/components/schemas/KeyCheck"
+                        },
+                        "reboundKeys": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Keys that were bound to a deleted credential of this provider and now use this one"
                         }
-                      }
+                      },
+                      "required": [
+                        "reboundKeys"
+                      ]
                     }
                   ]
                 }
@@ -876,7 +886,7 @@
     },
     "/v1/providers/credentials/{id}": {
       "delete": {
-        "summary": "Delete a provider key (admin)",
+        "summary": "Delete a provider key (keys that use it move to another key of the provider) (admin)",
         "tags": [
           "Providers"
         ],
@@ -912,11 +922,19 @@
                       "enum": [
                         true
                       ]
+                    },
+                    "reboundKeys": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Keys moved to another credential"
                     }
                   },
                   "required": [
                     "id",
-                    "deleted"
+                    "deleted",
+                    "reboundKeys"
                   ]
                 }
               }
@@ -1800,6 +1818,87 @@
         }
       }
     },
+    "/v1/keys/{id}/resume": {
+      "post": {
+        "summary": "Resume a key paused by the loop breaker (close its circuit before the cooldown ends) (admin)",
+        "tags": [
+          "Kill switch"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.-]{1,128}$"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "keyId": {
+                      "type": "string"
+                    },
+                    "resumed": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "keyId",
+                    "resumed"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role too low",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/status": {
       "get": {
         "summary": "Live remaining budget per scope (from Valkey) (viewer)",
@@ -1848,6 +1947,25 @@
                       "items": {
                         "type": "string"
                       }
+                    },
+                    "paused": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "keyId": {
+                            "type": "string"
+                          },
+                          "retryAfterSec": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "keyId",
+                          "retryAfterSec"
+                        ]
+                      },
+                      "description": "Keys refused for a loop (429 loop_detected) until the circuit closes"
                     },
                     "scopes": {
                       "type": "array",
@@ -1899,6 +2017,7 @@
                   },
                   "required": [
                     "killed",
+                    "paused",
                     "scopes"
                   ]
                 }
@@ -3582,6 +3701,155 @@
         }
       }
     },
+    "/v1/auth/session": {
+      "get": {
+        "summary": "The calling token: its org and role (the dashboard shows only what the role can do) (viewer)",
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "orgId": {
+                      "type": "string"
+                    },
+                    "role": {
+                      "type": "string",
+                      "enum": [
+                        "viewer",
+                        "admin",
+                        "owner"
+                      ]
+                    },
+                    "actor": {
+                      "type": "string"
+                    },
+                    "signIn": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "sso",
+                        "email",
+                        null
+                      ]
+                    }
+                  },
+                  "required": [
+                    "orgId",
+                    "role",
+                    "actor",
+                    "signIn"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role too low",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Sign out: end the calling session (tokens issued at sign-in only) (viewer)",
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "revoked": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "revoked"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role too low",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/users": {
       "get": {
         "summary": "People in the org (admin)",
@@ -4075,6 +4343,10 @@
                         "enabled": {
                           "type": "boolean"
                         },
+                        "planAllows": {
+                          "type": "boolean",
+                          "description": "False when the org's plan no longer includes export: nothing is sent"
+                        },
                         "lastSuccessAt": {
                           "type": [
                             "string",
@@ -4101,6 +4373,7 @@
                         "endpoint",
                         "headerNames",
                         "enabled",
+                        "planAllows",
                         "lastSuccessAt",
                         "lastErrorAt",
                         "lastError",
@@ -4208,6 +4481,10 @@
                     "enabled": {
                       "type": "boolean"
                     },
+                    "planAllows": {
+                      "type": "boolean",
+                      "description": "False when the org's plan no longer includes export: nothing is sent"
+                    },
                     "lastSuccessAt": {
                       "type": [
                         "string",
@@ -4234,6 +4511,7 @@
                     "endpoint",
                     "headerNames",
                     "enabled",
+                    "planAllows",
                     "lastSuccessAt",
                     "lastErrorAt",
                     "lastError",

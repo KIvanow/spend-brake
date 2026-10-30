@@ -8,6 +8,7 @@ import {
   issuedLicenses,
   migrate,
   orgEntitlements,
+  orgs,
   stripeEvents,
   virtualKeys,
 } from '@spend-brake/db';
@@ -279,6 +280,9 @@ describe('sign-up and checkout', () => {
     });
     const cap = await new BudgetEngine(valkey).getCap(orgId, { kind: 'org' }, 'm');
     expect(cap?.hard).toBe(50_000_000n);
+    // Alerts reach the owner by email before any webhook is set up.
+    const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+    expect(org?.settings).toEqual({ alertEmail: `${orgId}@example.com` });
     const above = await api.inject({
       method: 'PUT',
       url: '/v1/caps/org',
@@ -337,8 +341,14 @@ describe('plan transitions', () => {
     const cred = (await credential(t, 'mapbox')).json<{ id: string }>().id;
     expect((await newKey(t, cred)).statusCode).toBe(201);
     // Free: one key, one provider.
-    expect((await newKey(t, cred)).json()).toMatchObject({ error: 'plan_limit' });
-    expect((await credential(t, 'here')).json()).toMatchObject({ error: 'plan_limit' });
+    expect((await newKey(t, cred)).json()).toMatchObject({
+      error: 'plan_limit',
+      message: 'The free plan allows 1 key. Upgrade the plan on the Billing page to add more.',
+    });
+    expect((await credential(t, 'here')).json()).toMatchObject({
+      error: 'plan_limit',
+      message: 'The free plan allows 1 provider. Upgrade the plan on the Billing page to add more.',
+    });
 
     // Checkout completes, then the subscription arrives: Indie.
     await post(
@@ -626,6 +636,36 @@ describe('sign-up with email sign-in', () => {
     const org = await api.inject({ url: '/v1/org', headers: bearer(signedIn!.token) });
     expect(org.json()).toMatchObject({ id: body.orgId, timeZone: 'Europe/Sofia' });
     await hosted.close();
+  });
+
+  it('rate limits sign-up per client behind the reverse proxy', async () => {
+    const behind = await buildServer({
+      db,
+      valkey,
+      stripe: fakeStripe,
+      webhookSecret: SECRET,
+      dashboardUrl: 'https://app.example.com',
+      licenseKey: null,
+      sendLicense: () => Promise.resolve(),
+      signup: true,
+      trustProxy: true,
+      now: () => NOW,
+    });
+    const attempt = (forwardedFor: string, remoteAddress = '172.18.0.5') =>
+      behind.inject({
+        method: 'POST',
+        url: '/v1/billing/signup',
+        remoteAddress,
+        headers: { 'x-forwarded-for': forwardedFor },
+        payload: {},
+      });
+    for (let i = 0; i < 10; i++) expect((await attempt('203.0.113.7')).statusCode).toBe(400);
+    expect((await attempt('203.0.113.7')).statusCode).toBe(429);
+    // Another client (Caddy -> nginx hops are private) still gets through.
+    expect((await attempt('198.51.100.9, 172.18.0.2')).statusCode).toBe(400);
+    // A client at the edge can't pick its bucket with its own X-Forwarded-For.
+    expect((await attempt('198.51.100.20', '203.0.113.7')).statusCode).toBe(429);
+    await behind.close();
   });
 
   it('lists the plans publicly, with prices and limits', async () => {

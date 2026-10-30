@@ -1,5 +1,7 @@
+import { and, apiTokens, eq, isNull } from '@spend-brake/db';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { type Authenticator, ROLES } from '../auth.js';
 import { type Ctx, audit } from '../common.js';
 import {
   type EmailSignIn,
@@ -41,6 +43,7 @@ export function authRoutes(
   ctx: Ctx,
   signIn: EmailSignIn | undefined,
   info: PublicInfo,
+  authenticator: Authenticator,
 ): void {
   const allowed = (orgId: string) => ctx.hooks.emailSignInAllowed?.(orgId) ?? Promise.resolve(true);
   const json = (schema: z.ZodType) => ({ 'application/json': { schema } });
@@ -131,4 +134,53 @@ export function authRoutes(
       };
     },
   );
+
+  router.add({
+    method: 'get',
+    path: '/v1/auth/session',
+    role: 'viewer',
+    tag: 'Auth',
+    summary: 'The calling token: its org and role (the dashboard shows only what the role can do)',
+    response: z.object({
+      orgId: z.string(),
+      role: z.enum(ROLES),
+      actor: z.string(),
+      signIn: z.enum(['sso', 'email']).nullable(),
+    }),
+    handler: ({ auth }) =>
+      Promise.resolve({
+        orgId: auth.orgId,
+        role: auth.role,
+        actor: auth.actor,
+        signIn: auth.signIn,
+      }),
+  });
+
+  router.add({
+    method: 'delete',
+    path: '/v1/auth/session',
+    role: 'viewer',
+    tag: 'Auth',
+    summary: 'Sign out: end the calling session (tokens issued at sign-in only)',
+    response: z.object({ revoked: z.boolean() }),
+    handler: async ({ auth }) => {
+      // Only a person's sign-in session ends here; an API token pasted into the dashboard may
+      // be used elsewhere too (CI, brake init), so signing out just forgets it in the browser.
+      if (auth.signIn === null) return { revoked: false };
+      await ctx.db
+        .update(apiTokens)
+        .set({ revokedAt: ctx.now() })
+        .where(
+          and(
+            eq(apiTokens.id, auth.tokenId),
+            eq(apiTokens.orgId, auth.orgId),
+            isNull(apiTokens.revokedAt),
+          ),
+        );
+      // Refused from the next request on, not after the lookup cache expires.
+      authenticator.forget();
+      await audit(ctx, auth, 'auth.sign_out', auth.tokenId);
+      return { revoked: true };
+    },
+  });
 }

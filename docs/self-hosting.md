@@ -10,21 +10,22 @@ Copy `infra/.env.example` to `infra/.env` and fill it in (the file says how to g
 secret). Keep `BRAKE_MASTER_KEY` somewhere outside the host as well: provider keys and webhook
 URLs are encrypted with it and cannot be recovered without it.
 
-Run published images (pin a version; see [CHANGELOG.md](../CHANGELOG.md)):
+Build the images from source and start the stack:
 
 ```sh
-echo BRAKE_VERSION=0.1.0 >> infra/.env
-F="-f infra/docker-compose.yml -f infra/docker-compose.release.yml -f infra/docker-compose.tls.yml"
-docker compose --env-file infra/.env $F pull
+F="-f infra/docker-compose.yml -f infra/docker-compose.tls.yml"
+docker compose --env-file infra/.env $F build
 docker compose --env-file infra/.env $F up -d --wait
 ```
 
-or build from source by leaving out `docker-compose.release.yml` and adding `--build`.
-Business / Enterprise: add `-f infra/docker-compose.ee.yml` right after the base file and set
-`BRAKE_API_IMAGE=ee-api` and `BRAKE_WORKER_IMAGE=ee-worker` (see [ee/README.md](../ee/README.md)).
+Published images are coming; until then there is nothing to pull, and
+`infra/docker-compose.release.yml` is for when they are. Business / Enterprise: add
+`-f infra/docker-compose.ee.yml` right after the base file (see [ee/README.md](../ee/README.md)).
 
-Then run `brake init` once (it uses `BRAKE_SETUP_TOKEN`), and remove the setup token from
-`infra/.env` afterwards.
+Then build the CLI (`pnpm install && pnpm --filter @spend-brake/cli build`, which writes
+`apps/cli/dist/brake.cjs`; published packages are coming too), run
+`node apps/cli/dist/brake.cjs init` once (it uses `BRAKE_SETUP_TOKEN`), and remove the setup
+token from `infra/.env` afterwards.
 
 People sign in to the dashboard with an API token by default. With email set up (section 2),
 set `BRAKE_EMAIL_SIGN_IN=true` and invite your team under Team: each person gets a one-time
@@ -109,7 +110,7 @@ encrypted credentials; it is useless without `BRAKE_MASTER_KEY`, which is not in
 
 1. Read the release notes in [CHANGELOG.md](../CHANGELOG.md).
 2. Back up (section 5).
-3. Change `BRAKE_VERSION`, then `docker compose ... pull && docker compose ... up -d --wait`.
+3. `git pull` the release, then `docker compose ... build && docker compose ... up -d --wait`.
 
 The API and worker apply database migrations on start (one at a time, under a lock).
 Migrations only move forward: to roll back, restore the backup and start the previous version.

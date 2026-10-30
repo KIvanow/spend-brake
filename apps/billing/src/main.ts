@@ -24,6 +24,7 @@ const app = await buildServer({
   licenseKey: env.licenseKey,
   sendLicense: mailer.send,
   signup: env.BRAKE_HOSTED_SIGNUP,
+  trustProxy: env.TRUST_PROXY,
   ...(loginMailer
     ? { signIn: { dashboardUrl: env.BRAKE_DASHBOARD_URL, mailer: loginMailer } }
     : {}),
