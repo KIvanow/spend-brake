@@ -565,5 +565,8 @@ describe('setup', () => {
   it('refuses live Stripe keys', () => {
     expect(() => stripeClient('sk_live_abc')).toThrow(/test-mode/);
     expect(() => stripeClient('sk_test_abc')).not.toThrow();
+    // Only the seed script opts in to live mode.
+    expect(() => stripeClient('rk_live_abc', { allowLive: true })).not.toThrow();
+    expect(() => stripeClient('sk_org_live_abc', { allowLive: true })).toThrow();
   });
 });

@@ -48,6 +48,15 @@ STRIPE_SECRET_KEY=sk_test_... pnpm --filter @spend-brake/billing seed
 creates the products, monthly prices (lookup keys `spend_brake_<plan>_monthly`) and the
 Customer Portal configuration; running it again changes nothing.
 
+Live mode, once, by hand: create a restricted live key (`rk_live_`, write access to Products,
+Prices and Customer portal), then
+
+```sh
+STRIPE_SECRET_KEY=rk_live_... BRAKE_STRIPE_ALLOW_LIVE=true pnpm --filter @spend-brake/billing seed
+```
+
+The billing service itself still refuses live keys (test mode only).
+
 ## Local testing with the Stripe CLI
 
 ```sh

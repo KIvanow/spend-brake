@@ -90,6 +90,9 @@ export async function seedStripe(stripe: Stripe): Promise<SeedResult> {
 if (import.meta.url === `file://${process.argv[1]}`) {
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) throw new Error('Set STRIPE_SECRET_KEY (test mode).');
-  const r = await seedStripe(stripeClient(key));
+  // Live mode only when asked for in so many words: BRAKE_STRIPE_ALLOW_LIVE=true.
+  const r = await seedStripe(
+    stripeClient(key, { allowLive: process.env.BRAKE_STRIPE_ALLOW_LIVE === 'true' }),
+  );
   process.stdout.write(`${JSON.stringify(r, null, 2)}\n`);
 }
