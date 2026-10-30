@@ -29,6 +29,8 @@ const envSchema = z.object({
   BRAKE_UPSTREAM_OVERRIDES: json(z.record(z.string(), z.url())).optional(),
   /** SerpApi plan whose per-search price applies (see the serpapi catalog). */
   BRAKE_SERPAPI_PLAN: z.enum(SERPAPI_PLANS).default('starter'),
+  /** SerpApi speed mode on the account: ludicrous bills 2x, ludicrous_max 4x. */
+  BRAKE_SERPAPI_SPEED: z.enum(['normal', 'ludicrous', 'ludicrous_max']).default('normal'),
   /** Generic adapter configs (see @spend-brake/catalog GenericConfig). */
   BRAKE_GENERIC_PROVIDERS: json(z.array(z.unknown())).optional(),
 });

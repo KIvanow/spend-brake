@@ -232,6 +232,17 @@ describe('SerpApi prices (plan fee / searches)', () => {
     expect(price(serpapi, req('GET', `${SP}/search?engine=bing&q=x`))).toBe(25_000n);
   });
 
+  it('multiplies by the account speed mode (Ludicrous 2x, Ludicrous Max 4x)', () => {
+    const search = req('GET', `${SP}/search.json?engine=google&q=x`);
+    expect(price(new SerpApiAdapter({ speed: 'ludicrous' }), search)).toBe(50_000n);
+    expect(price(new SerpApiAdapter({ plan: 'production', speed: 'ludicrous_max' }), search)).toBe(
+      40_000n,
+    );
+    expect(
+      price(new SerpApiAdapter({ speed: 'ludicrous' }), req('GET', `${SP}/account.json`)),
+    ).toBe(0n);
+  });
+
   it('archive, account and locations are free; other paths are denied', () => {
     expect(price(serpapi, req('GET', `${SP}/searches/abc123.json`))).toBe(0n);
     expect(price(serpapi, req('GET', `${SP}/account.json`))).toBe(0n);

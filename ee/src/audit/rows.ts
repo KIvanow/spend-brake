@@ -1,4 +1,12 @@
-import { type Db, and, asc, auditLog, eq, gt, gte, lt } from '@spend-brake/db';
+import { type Db, and, asc, auditLog, eq, gt, gte, lt, sql } from '@spend-brake/db';
+
+/**
+ * Rows written by transactions older than every transaction still running. audit_log ids come
+ * from a sequence, so a slow transaction can commit a lower id after a higher one is visible;
+ * reading only these rows means a cursor past them never skips one. (32-bit xid arithmetic,
+ * modulo wraparound.)
+ */
+const SETTLED = sql`((pg_snapshot_xmin(pg_current_snapshot())::text::bigint - ${auditLog}.xmin::text::bigint) % 4294967296 + 4294967296) % 4294967296 between 1 and 2147483647`;
 
 export interface AuditRecord {
   id: string;
@@ -37,6 +45,7 @@ export async function auditAfter(
     .where(
       and(
         gt(auditLog.id, afterId),
+        SETTLED,
         filter.orgId ? eq(auditLog.orgId, filter.orgId) : undefined,
         filter.from ? gte(auditLog.at, filter.from) : undefined,
         filter.to ? lt(auditLog.at, filter.to) : undefined,

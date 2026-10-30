@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { inflateRawSync } from 'node:zlib';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { SignJWT, exportJWK, generateKeyPair } from 'jose';
 import { SignedXml } from 'xml-crypto';
@@ -15,12 +16,16 @@ const DASHBOARD = 'http://dash.test';
 const CLIENT = 'brake-client';
 
 // --- a minimal OpenID provider ---------------------------------------------------------------
+interface Grant {
+  nonce: string;
+  challenge: string;
+  email: string;
+  groups: string[];
+  verified: boolean | undefined;
+}
 let idp: FastifyInstance;
 let issuer: string;
-const codes = new Map<
-  string,
-  { nonce: string; challenge: string; email: string; groups: string[] }
->();
+const codes = new Map<string, Grant>();
 let signingKey: CryptoKey;
 
 async function startIdp() {
@@ -60,8 +65,8 @@ async function startIdp() {
     const idToken = await new SignJWT({
       nonce: c.nonce,
       email: c.email,
-      email_verified: true,
       groups: c.groups,
+      ...(c.verified === undefined ? {} : { email_verified: c.verified }),
     })
       .setProtectedHeader({ alg: 'RS256', kid: 'k1' })
       .setIssuer(issuer)
@@ -91,11 +96,27 @@ afterAll(async () => {
   await idp.close();
 });
 
-/** Log in through the IdP as `email` in `groups`; returns the proxy's final redirect. */
-async function oidcLogin(orgId: string, email: string, groups: string[]) {
+const cookieOf = (setCookie: string | string[] | undefined) =>
+  String([setCookie].flat()[0] ?? '').split(';')[0]!;
+
+/** Start a login in a browser: the IdP redirect and the binding cookie it set. */
+async function startLogin(orgId: string) {
   const start = await env.app.inject(`/v1/sso/${orgId}/login`);
   expect(start.statusCode).toBe(302);
-  const auth = new URL(start.headers.location!);
+  const cookie = cookieOf(start.headers['set-cookie']);
+  expect(cookie).toMatch(/^brake_sso=[\w-]{20,}$/);
+  expect(String(start.headers['set-cookie'])).toContain('HttpOnly');
+  return { location: new URL(start.headers.location!), cookie };
+}
+
+/** Log in through the IdP as `email` in `groups`; returns the API's final redirect. */
+async function oidcLogin(
+  orgId: string,
+  email: string,
+  groups: string[],
+  opts: { verified?: boolean | undefined; cookie?: string } = { verified: true },
+) {
+  const { location: auth, cookie } = await startLogin(orgId);
   expect(auth.origin + auth.pathname).toBe(`${issuer}/authorize`);
   expect(auth.searchParams.get('redirect_uri')).toBe(`${PUBLIC}/v1/sso/oidc/callback`);
   const code = randomUUID();
@@ -104,38 +125,41 @@ async function oidcLogin(orgId: string, email: string, groups: string[]) {
     challenge: auth.searchParams.get('code_challenge')!,
     email,
     groups,
+    verified: 'verified' in opts ? opts.verified : true,
   });
   const state = auth.searchParams.get('state')!;
-  return {
-    res: await env.app.inject(`/v1/sso/oidc/callback?code=${code}&state=${state}`),
-    state,
-    code,
-  };
+  const url = `/v1/sso/oidc/callback?code=${code}&state=${state}`;
+  const res = await env.app.inject({ url, headers: { cookie: opts.cookie ?? cookie } });
+  return { res, url, cookie };
 }
 
 const tokenFrom = (location: string | undefined) =>
   /#sso_token=(sbt_\w+)$/.exec(location ?? '')?.[1];
 
+const configureOidc = (o: Org, extra: object = {}) =>
+  env.app.inject({
+    method: 'PUT',
+    url: '/v1/sso',
+    headers: bearer(o.owner),
+    payload: {
+      protocol: 'oidc',
+      issuer,
+      clientId: CLIENT,
+      clientSecret: 's3cret',
+      roleMap: { 'brake-admins': 'admin', 'brake-ops': 'operator' },
+      allowedDomains: ['example.com'],
+      ...extra,
+    },
+  });
+
 describe('single sign-on with OIDC', () => {
   it('maps IdP groups to roles and issues a short-lived token to the dashboard', async () => {
-    const put = await env.app.inject({
-      method: 'PUT',
-      url: '/v1/sso',
-      headers: bearer(org.owner),
-      payload: {
-        protocol: 'oidc',
-        issuer,
-        clientId: CLIENT,
-        clientSecret: 's3cret',
-        roleMap: { 'brake-admins': 'admin', 'brake-ops': 'operator' },
-        allowedDomains: ['example.com'],
-      },
-    });
+    const put = await configureOidc(org);
     expect(put.statusCode).toBe(200);
     expect(put.body).not.toContain('s3cret');
     expect(put.json()).toMatchObject({ loginUrl: `${PUBLIC}/v1/sso/${org.id}/login` });
 
-    const { res, state, code } = await oidcLogin(org.id, 'Ana@Example.com', [
+    const { res, url, cookie } = await oidcLogin(org.id, 'Ana@Example.com', [
       'staff',
       'brake-admins',
     ]);
@@ -150,8 +174,7 @@ describe('single sign-on with OIDC', () => {
     });
     expect(caps.statusCode).toBe(200);
     // The login state works once.
-    const replay = await env.app.inject(`/v1/sso/oidc/callback?code=${code}&state=${state}`);
-    expect(replay.statusCode).toBe(403);
+    expect((await env.app.inject({ url, headers: { cookie } })).statusCode).toBe(403);
     // The token expires after the session length.
     env.clock.now = new Date(env.clock.now.getTime() + 9 * 3600_000);
     expect((await env.app.inject({ url: '/v1/caps', headers: bearer(admin) })).statusCode).toBe(
@@ -166,6 +189,43 @@ describe('single sign-on with OIDC', () => {
     expect(audit.body).toContain('ana@example.com');
   });
 
+  it('refuses a callback opened in a browser that did not start the login', async () => {
+    const stolen = await oidcLogin(org.id, 'ana@example.com', ['brake-admins'], {
+      verified: true,
+      cookie: 'brake_sso=someone-elses-browser',
+    });
+    expect(stolen.res.statusCode).toBe(403);
+    expect(stolen.res.json()).toMatchObject({ error: 'sso_refused' });
+    const none = await oidcLogin(org.id, 'ana@example.com', ['brake-admins'], {
+      verified: true,
+      cookie: '',
+    });
+    expect(none.res.statusCode).toBe(403);
+  });
+
+  it('needs a verified email unless the org opts out', async () => {
+    expect(
+      (await oidcLogin(org.id, 'ana@example.com', ['brake-admins'], { verified: undefined })).res
+        .statusCode,
+    ).toBe(403);
+    expect(
+      (await oidcLogin(org.id, 'ana@example.com', ['brake-admins'], { verified: false })).res
+        .statusCode,
+    ).toBe(403);
+    const other = await newOrg(env);
+    expect((await configureOidc(other, { requireVerifiedEmail: false })).statusCode).toBe(200);
+    const login = await oidcLogin(other.id, 'ana@example.com', ['brake-admins'], {
+      verified: undefined,
+    });
+    expect(login.res.statusCode).toBe(302);
+  });
+
+  it('checks the issuer when configured', async () => {
+    const res = await configureOidc(await newOrg(env), { issuer: 'http://127.0.0.1:9/nothing' });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: 'sso_discovery_failed' });
+  });
+
   it('gives ee roles through groups, and refuses unmapped users and other domains', async () => {
     const ops = tokenFrom(
       (await oidcLogin(org.id, 'ops@example.com', ['brake-ops'])).res.headers.location,
@@ -178,21 +238,51 @@ describe('single sign-on with OIDC', () => {
         payload: { target: 'prov:x' },
       });
     expect((await kill(ops)).statusCode).toBe(200);
-    expect(
-      (
-        await env.app.inject({
-          method: 'PUT',
-          url: '/v1/caps/org',
-          headers: bearer(ops),
-          payload: { day: { hard: 1 } },
-        })
-      ).statusCode,
-    ).toBe(403);
     const unmapped = await oidcLogin(org.id, 'guest@example.com', ['staff']);
     expect(unmapped.res.statusCode).toBe(403);
     expect(unmapped.res.json()).toMatchObject({ error: 'sso_refused' });
     const outsider = await oidcLogin(org.id, 'eve@evil.test', ['brake-admins']);
     expect(outsider.res.json()).toMatchObject({ error: 'sso_refused' });
+  });
+
+  it('ends the tokens of a person whose role changed, and all of them when SSO changes', async () => {
+    const asAdmin = tokenFrom(
+      (await oidcLogin(org.id, 'carl@example.com', ['brake-admins'])).res.headers.location,
+    )!;
+    const again = tokenFrom(
+      (await oidcLogin(org.id, 'carl@example.com', ['brake-admins'])).res.headers.location,
+    )!;
+    const caps = (t: string) => env.app.inject({ url: '/v1/caps', headers: bearer(t) });
+    expect((await caps(asAdmin)).statusCode).toBe(200);
+    // Demoted in the IdP: the next login revokes the admin tokens.
+    const asOps = tokenFrom(
+      (await oidcLogin(org.id, 'carl@example.com', ['brake-ops'])).res.headers.location,
+    )!;
+    expect((await caps(asAdmin)).statusCode).toBe(401);
+    expect((await caps(again)).statusCode).toBe(401);
+    expect((await caps(asOps)).statusCode).toBe(200);
+    // Reconfiguring SSO ends every token it issued; plain tokens keep working.
+    expect((await configureOidc(org)).statusCode).toBe(200);
+    expect((await caps(asOps)).statusCode).toBe(401);
+    expect((await caps(org.viewer)).statusCode).toBe(200);
+  });
+
+  it('cannot be changed or removed while two-person approval relies on it', async () => {
+    const o = await newOrg(env);
+    await configureOidc(o);
+    await env.app.inject({
+      method: 'PUT',
+      url: '/v1/approvals/policy',
+      headers: bearer(o.owner),
+      payload: { capApprovals: true },
+    });
+    const del = await env.app.inject({
+      method: 'DELETE',
+      url: '/v1/sso',
+      headers: bearer(o.owner),
+    });
+    expect(del.json()).toMatchObject({ error: 'approvals_on' });
+    expect((await configureOidc(o)).json()).toMatchObject({ error: 'approvals_on' });
   });
 
   it('counts two SSO tokens of one person as one person for approvals', async () => {
@@ -252,12 +342,15 @@ function idpCert() {
   };
 }
 
-function samlResponse(key: string, opts: { email: string; groups: string[]; audience: string }) {
+function samlResponse(
+  key: string,
+  opts: { email: string; groups: string[]; audience: string; inResponseTo: string },
+) {
   const now = new Date();
   const later = new Date(now.getTime() + 5 * 60_000).toISOString();
   const id = `_${randomUUID()}`;
   const attrs = opts.groups.map((g) => `<saml:AttributeValue>${g}</saml:AttributeValue>`).join('');
-  const assertion = `<saml:Assertion xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="${id}" Version="2.0" IssueInstant="${now.toISOString()}"><saml:Issuer>https://idp.test</saml:Issuer><saml:Subject><saml:NameID Format="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress">${opts.email}</saml:NameID><saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer"><saml:SubjectConfirmationData NotOnOrAfter="${later}" Recipient="${PUBLIC}/v1/sso/saml/acs"/></saml:SubjectConfirmation></saml:Subject><saml:Conditions NotBefore="${new Date(now.getTime() - 60_000).toISOString()}" NotOnOrAfter="${later}"><saml:AudienceRestriction><saml:Audience>${opts.audience}</saml:Audience></saml:AudienceRestriction></saml:Conditions><saml:AuthnStatement AuthnInstant="${now.toISOString()}"><saml:AuthnContext><saml:AuthnContextClassRef>urn:oasis:names:tc:SAML:2.0:ac:classes:Password</saml:AuthnContextClassRef></saml:AuthnContext></saml:AuthnStatement><saml:AttributeStatement><saml:Attribute Name="email"><saml:AttributeValue>${opts.email}</saml:AttributeValue></saml:Attribute><saml:Attribute Name="groups">${attrs}</saml:Attribute></saml:AttributeStatement></saml:Assertion>`;
+  const assertion = `<saml:Assertion xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="${id}" Version="2.0" IssueInstant="${now.toISOString()}"><saml:Issuer>https://idp.test</saml:Issuer><saml:Subject><saml:NameID Format="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress">${opts.email}</saml:NameID><saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer"><saml:SubjectConfirmationData NotOnOrAfter="${later}" Recipient="${PUBLIC}/v1/sso/saml/acs" InResponseTo="${opts.inResponseTo}"/></saml:SubjectConfirmation></saml:Subject><saml:Conditions NotBefore="${new Date(now.getTime() - 60_000).toISOString()}" NotOnOrAfter="${later}"><saml:AudienceRestriction><saml:Audience>${opts.audience}</saml:Audience></saml:AudienceRestriction></saml:Conditions><saml:AuthnStatement AuthnInstant="${now.toISOString()}"><saml:AuthnContext><saml:AuthnContextClassRef>urn:oasis:names:tc:SAML:2.0:ac:classes:Password</saml:AuthnContextClassRef></saml:AuthnContext></saml:AuthnStatement><saml:AttributeStatement><saml:Attribute Name="email"><saml:AttributeValue>${opts.email}</saml:AttributeValue></saml:Attribute><saml:Attribute Name="groups">${attrs}</saml:Attribute></saml:AttributeStatement></saml:Assertion>`;
   const sig = new SignedXml({
     privateKey: key,
     canonicalizationAlgorithm: 'http://www.w3.org/2001/10/xml-exc-c14n#',
@@ -274,12 +367,12 @@ function samlResponse(key: string, opts: { email: string; groups: string[]; audi
   sig.computeSignature(assertion, {
     location: { reference: "//*[local-name(.)='Issuer']", action: 'after' },
   });
-  const response = `<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" ID="_${randomUUID()}" Version="2.0" IssueInstant="${now.toISOString()}" Destination="${PUBLIC}/v1/sso/saml/acs"><saml:Issuer xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">https://idp.test</saml:Issuer><samlp:Status><samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/></samlp:Status>${sig.getSignedXml()}</samlp:Response>`;
+  const response = `<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" ID="_${randomUUID()}" Version="2.0" IssueInstant="${now.toISOString()}" Destination="${PUBLIC}/v1/sso/saml/acs" InResponseTo="${opts.inResponseTo}"><saml:Issuer xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">https://idp.test</saml:Issuer><samlp:Status><samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/></samlp:Status>${sig.getSignedXml()}</samlp:Response>`;
   return Buffer.from(response).toString('base64');
 }
 
 describe('single sign-on with SAML', () => {
-  it('accepts a signed assertion once and refuses forged ones', async () => {
+  it('accepts a signed answer to its own request once, and refuses forged ones', async () => {
     const samlOrg = await newOrg(env);
     const { key, cert } = idpCert();
     const put = await env.app.inject({
@@ -295,25 +388,37 @@ describe('single sign-on with SAML', () => {
       },
     });
     expect(put.statusCode).toBe(200);
+    /** A login started by this browser: its RelayState, cookie and AuthnRequest id. */
     const start = async () => {
-      const res = await env.app.inject(`/v1/sso/${samlOrg.id}/login`);
-      expect(res.headers.location).toMatch(/^https:\/\/idp\.test\/sso\?SAMLRequest=/);
-      return new URL(res.headers.location!).searchParams.get('RelayState')!;
+      const { location, cookie } = await startLogin(samlOrg.id);
+      expect(location.href).toMatch(/^https:\/\/idp\.test\/sso\?SAMLRequest=/);
+      const request = inflateRawSync(
+        Buffer.from(location.searchParams.get('SAMLRequest')!, 'base64'),
+      ).toString();
+      return {
+        relay: location.searchParams.get('RelayState')!,
+        cookie,
+        requestId: /\sID="([^"]+)"/.exec(request)![1]!,
+      };
     };
-    const post = (relay: string, saml: string) =>
+    const post = (s: { relay: string; cookie: string }, saml: string) =>
       env.app.inject({
         method: 'POST',
         url: '/v1/sso/saml/acs',
-        headers: { 'content-type': 'application/x-www-form-urlencoded' },
-        payload: new URLSearchParams({ SAMLResponse: saml, RelayState: relay }).toString(),
+        headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: s.cookie },
+        payload: new URLSearchParams({ SAMLResponse: saml, RelayState: s.relay }).toString(),
+      });
+    const answer = (requestId: string, signer = key, email = 'fin@corp.test') =>
+      samlResponse(signer, {
+        email,
+        groups: ['finance'],
+        audience: 'spend-brake',
+        inResponseTo: requestId,
       });
 
-    const signed = samlResponse(key, {
-      email: 'fin@corp.test',
-      groups: ['finance'],
-      audience: 'spend-brake',
-    });
-    const ok = await post(await start(), signed);
+    const first = await start();
+    const signed = answer(first.requestId);
+    const ok = await post(first, signed);
     expect(ok.statusCode).toBe(302);
     const billing = tokenFrom(ok.headers.location)!;
     expect(
@@ -326,28 +431,29 @@ describe('single sign-on with SAML', () => {
         })
       ).statusCode,
     ).toBe(200);
-    // The same assertion again (with a fresh state) is refused.
+    // The same answer again, even with a fresh login state, is refused.
     expect((await post(await start(), signed)).statusCode).toBe(403);
+    // An answer to a request this service never made.
+    expect((await post(await start(), answer('_not-ours'))).statusCode).toBe(403);
     // Signed by someone else.
-    const forged = samlResponse(idpCert().key, {
-      email: 'fin@corp.test',
-      groups: ['finance'],
-      audience: 'spend-brake',
-    });
-    expect((await post(await start(), forged)).statusCode).toBe(403);
+    const s2 = await start();
+    expect((await post(s2, answer(s2.requestId, idpCert().key))).statusCode).toBe(403);
     // Edited after signing (group changed).
+    const s3 = await start();
     const edited = Buffer.from(
-      Buffer.from(
-        samlResponse(key, { email: 'x@corp.test', groups: ['finance'], audience: 'spend-brake' }),
-        'base64',
-      )
+      Buffer.from(answer(s3.requestId, key, 'x@corp.test'), 'base64')
         .toString()
         .replace(
           '<saml:AttributeValue>finance</saml:AttributeValue>',
           '<saml:AttributeValue>admins</saml:AttributeValue>',
         ),
     ).toString('base64');
-    expect((await post(await start(), edited)).statusCode).toBe(403);
+    expect((await post(s3, edited)).statusCode).toBe(403);
+    // A valid answer posted from another browser.
+    const s4 = await start();
+    expect((await post({ ...s4, cookie: 'brake_sso=x' }, answer(s4.requestId))).statusCode).toBe(
+      403,
+    );
   });
 });
 

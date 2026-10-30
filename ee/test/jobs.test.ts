@@ -38,7 +38,7 @@ describe('ee worker jobs', () => {
     expect(asked).toEqual([
       'reconciliation:write',
       'reconciliation:write',
-      'audit_export:write',
+      'audit_export:read',
       'catalog_feed:write',
     ]);
   });

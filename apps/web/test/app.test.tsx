@@ -182,6 +182,51 @@ describe('dashboard', () => {
     });
   });
 
+  it('says when a raise waits for approval, and lets a second person approve it', async () => {
+    routes['PUT /v1/caps/org'] = () => [
+      200,
+      { items: [], pending: [{ scope: 'org', kind: 'd', approvalId: 'apr_1' }] },
+    ];
+    let pending = true;
+    routes['GET /v1/approvals'] = () => [
+      200,
+      {
+        items: pending
+          ? [
+              {
+                id: 'apr_1',
+                subject: 'cap',
+                scope: 'org',
+                kind: 'd',
+                fromHard: 5_000_000,
+                toHard: 9_000_000,
+                remove: false,
+                status: 'pending',
+                requestedBy: 'user:usr_ana',
+                requestedAt: '2026-10-30T12:00:00Z',
+              },
+            ]
+          : [],
+      },
+    ];
+    routes['POST /v1/approvals/apr_1/approve'] = () => {
+      pending = false;
+      return [200, { id: 'apr_1', status: 'approved' }];
+    };
+    const user = await signIn();
+    await user.click(screen.getByRole('button', { name: 'Caps' }));
+    const form = screen.getByRole('form', { name: 'Set a cap' });
+    await user.type(within(form).getByLabelText('Hard cap ($)'), '9');
+    await user.click(within(form).getByRole('button', { name: 'Save' }));
+    expect(await screen.findByText(/Waiting for a second person/)).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: 'Approvals' }));
+    expect(await screen.findByText('org per day: $5.00 → $9.00')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Approve' }));
+    expect(await screen.findByText('Nothing is waiting.')).toBeTruthy();
+    expect(calls.some((c) => c.url === '/v1/approvals/apr_1/approve')).toBe(true);
+  });
+
   it('opens the page named in the URL hash and lists webhook deliveries', async () => {
     routes['GET /v1/webhooks'] = () => [
       200,

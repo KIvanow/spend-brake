@@ -1,5 +1,6 @@
 import {
   ApiError,
+  type Auth,
   type CapRaise,
   type Ctx,
   type Router,
@@ -14,13 +15,14 @@ import {
 import { and, caps, desc, eq, gt, ne } from '@spend-brake/db';
 import { z } from 'zod';
 import type { Entitlements } from '../entitlements.js';
-import { eeApprovals, eeOrgPolicies } from '../schema.js';
+import { eeApprovals, eeOrgPolicies, eeSsoConfigs } from '../schema.js';
 
 const TTL_MS = 24 * 3600_000;
 
 const approvalView = z
   .object({
     id: z.string(),
+    subject: z.enum(['cap', 'policy']),
     scope: z.string(),
     kind: z.enum(['d', 'm']),
     fromHard: z.number().nullable(),
@@ -43,6 +45,7 @@ function view(row: Row, now: Date) {
   const expired = row.status === 'pending' && row.expiresAt <= now;
   return {
     id: row.id,
+    subject: row.subject,
     scope: row.scope,
     kind: row.kind,
     fromHard: n(row.fromHardMicros),
@@ -59,7 +62,26 @@ function view(row: Row, now: Date) {
   };
 }
 
-async function approvalsOn(ctx: Ctx, orgId: string): Promise<boolean> {
+/**
+ * The person behind a request: only single sign-on tokens name one (`user:<id>`). Plain API
+ * tokens do not: any owner can mint more of them, so two tokens are never two people.
+ */
+export const personOf = (auth: Auth): string | null =>
+  auth.actor.startsWith('user:') ? auth.actor : null;
+
+const SSO_REQUIRED =
+  'With two-person approval on, changes are requested and approved by people signed in with single sign-on.';
+
+async function ssoConfigured(ctx: Ctx, orgId: string): Promise<boolean> {
+  const [row] = await ctx.db
+    .select({ orgId: eeSsoConfigs.orgId })
+    .from(eeSsoConfigs)
+    .where(eq(eeSsoConfigs.orgId, orgId))
+    .limit(1);
+  return row !== undefined;
+}
+
+export async function approvalsOn(ctx: Ctx, orgId: string): Promise<boolean> {
   const [p] = await ctx.db
     .select({ on: eeOrgPolicies.capApprovals })
     .from(eeOrgPolicies)
@@ -70,13 +92,23 @@ async function approvalsOn(ctx: Ctx, orgId: string): Promise<boolean> {
 
 /**
  * The holdCapRaise hook. With approvals on, a raise becomes a request a second person must
- * approve. Once the license has turned read-only the hook steps aside: raising caps is a core
- * action and an expired license must never lock an org into its current caps.
+ * approve; requester and approver are people known to the IdP. Alert links name no person, so
+ * they cannot raise. Once the license has turned read-only the hook steps aside: raising caps
+ * is a core action and an expired license must never lock an org into its current caps.
  */
 export function holdCapRaise(ctx: Ctx, ent: Entitlements) {
   return async (change: CapRaise): Promise<string | null> => {
     if (!(await ent.can('approvals', 'write'))) return null;
     if (!(await approvalsOn(ctx, change.orgId))) return null;
+    if (change.via === 'action_link') {
+      throw new ApiError(
+        403,
+        'approval_required',
+        'Raising this cap needs a second person: request it in the dashboard.',
+      );
+    }
+    const person = personOf(change.auth);
+    if (!person) throw new ApiError(403, 'sso_required', SSO_REQUIRED);
     const approvalId = newId('apr');
     const now = ctx.now();
     await ctx.db.insert(eeApprovals).values({
@@ -89,7 +121,7 @@ export function holdCapRaise(ctx: Ctx, ent: Entitlements) {
       toSoftMicros: change.to?.soft ?? null,
       remove: change.to === null,
       via: change.via,
-      requestedBy: change.auth.actor,
+      requestedBy: person,
       requestedAt: now,
       expiresAt: new Date(now.getTime() + TTL_MS),
     });
@@ -125,9 +157,39 @@ export function approvalRoutes(r: Router, ctx: Ctx, ent: Entitlements): void {
     tag: 'Approvals',
     summary: 'Require (or stop requiring) a second person to raise or remove a hard cap',
     body: z.object({ capApprovals: z.boolean() }),
-    response: z.object({ capApprovals: z.boolean() }),
+    response: z.object({ capApprovals: z.boolean(), pendingApproval: z.string().optional() }),
     handler: async ({ auth, body }) => {
       await ent.require('approvals', 'write');
+      const on = await approvalsOn(ctx, auth.orgId);
+      if (body.capApprovals === on) return { capApprovals: on };
+      if (body.capApprovals && !(await ssoConfigured(ctx, auth.orgId))) {
+        throw new ApiError(
+          409,
+          'sso_required',
+          'Configure single sign-on first: approvals are between people the IdP knows.',
+        );
+      }
+      if (!body.capApprovals) {
+        // Switching the rule off is itself a change a second person approves.
+        const person = personOf(auth);
+        if (!person) throw new ApiError(403, 'sso_required', SSO_REQUIRED);
+        const now = ctx.now();
+        const approvalId = newId('apr');
+        await ctx.db.insert(eeApprovals).values({
+          id: approvalId,
+          orgId: auth.orgId,
+          subject: 'policy',
+          scope: 'approvals',
+          kind: 'd',
+          remove: true,
+          via: 'api',
+          requestedBy: person,
+          requestedAt: now,
+          expiresAt: new Date(now.getTime() + TTL_MS),
+        });
+        await audit(ctx, auth, 'approvals.policy.requested', approvalId, { capApprovals: false });
+        return { capApprovals: true, pendingApproval: approvalId };
+      }
       const row = { orgId: auth.orgId, capApprovals: body.capApprovals, updatedAt: ctx.now() };
       await ctx.db
         .insert(eeOrgPolicies)
@@ -178,6 +240,16 @@ export function approvalRoutes(r: Router, ctx: Ctx, ent: Entitlements): void {
       response: approvalView,
       handler: async ({ auth, params, body }) => {
         await ent.require('approvals', 'write');
+        const person = personOf(auth);
+        if (!person) throw new ApiError(403, 'sso_required', SSO_REQUIRED);
+        const [target] = await ctx.db
+          .select({ subject: eeApprovals.subject })
+          .from(eeApprovals)
+          .where(and(eq(eeApprovals.id, params.id), eq(eeApprovals.orgId, auth.orgId)))
+          .limit(1);
+        if (target?.subject === 'policy' && auth.role !== 'owner') {
+          throw new ApiError(403, 'forbidden', 'Only an owner decides on switching approvals off.');
+        }
         const now = ctx.now();
         // One statement decides: it only matches a pending, unexpired request someone else made,
         // so two approvers (or a double click) cannot both apply it.
@@ -190,7 +262,7 @@ export function approvalRoutes(r: Router, ctx: Ctx, ent: Entitlements): void {
               eq(eeApprovals.orgId, auth.orgId),
               eq(eeApprovals.status, 'pending'),
               gt(eeApprovals.expiresAt, now),
-              ne(eeApprovals.requestedBy, auth.actor),
+              ne(eeApprovals.requestedBy, person),
             ),
           )
           .returning();
@@ -201,7 +273,7 @@ export function approvalRoutes(r: Router, ctx: Ctx, ent: Entitlements): void {
             .where(and(eq(eeApprovals.id, params.id), eq(eeApprovals.orgId, auth.orgId)))
             .limit(1);
           if (!existing) throw notFound('Approval');
-          if (existing.status === 'pending' && existing.requestedBy === auth.actor) {
+          if (existing.status === 'pending' && existing.requestedBy === person) {
             throw new ApiError(
               403,
               'second_person_required',
@@ -225,6 +297,13 @@ export function approvalRoutes(r: Router, ctx: Ctx, ent: Entitlements): void {
 }
 
 async function apply(ctx: Ctx, row: Row): Promise<void> {
+  if (row.subject === 'policy') {
+    await ctx.db
+      .update(eeOrgPolicies)
+      .set({ capApprovals: false, updatedAt: ctx.now() })
+      .where(eq(eeOrgPolicies.orgId, row.orgId));
+    return;
+  }
   if (row.remove) {
     await ctx.engine.deleteCap(row.orgId, toScope(row.scope), row.kind);
     await ctx.db

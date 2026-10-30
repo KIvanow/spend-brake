@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto';
-import { SAML, ValidateInResponseTo } from '@node-saml/node-saml';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { type CacheProvider, SAML, ValidateInResponseTo } from '@node-saml/node-saml';
 import {
   ApiError,
   type Auth,
@@ -12,15 +12,16 @@ import {
   newId,
   sha256,
 } from '@spend-brake/api';
-import { and, apiTokens, eq, users } from '@spend-brake/db';
+import { and, apiTokens, eq, isNull, notInArray, sql, users } from '@spend-brake/db';
 import { type Envelope, decryptSecret, encryptSecret } from '@spend-brake/shared';
 import type { FastifyInstance } from 'fastify';
 import type { Redis } from 'ioredis';
 import * as oidc from 'openid-client';
 import { z } from 'zod';
+import { approvalsOn } from '../api/approvals.js';
 import { createRoleToken, EE_ROLES, type EeRole } from '../api/roles.js';
 import type { Entitlements } from '../entitlements.js';
-import { eeSsoConfigs } from '../schema.js';
+import { eeSsoConfigs, eeTokenRoles } from '../schema.js';
 
 export interface SsoOptions {
   /** This API's URL as the browser and IdP reach it (redirect URI, SAML ACS). */
@@ -34,7 +35,8 @@ export interface SsoOptions {
 }
 
 const STATE_TTL_SEC = 600;
-const ASSERTION_TTL_SEC = 3600;
+const COOKIE = 'brake_sso';
+const CONFIG_TTL_MS = 10 * 60_000;
 const SSO_ROLES = ['owner', 'admin', ...EE_ROLES, 'viewer'] as const;
 type SsoRole = (typeof SSO_ROLES)[number];
 // The first mapped group that names a role in this order wins.
@@ -61,6 +63,8 @@ const configBody = z.discriminatedUnion('protocol', [
     issuer: z.url(),
     clientId: z.string().min(1).max(500),
     clientSecret: z.string().min(1).max(2000),
+    /** Refuse logins whose `email_verified` is not true (for IdPs that omit it: false). */
+    requireVerifiedEmail: z.boolean().default(true),
     ...common,
   }),
   z.object({
@@ -94,6 +98,7 @@ interface OidcSettings {
   issuer: string;
   clientId: string;
   secret: Envelope;
+  requireVerifiedEmail?: boolean;
 }
 interface SamlSettings {
   entryPoint: string;
@@ -103,6 +108,8 @@ interface SamlSettings {
 interface LoginState {
   orgId: string;
   protocol: 'oidc' | 'saml';
+  /** SHA-256 of the cookie set on the browser that started the login. */
+  binding: string;
   nonce?: string;
   verifier?: string;
 }
@@ -113,6 +120,15 @@ export function roleFor(row: Pick<ConfigRow, 'roleMap' | 'defaultRole'>, groups:
   const mapped = groups.map((g) => map[g]).filter((r): r is SsoRole => r !== undefined);
   for (const role of PRECEDENCE) if (mapped.includes(role)) return role;
   return (row.defaultRole as SsoRole | null) ?? null;
+}
+
+/** The login-binding cookie from a Cookie header, if present. */
+function cookieValue(header: string | undefined): string | null {
+  for (const part of (header ?? '').split(';')) {
+    const [name, ...rest] = part.trim().split('=');
+    if (name === COOKIE) return rest.join('=') || null;
+  }
+  return null;
 }
 
 const asList = (v: unknown): string[] =>
@@ -154,16 +170,43 @@ export function ssoRoutes(
     };
   };
 
-  const oidcConfig = async (orgId: string, s: OidcSettings) => {
-    if (!ctx.wrapper) throw new ApiError(503, 'no_master_key', 'Set the master key first.');
-    const secret = await decryptSecret(ctx.wrapper, s.secret, secretContext(orgId));
-    return oidc.discovery(
+  // Discovery once per org and 10 minutes, not on every (unauthenticated) login start.
+  const oidcConfigs = new Map<string, { until: number; config: Promise<oidc.Configuration> }>();
+  const discover = (secret: string, s: Pick<OidcSettings, 'issuer' | 'clientId'>) =>
+    oidc.discovery(
       new URL(s.issuer),
       s.clientId,
       secret,
       undefined,
       opts.allowInsecureIdp ? { execute: [oidc.allowInsecureRequests] } : undefined,
     );
+  const oidcConfig = async (orgId: string, s: OidcSettings) => {
+    const hit = oidcConfigs.get(orgId);
+    if (hit && hit.until > Date.now()) return hit.config;
+    if (!ctx.wrapper) throw new ApiError(503, 'no_master_key', 'Set the master key first.');
+    const config = discover(await decryptSecret(ctx.wrapper, s.secret, secretContext(orgId)), s);
+    oidcConfigs.set(orgId, { until: Date.now() + CONFIG_TTL_MS, config });
+    config.catch(() => oidcConfigs.delete(orgId));
+    return config;
+  };
+
+  // SAML request ids and assertion ids, shared by every API instance.
+  const samlCache: CacheProvider = {
+    saveAsync: async (key, value) => {
+      await valkey.set(`bk:sso:saml:${key}`, value, 'EX', STATE_TTL_SEC);
+      return { value, createdAt: Date.now() };
+    },
+    getAsync: (key) => valkey.get(`bk:sso:saml:${key}`),
+    removeAsync: (key) => (key ? valkey.getdel(`bk:sso:saml:${key}`) : Promise.resolve(null)),
+    consumeAsync: (key) => valkey.getdel(`bk:sso:saml:${key}`),
+    saveIfAbsentAsync: async (key, value, expiresAtMs) =>
+      (await valkey.set(
+        `bk:sso:saml:${key}`,
+        value,
+        'PX',
+        Math.max(expiresAtMs - Date.now(), 1_000),
+        'NX',
+      )) === 'OK',
   };
 
   const saml = (s: SamlSettings) =>
@@ -175,8 +218,11 @@ export function ssoRoutes(
       audience: s.spEntityId,
       wantAssertionsSigned: true,
       wantAuthnResponseSigned: false,
-      // State is checked by RelayState, replay by the assertion hash.
-      validateInResponseTo: ValidateInResponseTo.never,
+      // The response must answer a request this service made, once; each assertion is used once.
+      validateInResponseTo: ValidateInResponseTo.always,
+      requestIdExpirationPeriodMs: STATE_TTL_SEC * 1000,
+      rejectReplayedAssertions: true,
+      cacheProvider: samlCache,
       acceptedClockSkewMs: 60_000,
     });
 
@@ -192,13 +238,25 @@ export function ssoRoutes(
     response: configView,
     handler: async ({ auth, body }) => {
       await ent.require('sso', 'write');
+      await refuseWhileApprovals(auth.orgId);
       let settings: OidcSettings | SamlSettings;
       if (body.protocol === 'oidc') {
         if (!ctx.wrapper) throw new ApiError(503, 'no_master_key', 'Set the master key first.');
+        // Check the issuer now rather than on the first login.
+        try {
+          await discover(body.clientSecret, body);
+        } catch (err) {
+          throw new ApiError(
+            400,
+            'sso_discovery_failed',
+            `Could not read the issuer's OpenID configuration: ${(err as Error).message}`,
+          );
+        }
         settings = {
           issuer: body.issuer,
           clientId: body.clientId,
           secret: await encryptSecret(ctx.wrapper, body.clientSecret, secretContext(auth.orgId)),
+          requireVerifiedEmail: body.requireVerifiedEmail,
         };
       } else {
         settings = {
@@ -222,9 +280,13 @@ export function ssoRoutes(
         .values(row)
         .onConflictDoUpdate({ target: eeSsoConfigs.orgId, set: row })
         .returning();
+      oidcConfigs.delete(auth.orgId);
+      // Tokens issued under the old settings (IdP, role map) end now.
+      const revoked = await revokeSsoTokens(auth.orgId);
       await audit(ctx, auth, 'sso.configure', body.protocol, {
         roleMap: body.roleMap,
         defaultRole: body.defaultRole,
+        revokedTokens: revoked,
       });
       return viewOf(saved!);
     },
@@ -250,15 +312,18 @@ export function ssoRoutes(
     path: '/v1/sso',
     role: 'owner',
     tag: 'SSO',
-    summary: 'Turn single sign-on off (tokens already issued run out on their own)',
+    summary: 'Turn single sign-on off and revoke the tokens it issued',
     response: z.object({ deleted: z.boolean() }),
     handler: async ({ auth }) => {
       await ent.require('sso', 'write');
+      await refuseWhileApprovals(auth.orgId);
       const rows = await ctx.db
         .delete(eeSsoConfigs)
         .where(eq(eeSsoConfigs.orgId, auth.orgId))
         .returning();
-      await audit(ctx, auth, 'sso.delete', null);
+      oidcConfigs.delete(auth.orgId);
+      const revoked = await revokeSsoTokens(auth.orgId);
+      await audit(ctx, auth, 'sso.delete', null, { revokedTokens: revoked });
       return { deleted: rows.length > 0 };
     },
   });
@@ -293,11 +358,15 @@ export function ssoRoutes(
       const row = /^[A-Za-z0-9_-]{1,64}$/.test(orgId) ? await loadConfig(orgId) : null;
       if (!row) throw new ApiError(404, 'not_found', 'Single sign-on is not configured.');
       const state = oidc.randomState();
+      // Ties the callback to this browser: a callback URL handed to someone else fails.
+      const cookie = randomBytes(24).toString('base64url');
+      const binding = sha256(cookie);
+      reply.header('set-cookie', cookieHeader(cookie, STATE_TTL_SEC));
       if (row.protocol === 'oidc') {
         const config = await oidcConfig(orgId, row.settings as OidcSettings);
         const nonce = oidc.randomNonce();
         const verifier = oidc.randomPKCECodeVerifier();
-        await saveState(state, { orgId, protocol: 'oidc', nonce, verifier });
+        await saveState(state, { orgId, protocol: 'oidc', binding, nonce, verifier });
         const url = oidc.buildAuthorizationUrl(config, {
           redirect_uri: redirectUri,
           scope: 'openid email profile',
@@ -308,7 +377,7 @@ export function ssoRoutes(
         });
         return reply.redirect(url.href);
       }
-      await saveState(state, { orgId, protocol: 'saml' });
+      await saveState(state, { orgId, protocol: 'saml', binding });
       const url = await saml(row.settings as SamlSettings).getAuthorizeUrlAsync(
         state,
         undefined,
@@ -321,7 +390,7 @@ export function ssoRoutes(
   app.get('/v1/sso/oidc/callback', { config: rateLimit }, async (req, reply) => {
     await ent.require('sso', 'write');
     const current = new URL(req.url, publicUrl);
-    const state = await takeState(current.searchParams.get('state'), 'oidc');
+    const state = await takeState(current.searchParams.get('state'), 'oidc', req.headers.cookie);
     const row = await loadConfig(state.orgId);
     if (row?.protocol !== 'oidc') throw refused('Single sign-on changed during the login.');
     const config = await oidcConfig(state.orgId, row.settings as OidcSettings);
@@ -338,9 +407,14 @@ export function ssoRoutes(
       req.log.warn({ err: (err as Error).message }, 'oidc login failed');
       throw refused('The identity provider did not confirm the login.');
     }
-    if (claims.email_verified === false) throw refused('The email address is not verified.');
+    const settings = row.settings as OidcSettings;
+    const verified =
+      claims.email_verified === true ||
+      (settings.requireVerifiedEmail === false && claims.email_verified !== false);
+    if (!verified) throw refused('The IdP did not confirm the email address is verified.');
     const email = typeof claims.email === 'string' ? claims.email : '';
     const token = await signIn(row, email, asList(claims[row.groupsClaim]));
+    reply.header('set-cookie', cookieHeader('', 0));
     return reply.redirect(dashboardWith(token));
   });
 
@@ -353,7 +427,7 @@ export function ssoRoutes(
     scoped.post('/v1/sso/saml/acs', { config: rateLimit }, async (req, reply) => {
       await ent.require('sso', 'write');
       const form = (req.body ?? {}) as Record<string, string>;
-      const state = await takeState(form.RelayState ?? null, 'saml');
+      const state = await takeState(form.RelayState ?? null, 'saml', req.headers.cookie);
       const row = await loadConfig(state.orgId);
       if (row?.protocol !== 'saml') throw refused('Single sign-on changed during the login.');
       let profile;
@@ -366,22 +440,13 @@ export function ssoRoutes(
         throw refused('The identity provider did not confirm the login.');
       }
       if (!profile) throw refused('The identity provider did not confirm the login.');
-      // A signed assertion is accepted once.
-      const assertion = profile.getAssertionXml?.() ?? JSON.stringify(profile);
-      const seen = await valkey.set(
-        `bk:sso:assertion:${createHash('sha256').update(assertion).digest('hex')}`,
-        '1',
-        'EX',
-        ASSERTION_TTL_SEC,
-        'NX',
-      );
-      if (seen !== 'OK') throw refused('This assertion was already used.');
       const email =
         profile.email ??
         profile.mail ??
         profile['urn:oid:0.9.2342.19200300.100.1.3'] ??
         (profile.nameID.includes('@') ? profile.nameID : '');
       const token = await signIn(row, String(email), asList(profile[row.groupsClaim]));
+      reply.header('set-cookie', cookieHeader('', 0));
       return reply.redirect(dashboardWith(token));
     });
     done();
@@ -400,13 +465,55 @@ export function ssoRoutes(
     await valkey.set(`bk:sso:state:${state}`, JSON.stringify(value), 'EX', STATE_TTL_SEC);
   }
 
-  async function takeState(state: string | null, protocol: LoginState['protocol']) {
+  async function takeState(
+    state: string | null,
+    protocol: LoginState['protocol'],
+    cookies: string | undefined,
+  ) {
     if (!state || !/^[A-Za-z0-9_-]{16,128}$/.test(state)) throw refused('Missing login state.');
     const raw = await valkey.getdel(`bk:sso:state:${state}`);
     if (!raw) throw refused('This login expired or was already used; start again.');
     const value = JSON.parse(raw) as LoginState;
     if (value.protocol !== protocol) throw refused('Wrong login flow.');
+    const cookie = cookieValue(cookies);
+    const ok =
+      cookie !== null && timingSafeEqual(Buffer.from(sha256(cookie)), Buffer.from(value.binding));
+    if (!ok) throw refused('This login was started in another browser; start again here.');
     return value;
+  }
+
+  function cookieHeader(value: string, maxAge: number) {
+    // The SAML response is a cross-site POST: only SameSite=None (which needs Secure) carries
+    // the cookie there. Over plain HTTP (local development) Lax is the best available.
+    const site = publicUrl.startsWith('https:') ? 'SameSite=None; Secure' : 'SameSite=Lax';
+    return `${COOKIE}=${value}; Path=/v1/sso; HttpOnly; Max-Age=${maxAge}; ${site}`;
+  }
+
+  async function refuseWhileApprovals(orgId: string) {
+    if (await approvalsOn(ctx, orgId)) {
+      throw new ApiError(
+        409,
+        'approvals_on',
+        'Two-person approval relies on these sign-ins: switch it off (with a second person) first.',
+      );
+    }
+  }
+
+  /** Revoke the live tokens single sign-on issued in the org, or to one user (but `except`). */
+  async function revokeSsoTokens(orgId: string, userId?: string, except: string[] = []) {
+    const rows = await ctx.db
+      .update(apiTokens)
+      .set({ revokedAt: ctx.now() })
+      .where(
+        and(
+          eq(apiTokens.orgId, orgId),
+          userId ? eq(apiTokens.userId, userId) : sql`${apiTokens.userId} is not null`,
+          isNull(apiTokens.revokedAt),
+          except.length ? notInArray(apiTokens.id, except) : undefined,
+        ),
+      )
+      .returning({ id: apiTokens.id });
+    return rows.length;
   }
 
   /** Find or create the user, then issue a short-lived token with the mapped role. */
@@ -422,21 +529,28 @@ export function ssoRoutes(
     const coreRole: Role = (EE_ROLES as readonly string[]).includes(role)
       ? 'viewer'
       : (role as Role);
-    const [existing] = await ctx.db
+    // Two first logins at once both insert; the unique (org, email) index keeps one.
+    await ctx.db
+      .insert(users)
+      .values({ id: newId('usr'), orgId: row.orgId, email, role: coreRole, createdAt: ctx.now() })
+      .onConflictDoNothing();
+    const [user] = await ctx.db
       .select()
       .from(users)
       .where(and(eq(users.orgId, row.orgId), eq(users.email, email)))
       .limit(1);
-    const userId = existing?.id ?? newId('usr');
-    if (existing) {
-      if (existing.role !== coreRole) {
-        await ctx.db.update(users).set({ role: coreRole }).where(eq(users.id, userId));
-      }
-    } else {
-      await ctx.db
-        .insert(users)
-        .values({ id: userId, orgId: row.orgId, email, role: coreRole, createdAt: ctx.now() });
+    const userId = user!.id;
+    if (user!.role !== coreRole) {
+      await ctx.db.update(users).set({ role: coreRole }).where(eq(users.id, userId));
     }
+    // The IdP decides the role at each login: tokens issued with another role end now.
+    const tokens = await ctx.db
+      .select({ id: apiTokens.id, core: apiTokens.role, ee: eeTokenRoles.role })
+      .from(apiTokens)
+      .leftJoin(eeTokenRoles, eq(eeTokenRoles.tokenId, apiTokens.id))
+      .where(and(eq(apiTokens.userId, userId), isNull(apiTokens.revokedAt)));
+    const same = tokens.filter((t) => (t.ee ?? t.core) === role).map((t) => t.id);
+    if (same.length < tokens.length) await revokeSsoTokens(row.orgId, userId, same);
     const expiresAt = new Date(ctx.now().getTime() + sessionMs);
     let token: string;
     let tokenId: string;

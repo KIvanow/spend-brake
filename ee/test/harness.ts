@@ -2,7 +2,7 @@ import { generateKeyPairSync, randomBytes } from 'node:crypto';
 import { Writable } from 'node:stream';
 import { bootstrapOrg, buildApi, newApiToken, newId, sha256 } from '@spend-brake/api';
 import { Registry } from '@spend-brake/budget';
-import { type Db, apiTokens, createDb, migrate } from '@spend-brake/db';
+import { type Db, apiTokens, createDb, eq, migrate, users } from '@spend-brake/db';
 import { LocalKeyWrapper, redactingLoggerOptions } from '@spend-brake/shared';
 import type { FastifyInstance } from 'fastify';
 import { Redis } from 'ioredis';
@@ -11,7 +11,7 @@ import { eeApi } from '../src/api/index.js';
 import { Entitlements } from '../src/entitlements.js';
 import { FEATURES, type License, signLicense } from '../src/license/license.js';
 import { migrateEe } from '../src/migrate.js';
-import { eeLicenses } from '../src/schema.js';
+import { eeLicenses, eeSsoConfigs } from '../src/schema.js';
 import type { SsoOptions } from '../src/sso/sso.js';
 
 /** A key pair standing in for the issuer's (the real private key never enters the repo). */
@@ -32,6 +32,8 @@ export function license(overrides: Partial<License> = {}): License {
     ...overrides,
   };
 }
+
+export const ACTION_SECRET = 'a'.repeat(32);
 
 export class LogSink extends Writable {
   lines: string[] = [];
@@ -95,6 +97,7 @@ export async function startEnv(opts: EnvOptions = {}): Promise<Env> {
     logger: { ...redactingLoggerOptions('info'), stream: logs },
     authCacheMs: 0,
     rateLimitPerMinute: 10_000,
+    actionSecret: ACTION_SECRET,
     now: () => clock.now,
     extensions: [eeApi({ entitlements: ent, valkey, ...(opts.sso ? { sso: opts.sso } : {}) })],
   });
@@ -170,3 +173,51 @@ export async function token(env: Env, orgId: string, role: 'owner' | 'admin' | '
 }
 
 export const bearer = (t: string) => ({ authorization: `Bearer ${t}` });
+
+/** A token as single sign-on issues it: tied to a person (users row). */
+export async function ssoPerson(
+  env: Env,
+  orgId: string,
+  email: string,
+  role: 'owner' | 'admin' | 'viewer',
+): Promise<string> {
+  const userId = newId('usr');
+  await env.db.insert(users).values({ id: userId, orgId, email, role });
+  const t = newApiToken();
+  await env.db.insert(apiTokens).values({
+    id: newId('tok'),
+    orgId,
+    userId,
+    name: `sso:${email}`,
+    role,
+    tokenHash: sha256(t),
+  });
+  return t;
+}
+
+/** Another token for a person who already has one (a second login). */
+export async function anotherLogin(env: Env, token: string): Promise<string> {
+  const [row] = await env.db
+    .select()
+    .from(apiTokens)
+    .where(eq(apiTokens.tokenHash, sha256(token)));
+  const t = newApiToken();
+  await env.db.insert(apiTokens).values({
+    id: newId('tok'),
+    orgId: row!.orgId,
+    userId: row!.userId,
+    name: row!.name,
+    role: row!.role,
+    tokenHash: sha256(t),
+  });
+  return t;
+}
+
+/** Mark single sign-on as configured for an org (the IdP itself is not used). */
+export async function ssoConfigured(env: Env, orgId: string): Promise<void> {
+  await env.db.insert(eeSsoConfigs).values({
+    orgId,
+    protocol: 'saml',
+    settings: { entryPoint: 'https://idp.test/sso', idpCert: 'x', spEntityId: 'sb' },
+  });
+}

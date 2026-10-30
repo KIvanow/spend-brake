@@ -19,7 +19,10 @@ prices live in data files that cite their source and verification date.
 
 With `BRAKE_CATALOG_DIR` set, `readDataFile` prefers `$BRAKE_CATALOG_DIR/current/<file>` (a
 symlink to one complete version, switched atomically) over the bundled copy; the proxy rebuilds
-its adapters when `current` changes. The verified catalog feed in `ee/` fills it.
+its adapters when `current` changes, reading every file of one build from the same version
+(`withCatalogDir`), and serves bundled prices if an installed version does not load.
+`loadEveryCatalog()` loads every data file as the services do; the verified catalog feed in `ee/`
+runs it before switching versions.
 
 Both were verified on 2026-10-29. Prices are copied as USD per 1,000 events, exactly as on the
 page, with Google's SKU ID next to each. A SKU whose price is not verified has `per1000: null`;
@@ -160,12 +163,11 @@ the request; where the provider reports what it billed, the response settles it.
 | Tavily   | Credits at $0.008: search 1 (basic, fast, ultra-fast) or 2 (advanced, or `auto_parameters` without a 1-credit depth); extract per URL (1 or 2 credits per 5); map per page (1 or 2 with `instructions` per 10, up to `limit`, default 50); crawl = map + extract; research at its maximum (110 mini, 250 pro) | `usage.credits` on search; returned results on extract, map and crawl extraction |
 | Exa      | Search by `type` ($4 lite, $7 auto, $12 deep, $15 deep-reasoning per 1k) + $1/1k per result above 10 + $1/1k per page per content type (text, highlights, summary); `/contents` per page per type (text when none named); `/answer` $5/1k                                                                     | `costDollars.total` (streamed responses keep the worst case)                     |
 | Brave    | Web, news, videos, images and LLM context $5/1k; autosuggest and spellcheck $5/10k                                                                                                                                                                                                                            | Flat per request                                                                 |
-| SerpApi  | One search at the plan's price per search (`BRAKE_SERPAPI_PLAN`, Starter $25/1k by default); archive, account and locations free                                                                                                                                                                              | Flat per request                                                                 |
+| SerpApi  | One search at the plan's price per search (`BRAKE_SERPAPI_PLAN`, Starter $25/1k by default), times the account's speed mode (`BRAKE_SERPAPI_SPEED`: Ludicrous 2x, Ludicrous Max 4x); archive, account and locations free                                                                                      | Flat per request                                                                 |
 
 Denied as unpriced: Exa `findSimilar`, research/agent and unknown search types; Brave Answers
 (token-priced), local POIs and summarizer; Tavily bodies carrying `api_key` (the key must go in
-the Authorization header). SerpApi charges cached searches nothing and its Ludicrous Speed modes
-2x/4x; the proxy cannot see either, so it charges every successful search at the plan price.
+the Authorization header). SerpApi charges cached searches nothing; the proxy cannot see that, so it charges every successful search at the plan price.
 The worker's drift check watches the Tavily and Exa price pages; Brave and SerpApi render
 theirs client-side, so re-verify those by hand.
 

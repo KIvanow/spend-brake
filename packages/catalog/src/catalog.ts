@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse } from 'yaml';
 import { z } from 'zod';
@@ -96,6 +96,35 @@ export function catalogOverrideDir(env: NodeJS.ProcessEnv = process.env): string
   return existsSync(current) ? realpathSync(current) : null;
 }
 
+let pinned: { dir: string | null } | null = null;
+
+/**
+ * Read every data file inside `fn` from one directory (null: the bundled data), so a catalog
+ * update switching `current` midway cannot mix two versions. `fn` must be synchronous.
+ */
+export function withCatalogDir<T>(dir: string | null, fn: () => T): T {
+  const previous = pinned;
+  pinned = { dir };
+  try {
+    return fn();
+  } finally {
+    pinned = previous;
+  }
+}
+
+/** Data files shipped with this package, as `provider/file.yaml`. */
+export function bundledDataFiles(): string[] {
+  const root = new URL('../data/', import.meta.url);
+  return readdirSync(root, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .flatMap((d) =>
+      readdirSync(new URL(`${d.name}/`, root))
+        .filter((f) => f.endsWith('.yaml'))
+        .map((f) => `${d.name}/${f}`),
+    )
+    .sort();
+}
+
 /** The catalog data shipped with this package; works from both src/ and dist/. */
 export function readBundledDataFile(relative: string): string {
   return readFileSync(new URL(`../data/${relative}`, import.meta.url), 'utf8');
@@ -103,7 +132,7 @@ export function readBundledDataFile(relative: string): string {
 
 /** A data file: the updated copy when one is installed, otherwise the bundled one. */
 export function readDataFile(relative: string): string {
-  const dir = catalogOverrideDir();
+  const dir = pinned ? pinned.dir : catalogOverrideDir();
   if (dir) {
     const path = join(dir, relative);
     if (existsSync(path)) return readFileSync(path, 'utf8');

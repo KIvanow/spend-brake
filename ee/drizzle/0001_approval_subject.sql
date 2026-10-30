@@ -1,0 +1,1 @@
+ALTER TABLE "ee_approvals" ADD COLUMN "subject" text DEFAULT 'cap' NOT NULL;

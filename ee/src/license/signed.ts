@@ -1,9 +1,13 @@
 import { createPrivateKey, createPublicKey, sign, verify } from 'node:crypto';
 import { z } from 'zod';
 
-// A signed document: the payload's exact bytes (base64url) and an Ed25519 signature over them.
-// Signing bytes rather than re-serialized JSON means nothing about key order or whitespace can
-// make a verifier accept something the signer did not sign.
+// A signed document: the payload's exact bytes (base64url) and an Ed25519 signature over the
+// format name and those bytes. Signing bytes rather than re-serialized JSON means nothing about
+// key order or whitespace can make a verifier accept something the signer did not sign; the
+// format name keeps a signature for one kind of document from passing as another.
+
+const signedBytes = (format: string, payload: Buffer) =>
+  Buffer.concat([Buffer.from(`${format}\n`), payload]);
 
 const envelope = z.strictObject({
   format: z.string(),
@@ -22,7 +26,7 @@ export class SignatureError extends Error {
 
 export function signDocument(format: string, payload: unknown, privateKeyPem: string): string {
   const bytes = Buffer.from(JSON.stringify(payload));
-  const signature = sign(null, bytes, createPrivateKey(privateKeyPem));
+  const signature = sign(null, signedBytes(format, bytes), createPrivateKey(privateKeyPem));
   return `${JSON.stringify({
     format,
     payload: bytes.toString('base64url'),
@@ -42,7 +46,7 @@ export function verifyDocument(text: string, format: string, publicKeyPem: strin
   const bytes = Buffer.from(doc.payload, 'base64url');
   const key = createPublicKey(publicKeyPem);
   if (key.asymmetricKeyType !== 'ed25519') throw new Error('verification key must be Ed25519');
-  if (!verify(null, bytes, key, Buffer.from(doc.signature, 'base64url'))) {
+  if (!verify(null, signedBytes(format, bytes), key, Buffer.from(doc.signature, 'base64url'))) {
     throw new SignatureError('bad_signature', 'The signature does not match.');
   }
   try {

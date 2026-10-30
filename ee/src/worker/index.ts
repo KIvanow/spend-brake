@@ -40,8 +40,9 @@ export function eeJobs(opts: EeWorkerOptions): WorkerJob[] {
     jobs.push({
       name: 'audit-export',
       everyMs: i.auditMs ?? 60_000,
+      // Shipping the trail only reads it: it keeps going once the license is read-only.
       run: async (host: WorkerHost) =>
-        (await ent.can('audit_export', 'write'))
+        (await ent.can('audit_export', 'read'))
           ? exportAudit(host.db, sinks, host.now, host.log)
           : {},
     });

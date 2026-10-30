@@ -28,6 +28,13 @@ export const SERPAPI_PLANS = [
 ] as const;
 export type SerpApiPlan = (typeof SERPAPI_PLANS)[number];
 
+/**
+ * SerpApi's speed modes are an account setting the request does not show: Ludicrous Speed bills
+ * each search 2x, Ludicrous Speed Max 4x.
+ */
+export const SERPAPI_SPEEDS = { normal: 1n, ludicrous: 2n, ludicrous_max: 4n } as const;
+export type SerpApiSpeed = keyof typeof SERPAPI_SPEEDS;
+
 export function loadSerpApiCatalog(): Catalog {
   return parseCatalog(readDataFile('serpapi/catalog.yaml'));
 }
@@ -42,10 +49,12 @@ export class SerpApiAdapter implements ProviderAdapter {
   readonly timeoutBilled = true;
   readonly catalog: Catalog;
   private readonly sku: string;
+  private readonly searchUnits: bigint;
 
-  constructor(opts: { catalog?: Catalog; plan?: SerpApiPlan } = {}) {
+  constructor(opts: { catalog?: Catalog; plan?: SerpApiPlan; speed?: SerpApiSpeed } = {}) {
     this.catalog = opts.catalog ?? loadSerpApiCatalog();
     this.sku = `serpapi.search.${opts.plan ?? 'starter'}`;
+    this.searchUnits = SERPAPI_SPEEDS[opts.speed ?? 'normal'];
     if (!this.catalog.skus.has(this.sku)) throw new Error(`unknown SerpApi plan ${opts.plan}`);
   }
 
@@ -65,7 +74,9 @@ export class SerpApiAdapter implements ProviderAdapter {
   private route(req: IncomingReq): Route {
     const { method, path } = req;
     if (method !== 'GET') return { unpriced: `no catalog entry for ${method} ${API}${path}` };
-    if (/^\/search(\.json|\.html)?$/.test(path)) return one('serpapi.search', this.sku);
+    if (/^\/search(\.json|\.html)?$/.test(path)) {
+      return one('serpapi.search', this.sku, this.searchUnits);
+    }
     if (
       /^\/searches\/[A-Za-z0-9]+(\.json|\.html)?$/.test(path) ||
       /^\/account(\.json)?$/.test(path) ||

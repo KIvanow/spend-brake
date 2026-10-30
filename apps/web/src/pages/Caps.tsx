@@ -11,14 +11,22 @@ export function Caps() {
   const [hard, setHard] = useState('');
   const [soft, setSoft] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const held = (r: { pending?: unknown[] }) =>
+    setNotice(
+      r.pending?.length
+        ? 'Waiting for a second person to approve this on the Approvals page; the cap is unchanged until then.'
+        : null,
+    );
 
   const save = useMutation({
     mutationFn: (v: { scope: string; kind: 'd' | 'm'; hard: number | null; soft: number | null }) =>
-      api(`/v1/caps/${encodeURIComponent(v.scope)}`, {
+      api<{ pending?: unknown[] }>(`/v1/caps/${encodeURIComponent(v.scope)}`, {
         method: 'PUT',
         body: { [v.kind === 'd' ? 'day' : 'month']: { hard: v.hard, soft: v.soft } },
       }),
-    onSuccess: () => {
+    onSuccess: (r) => {
+      held(r);
       void qc.invalidateQueries({ queryKey: ['caps'] });
       void qc.invalidateQueries({ queryKey: ['status'] });
       setHard('');
@@ -27,8 +35,13 @@ export function Caps() {
   });
   const remove = useMutation({
     mutationFn: (c: Cap) =>
-      api(`/v1/caps/${encodeURIComponent(c.scope)}?kind=${c.kind}`, { method: 'DELETE' }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['caps'] }),
+      api<{ pending?: unknown[] }>(`/v1/caps/${encodeURIComponent(c.scope)}?kind=${c.kind}`, {
+        method: 'DELETE',
+      }),
+    onSuccess: (r) => {
+      held(r);
+      void qc.invalidateQueries({ queryKey: ['caps'] });
+    },
   });
 
   const submit = (e: FormEvent) => {
@@ -107,9 +120,10 @@ export function Caps() {
         <button type="submit" disabled={save.isPending}>
           Save
         </button>
-        {(formError ?? save.error?.message) && (
-          <p className="error">{formError ?? save.error?.message}</p>
+        {(formError ?? save.error?.message ?? remove.error?.message) && (
+          <p className="error">{formError ?? save.error?.message ?? remove.error?.message}</p>
         )}
+        {notice && <p className="notice">{notice}</p>}
       </form>
     </section>
   );

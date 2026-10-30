@@ -34,11 +34,7 @@ export class Entitlements {
   }
 
   private async load(): Promise<License | null> {
-    const rows = await this.db
-      .select()
-      .from(eeLicenses)
-      .orderBy(desc(eeLicenses.installedAt))
-      .limit(5);
+    const rows = await this.db.select().from(eeLicenses).orderBy(desc(eeLicenses.installedAt));
     // The newest one that still verifies (a row edited in the database does not).
     for (const row of rows) {
       try {

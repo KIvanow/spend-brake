@@ -58,8 +58,15 @@ export function s3Sink(opts: S3SinkOptions): AuditSink {
 // RFC 5424, facility 13 (log audit), severity 6 (informational).
 const PRI = 13 * 8 + 6;
 
+// Below the UDP datagram limit with room for the header.
+const MAX_LINE_BYTES = 60_000;
+
+/** One RFC 5424 line; a record too large for a datagram keeps everything but its `data`. */
 export function syslogLine(r: AuditRecord, host = hostname()): string {
-  return `<${PRI}>1 ${r.at} ${host} spend-brake - audit - ${JSON.stringify(r)}`;
+  const line = `<${PRI}>1 ${r.at} ${host} spend-brake - audit - ${JSON.stringify(r)}`;
+  if (Buffer.byteLength(line) <= MAX_LINE_BYTES) return line;
+  const slim = { ...r, data: { truncated: true }, reason: r.reason?.slice(0, 1000) ?? null };
+  return `<${PRI}>1 ${r.at} ${host} spend-brake - audit - ${JSON.stringify(slim)}`;
 }
 
 /** Syslog to a SIEM: `udp://host:514` (one datagram per record) or `tcp://host:514`. */
@@ -94,12 +101,10 @@ export function syslogSink(url: string): AuditSink {
           const line = syslogLine(r);
           return `${Buffer.byteLength(line)} ${line}`;
         });
-        const socket = connect({ host, port }, () => socket.end(frames.join('')));
+        // Done once the bytes are handed to the network stack: syslog has no acknowledgement.
+        const socket = connect({ host, port }, () => socket.end(frames.join(''), () => resolve()));
         socket.setTimeout(10_000, () => socket.destroy(new Error('syslog timed out')));
         socket.on('error', reject);
-        socket.on('close', (hadError) => {
-          if (!hadError) resolve();
-        });
       }),
   };
 }

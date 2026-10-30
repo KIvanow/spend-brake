@@ -18,7 +18,7 @@ export interface Message {
   actions: Action[];
 }
 
-/** One SKU price change in a catalog update (USD per 1,000, first band; null = unpriced). */
+/** One SKU price change in a catalog update (readable prices; null = not in that version). */
 interface PriceChange {
   sku: string;
   from: string | null;
@@ -168,7 +168,7 @@ export function buildMessage(alertId: string, job: AlertJob, o: LinkOptions): Me
       const changes = Array.isArray(job.changes) ? (job.changes as PriceChange[]) : [];
       const lines = changes
         .slice(0, 10)
-        .map((c) => `${c.sku}: ${c.from ?? 'unpriced'} -> ${c.to ?? 'unpriced'} per 1,000`);
+        .map((c) => `${c.sku}: ${c.from ?? 'none'} -> ${c.to ?? 'none'}`);
       if (changes.length > 10) lines.push(`and ${changes.length - 10} more`);
       return {
         ...base,

@@ -82,14 +82,22 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ token: req.params.token, ...(amount ? { amount } : {}) }),
       });
-      const body = (await res.body.json()) as { action?: string; message?: string };
+      const body = (await res.body.json()) as {
+        action?: string;
+        message?: string;
+        pendingApproval?: string;
+      };
       const ok = res.statusCode === 200;
       return reply
         .code(ok ? 200 : res.statusCode)
         .send(
           resultPage(
             ok,
-            ok ? (DONE[body.action ?? ''] ?? 'Done.') : (body.message ?? 'Something went wrong.'),
+            !ok
+              ? (body.message ?? 'Something went wrong.')
+              : body.pendingApproval
+                ? 'The raise is waiting for a second person to approve it in the dashboard; the cap is unchanged until then.'
+                : (DONE[body.action ?? ''] ?? 'Done.'),
           ),
         );
     },

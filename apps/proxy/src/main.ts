@@ -10,6 +10,7 @@ import {
   TavilyAdapter,
   TwilioAdapter,
   catalogOverrideDir,
+  withCatalogDir,
 } from '@spend-brake/catalog';
 import { Registry } from '@spend-brake/budget';
 import { keyWrapperFromEnv } from '@spend-brake/shared';
@@ -29,8 +30,11 @@ const valkey = new Redis(env.VALKEY_URL, {
   // most of the per-request write syscalls.
   enableAutoPipelining: true,
 });
-// Built again when an updated catalog is installed (BRAKE_CATALOG_DIR).
-const makeAdapters = (): ProviderAdapter[] => [
+// Built again when an updated catalog is installed (BRAKE_CATALOG_DIR), each time from one
+// catalog directory (`dir`, null for the bundled data).
+const makeAdapters = (dir: string | null): ProviderAdapter[] =>
+  withCatalogDir(dir, () => buildAdapters());
+const buildAdapters = (): ProviderAdapter[] => [
   new GoogleMapsAdapter(),
   new TwilioAdapter(),
   new MapboxAdapter(),
@@ -38,13 +42,22 @@ const makeAdapters = (): ProviderAdapter[] => [
   new TavilyAdapter(),
   new ExaAdapter(),
   new BraveAdapter(),
-  new SerpApiAdapter({ plan: env.BRAKE_SERPAPI_PLAN }),
+  new SerpApiAdapter({ plan: env.BRAKE_SERPAPI_PLAN, speed: env.BRAKE_SERPAPI_SPEED }),
   ...(env.BRAKE_GENERIC_PROVIDERS ?? []).map(
     (cfg) => new GenericAdapter(cfg as ConstructorParameters<typeof GenericAdapter>[0]),
   ),
 ];
 let catalogVersion = catalogOverrideDir();
-const adapters = makeAdapters();
+let adapters: ProviderAdapter[];
+try {
+  adapters = makeAdapters(catalogVersion);
+} catch (err) {
+  // An updated catalog that does not load must not keep the proxy down: serve bundled prices.
+  process.stderr.write(
+    `${JSON.stringify({ level: 50, err: (err as Error).message, catalog: catalogVersion, msg: 'catalog update does not load; using bundled prices' })}\n`,
+  );
+  adapters = makeAdapters(null);
+}
 
 // Encrypted credentials from the admin API; BRAKE_DEV_SECRETS only when no master key is set.
 const wrapper = await keyWrapperFromEnv(process.env);
@@ -73,9 +86,11 @@ const catalogTimer = setInterval(() => {
   try {
     next = catalogOverrideDir();
     if (next === catalogVersion) return;
-    app.brakeSetAdapters(makeAdapters());
+    app.brakeSetAdapters(makeAdapters(next));
   } catch (err) {
     app.log.error({ err: (err as Error).message }, 'catalog reload failed; keeping current prices');
+    // Remember it, so a broken version is reported once rather than every 30 s.
+    catalogVersion = catalogOverrideDir();
     return;
   }
   catalogVersion = next;

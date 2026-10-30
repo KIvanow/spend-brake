@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import type { PutObjectCommand } from '@aws-sdk/client-s3';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { exportAudit } from '../src/audit/export.js';
-import { type AuditSink, fileSink, s3Sink, syslogSink } from '../src/audit/sinks.js';
+import { type AuditSink, fileSink, s3Sink, syslogLine, syslogSink } from '../src/audit/sinks.js';
 import { eeExportCursors } from '../src/schema.js';
 import { type Env, bearer, newOrg, startEnv } from './harness.js';
 
@@ -106,6 +106,61 @@ describe('audit export', () => {
     expect(cursors.find((c) => c.sink === 'flaky')).toBeUndefined();
     fail = false;
     expect((await exportAudit(env.db, [flaky], () => env.clock.now)).flaky).toBe(r.ok);
+  });
+
+  it('never skips a record committed after a higher id was exported', async () => {
+    const org = await newOrg(env);
+    await exportAudit(
+      env.db,
+      [fileSink(join(tmpdir(), `drain-${Date.now()}`))],
+      () => env.clock.now,
+    );
+    const seen: string[] = [];
+    const sink: AuditSink = {
+      name: 'order',
+      write: (r) => {
+        seen.push(...r.map((x) => x.target ?? ''));
+        return Promise.resolve();
+      },
+    };
+    await exportAudit(env.db, [sink], () => env.clock.now);
+    seen.length = 0;
+    // A slow transaction takes an id, then a later one commits first.
+    const slow = await env.db.$client.connect();
+    await slow.query('begin');
+    await slow.query(
+      `insert into audit_log (org_id, actor, action, target, data, at) values ($1, 'test', 'slow', 'first', '{}', now())`,
+      [org.id],
+    );
+    await kill(org.admin, 'prov:second');
+    await exportAudit(env.db, [sink], () => env.clock.now);
+    expect(seen).toEqual([]);
+    await slow.query('commit');
+    slow.release();
+    await exportAudit(env.db, [sink], () => env.clock.now);
+    expect(seen).toEqual(['first', 'prov:second']);
+  });
+
+  it('keeps an oversized record within a datagram and bounds the API cursor', async () => {
+    const record = {
+      id: '9',
+      orgId: 'o',
+      at: '2026-10-30T12:00:00.000Z',
+      actor: 'a',
+      action: 'x',
+      target: null,
+      reason: null,
+      data: { blob: 'y'.repeat(100_000) },
+    };
+    const line = syslogLine(record, 'h');
+    expect(Buffer.byteLength(line)).toBeLessThan(60_000);
+    expect(line).toContain('"truncated":true');
+    const org = await newOrg(env);
+    const res = await env.app.inject({
+      url: '/v1/audit/export?cursor=9999999999999999999',
+      headers: bearer(org.admin),
+    });
+    expect(res.statusCode).toBe(400);
   });
 
   it('frames records over TCP syslog with octet counting', async () => {

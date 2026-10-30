@@ -78,6 +78,7 @@ export {
   like,
   lt,
   ne,
+  notInArray,
   or,
   sql,
 } from 'drizzle-orm';

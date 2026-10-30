@@ -21,14 +21,9 @@ export type EeRole = (typeof EE_ROLES)[number];
  * with these roles are stored as viewer tokens, so without a license they are exactly that.
  */
 export const ROLE_PERMISSIONS: Record<EeRole, readonly string[]> = {
-  // Runs the system day to day: keys and the kill switch, never money or credentials.
-  operator: [
-    'POST /v1/kill',
-    'POST /v1/unkill',
-    'POST /v1/keys',
-    'PATCH /v1/keys/{id}',
-    'DELETE /v1/keys/{id}',
-  ],
+  // Stops things: the kill switch and revoking keys. Creating or editing keys is left out, as
+  // a key carries budgets (session, agent, fail-open) and credentials.
+  operator: ['POST /v1/kill', 'POST /v1/unkill', 'DELETE /v1/keys/{id}'],
   // Owns budgets: caps, approvals and the comparison with the bill.
   billing: [
     'PUT /v1/caps/{scope}',

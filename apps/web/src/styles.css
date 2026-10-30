@@ -91,6 +91,9 @@ code {
 .error {
   color: var(--danger);
 }
+.notice {
+  color: var(--warn);
+}
 .stat {
   font-size: 26px;
   font-weight: 600;

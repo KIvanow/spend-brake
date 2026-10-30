@@ -19,6 +19,7 @@ export function auditRoutes(r: Router, ctx: Ctx, ent: Entitlements): void {
       cursor: z
         .string()
         .regex(/^\d{1,19}$/)
+        .refine((v) => BigInt(v) <= 9_223_372_036_854_775_807n, 'Too large.')
         .optional(),
     }),
     response: z.string().openapi({ description: 'application/x-ndjson' }),

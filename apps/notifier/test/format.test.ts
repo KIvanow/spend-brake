@@ -124,13 +124,15 @@ describe('alert messages', () => {
         orgId: null,
         version: '2026-11-01.1',
         changes: [
-          { file: 'mapbox/catalog.yaml', sku: 'mapbox.directions', from: '2.00', to: '2.40' },
+          { sku: 'mapbox.directions', from: '2/1.6 per 1,000', to: '2.4/1.6 per 1,000' },
+          { sku: 'twilio.sms.DE', from: '0.0951 each', to: null },
         ],
       },
       links,
     );
-    expect(m.title).toBe('Catalog update 2026-11-01.1 changed 1 prices');
-    expect(m.text).toContain('mapbox.directions: 2.00 -> 2.40 per 1,000');
+    expect(m.title).toBe('Catalog update 2026-11-01.1 changed 2 prices');
+    expect(m.text).toContain('mapbox.directions: 2/1.6 per 1,000 -> 2.4/1.6 per 1,000');
+    expect(m.text).toContain('twilio.sms.DE: 0.0951 each -> none');
   });
 
   it('maps scopes to the kill target that stops them', () => {

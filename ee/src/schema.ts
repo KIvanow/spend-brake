@@ -36,6 +36,10 @@ export const eeApprovals = pgTable(
   {
     id: text('id').primaryKey(),
     orgId: text('org_id').notNull(),
+    /** What is held: a cap raise, or switching the approval rule itself off. */
+    subject: text('subject', { enum: ['cap', 'policy'] })
+      .notNull()
+      .default('cap'),
     scope: text('scope').notNull(),
     kind: text('kind', { enum: ['d', 'm'] }).notNull(),
     fromHardMicros: bigint('from_hard_micros', { mode: 'bigint' }),
