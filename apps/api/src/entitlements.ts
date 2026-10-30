@@ -117,12 +117,16 @@ export async function requireCapacity(
 export async function requireFeature(
   ctx: Ctx,
   orgId: string,
-  feature: 'sessionAnalytics' | 'customLoopRules',
+  feature: 'sessionAnalytics' | 'customLoopRules' | 'otelExport',
 ): Promise<void> {
   const e = await entitlementsOf(ctx, orgId);
   if (!e || e[feature]) return;
-  const name = feature === 'sessionAnalytics' ? 'Session analytics' : 'Custom loop rules';
-  throw new ApiError(402, 'plan_feature', `${name} come with the Agents plan.`);
+  const message = {
+    sessionAnalytics: 'Session analytics come with the Agents plan.',
+    customLoopRules: 'Custom loop rules come with the Agents plan.',
+    otelExport: 'OpenTelemetry export comes with the Team and Agents plans.',
+  }[feature];
+  throw new ApiError(402, 'plan_feature', message);
 }
 
 /** The Free plan protects a limited monthly spend: the org's monthly hard cap stays below it. */

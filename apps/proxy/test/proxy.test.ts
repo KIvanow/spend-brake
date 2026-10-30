@@ -80,6 +80,8 @@ describe('happy path', () => {
         'x-brake-session': 'run-1',
         'content-type': 'application/json',
         'x-goog-fieldmask': 'places.id,places.displayName',
+        traceparent: '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01',
+        'user-agent': 'my-app/1.0',
       },
       payload: body,
     });
@@ -115,7 +117,14 @@ describe('happy path', () => {
       worstMicros: '32000',
       status: '200',
       session: 'run-1',
+      // For the org's own telemetry: the caller's trace, client and sizes (never the query).
+      traceId: '4bf92f3577b34da6a3ce929d0e0e4736',
+      parentSpanId: '00f067aa0ba902b7',
+      userAgent: 'my-app/1.0',
+      reqBytes: String(Buffer.byteLength(body)),
     });
+    expect(Number(ev!.resBytes)).toBeGreaterThan(0);
+    expect(JSON.stringify(ev)).not.toContain('pizza');
   });
 
   it('accepts the virtual key in place of the Google key (drop-in mode)', async () => {

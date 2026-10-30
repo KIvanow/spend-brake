@@ -398,6 +398,9 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
 
     // 2. Classify and price.
     const rawBody = Buffer.isBuffer(request.body) ? request.body : undefined;
+    // What the org's own telemetry gets about the call (never query strings or bodies: they hold
+    // addresses, phone numbers and search terms).
+    const call = callInfo(request.headers, rawBody);
     const incoming: IncomingReq = {
       method: request.method,
       origin: upstream.origin,
@@ -452,6 +455,7 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
         };
       } else {
         emit(org.id, {
+          ...call,
           type: 'blocked',
           reason: 'unpriced_route',
           reqId: request.id,
@@ -491,6 +495,7 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
       const allowed = key.countries ?? DEFAULT_COUNTRIES;
       if (!dest.country || !allowed.includes(dest.country)) {
         emit(org.id, {
+          ...call,
           type: 'blocked',
           reason: 'country_not_allowed',
           reqId: request.id,
@@ -517,6 +522,7 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
         );
         if (!pump.ok) {
           emit(org.id, {
+            ...call,
             type: pump.tripped ? 'loop' : 'blocked',
             reason: 'pumping',
             reqId: request.id,
@@ -611,12 +617,19 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
       };
       switch (r.outcome) {
         case 'killed':
-          emit(org.id, { type: 'blocked', reason: 'killed', target: r.target, ...base });
+          emit(org.id, {
+            ...call,
+            type: 'blocked',
+            reason: 'killed',
+            target: r.target,
+            ...base,
+          });
           return sendError(reply, 'killed', `Spending is switched off for ${r.target}. Stop.`, {
             target: r.target,
           });
         case 'loop_detected':
           emit(org.id, {
+            ...call,
             type: r.tripped ? 'loop' : 'blocked',
             reason: 'loop_detected',
             hash: priced.hash,
@@ -632,6 +645,7 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
         case 'budget_exceeded':
           reply.header('x-brake-remaining-micros', String(r.cap > r.used ? r.cap - r.used : 0n));
           emit(org.id, {
+            ...call,
             type: 'blocked',
             reason: 'budget_exceeded',
             scope: r.scope,
@@ -687,6 +701,8 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
     // and appends the usage event; if it fails, the sweeper commits the reservation at worst case.
     // `billed`: the provider charges for this request at list price, so its units count toward
     // volume bands and the free allowance even when our price for it is zero.
+    // Response size, once known (streamed responses report their Content-Length).
+    let resBytes: number | undefined;
     const settle = (
       actual: bigint,
       billed: boolean,
@@ -719,6 +735,8 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
         failOpen: failOpenDay ? '1' : undefined,
         keyError: keyError ? '1' : undefined,
         error,
+        ...call,
+        resBytes: resBytes === undefined ? undefined : String(resBytes),
       });
       if (failOpenDay) {
         local.settle(key.id, failOpenDay, priced.worst, actual);
@@ -846,6 +864,8 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
     const upstreamMs = performance.now() - upstreamStart;
     metrics.upstreamLatency.observe({ provider: adapter.id }, upstreamMs);
     const resHeaders = res.headers as Record<string, string | undefined>;
+    const length = Number(resHeaders['content-length']);
+    if (Number.isSafeInteger(length) && length >= 0) resBytes = length;
 
     // 6. Settle from the response, then 7. emit (inside settle). The list price decides whether
     // the provider billed; a trusted free allowance then prices it from fresh (uncached) counts.
@@ -894,6 +914,7 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
         costHeaders(actual);
         return sendError(reply, 'upstream_unavailable', 'Provider response failed mid-way.');
       }
+      resBytes = raw.length;
       let body: unknown;
       try {
         body = parseJson(decodeBody(raw, resHeaders['content-encoding']));
@@ -928,6 +949,33 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
   });
 
   return app;
+}
+
+const TRACEPARENT = /^00-([0-9a-f]{32})-([0-9a-f]{16})-[0-9a-f]{2}$/;
+
+/**
+ * Per-call details for the org's telemetry: the caller's W3C trace context (so the call shows up
+ * inside their own trace), user agent and request size.
+ */
+export function callInfo(
+  headers: Record<string, string | string[] | undefined>,
+  body: Buffer | undefined,
+): Record<string, string | undefined> {
+  const tp = headers.traceparent;
+  const m = typeof tp === 'string' ? TRACEPARENT.exec(tp.trim()) : null;
+  // All-zero ids are invalid per the W3C spec.
+  const valid = m && !/^0+$/.test(m[1]!) && !/^0+$/.test(m[2]!);
+  const ua = headers['user-agent'];
+  return {
+    traceId: valid ? m[1] : undefined,
+    parentSpanId: valid ? m[2] : undefined,
+    // Printable ASCII only, bounded: it is client-controlled.
+    userAgent:
+      typeof ua === 'string'
+        ? ua.replace(/[^\x20-\x7e]/g, '').slice(0, 200) || undefined
+        : undefined,
+    reqBytes: body ? String(body.length) : undefined,
+  };
 }
 
 /** Logger options that keep credentials out of every log line. */

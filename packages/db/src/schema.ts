@@ -173,6 +173,25 @@ export const webhooks = pgTable(
   (t) => [index('webhooks_org').on(t.orgId)],
 );
 
+/** Where an org's calls go as OpenTelemetry spans (OTLP/HTTP), one destination per org. */
+export const telemetryExports = pgTable('telemetry_exports', {
+  orgId: text('org_id')
+    .primaryKey()
+    .references(() => orgs.id),
+  /** OTLP/HTTP base URL or full /v1/traces URL. */
+  endpoint: text('endpoint').notNull(),
+  /** Request headers (the collector's API key), encrypted like provider keys. */
+  headersEnvelope: jsonb('headers_envelope').notNull(),
+  /** Header names only, for display. */
+  headerNames: text('header_names').array().notNull().default([]),
+  enabled: boolean('enabled').notNull().default(true),
+  lastSuccessAt: timestamp('last_success_at', { withTimezone: true }),
+  lastErrorAt: timestamp('last_error_at', { withTimezone: true }),
+  lastError: text('last_error'),
+  createdAt: created(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const webhookDeliveries = pgTable(
   'webhook_deliveries',
   {
@@ -250,6 +269,8 @@ export const orgEntitlements = pgTable(
     retentionDays: bigint('retention_days', { mode: 'number' }).notNull(),
     sessionAnalytics: boolean('session_analytics').notNull().default(false),
     customLoopRules: boolean('custom_loop_rules').notNull().default(false),
+    /** Calls exported as OpenTelemetry spans to the org's own collector. */
+    otelExport: boolean('otel_export').notNull().default(false),
     billingEmail: text('billing_email'),
     stripeCustomerId: text('stripe_customer_id'),
     stripeSubscriptionId: text('stripe_subscription_id'),

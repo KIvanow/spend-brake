@@ -40,6 +40,16 @@ First release.
   the app, set caps, see the first call. Provider keys and Spend Brake keys can now be managed
   in the dashboard.
 
+### Telemetry for each org
+
+- Calls record the caller's trace context (`traceparent`), user agent, request and response size
+  and the provider's latency, never query strings or bodies.
+- `GET /v1/metrics`: the org's own Prometheus metrics (requests by outcome, cost, refunds,
+  latency histograms, live budget), counted once per call even when the ledger replays.
+- OpenTelemetry export: every call as an OTLP span to the org's collector, joining the caller's
+  trace; headers encrypted, private addresses refused, bounded retry queue. Team and Agents
+  plans on the hosted service.
+
 ### Business / Enterprise (`ee/`, LICENSE-EE)
 
 - Offline-verified licenses with a 14-day grace period; single sign-on (OIDC, SAML); operator,

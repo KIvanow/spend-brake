@@ -137,3 +137,20 @@ Migrations only move forward: to roll back, restore the backup and start the pre
 | Metrics (Prometheus)   | proxy `:9465/metrics`, worker `:9464/metrics` (inside the network)                                                                                                                |
 | Traces (OpenTelemetry) | set `OTEL_EXPORTER_OTLP_ENDPOINT` on each service                                                                                                                                 |
 | Alerts worth paging on | `brake_reservations_expired_total` rising, `brake_ledger_lag_events` growing, `brake_worker_last_loop_timestamp_seconds` stale, `upstream_key_error` and `reconcile_drift` alerts |
+
+### Each org's own telemetry
+
+Separate from the operator metrics above, every org gets telemetry for its own calls:
+
+- **Prometheus:** `GET https://<app domain>/v1/metrics` with any of the org's tokens (create a
+  read-only one under Telemetry). Requests, cost and refunds by provider, SKU, key, agent,
+  environment and outcome (including refused calls), request and provider latency histograms,
+  and what is left of each cap.
+- **OpenTelemetry:** under Telemetry, an org sets an OTLP/HTTP endpoint and headers (stored
+  encrypted); the worker sends every call as a span, inside the caller's trace when the request
+  carried a `traceparent` header. A collector that is down delays spans (up to 10,000 wait per
+  org); private addresses are refused (`ALLOW_PRIVATE_COLLECTORS=true` on the worker allows them,
+  for development). On the hosted service this comes with the Team and Agents plans.
+
+Neither ever includes query strings or request bodies: those hold addresses, phone numbers and
+search terms.

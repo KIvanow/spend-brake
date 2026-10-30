@@ -15,11 +15,12 @@ import {
   orgs,
   usageEvents,
 } from '@spend-brake/db';
-import type { KeyWrapper } from '@spend-brake/shared';
+import { type KeyWrapper, guardedAgent } from '@spend-brake/shared';
 import type { ValkeyClient as Redis } from '@spend-brake/budget';
 import { type Alert, AlertQueue } from './alerts.js';
 import { checkSources, openDriftIssue } from './drift.js';
 import { LedgerConsumer } from './ledger.js';
+import { OtlpExporter, countCalls } from './telemetry.js';
 import { Metrics } from './metrics.js';
 import { type SettleResult, type TwilioDeps, settleTwilioPending } from './twilio.js';
 
@@ -75,6 +76,8 @@ export interface WorkerDeps {
   /** More loops (separately licensed features plug in here). */
   jobs?: WorkerJob[];
   github?: { repo: string; token: string };
+  /** Let orgs' OTLP collectors be private addresses (development only). */
+  allowPrivateCollectors?: boolean;
   now?: () => Date;
 }
 
@@ -93,6 +96,7 @@ export class Worker {
   readonly metrics: Metrics;
   readonly alerts: AlertQueue;
   readonly ledger: LedgerConsumer;
+  readonly otlp: OtlpExporter;
   private readonly engine: BudgetEngine;
   private readonly timers: NodeJS.Timeout[] = [];
   private orgIds: string[] = [];
@@ -103,14 +107,31 @@ export class Worker {
     this.metrics = deps.metrics ?? new Metrics();
     this.alerts = new AlertQueue(deps.queueConnection, this.metrics);
     this.engine = new BudgetEngine(deps.valkey);
-    this.ledger = new LedgerConsumer(deps.db, deps.valkey, deps.workerId, async (rows, alerts) => {
-      for (const r of rows) {
-        this.metrics.ledgerEvents.inc({ type: r.type });
-        if (r.costMicros)
-          this.metrics.costMicros.inc({ provider: r.provider ?? '' }, Number(r.costMicros));
-      }
-      await this.alerts.add(alerts);
+    this.otlp = new OtlpExporter({
+      db: deps.db,
+      valkey: deps.valkey,
+      wrapper: deps.wrapper ?? null,
+      dispatcher: guardedAgent(deps.allowPrivateCollectors ?? false, 'collector'),
+      now: () => this.now(),
+      log: deps.log,
+      workerId: deps.workerId,
     });
+    this.ledger = new LedgerConsumer(
+      deps.db,
+      deps.valkey,
+      deps.workerId,
+      async (rows, alerts, fresh) => {
+        for (const r of rows) {
+          this.metrics.ledgerEvents.inc({ type: r.type });
+          if (r.costMicros)
+            this.metrics.costMicros.inc({ provider: r.provider ?? '' }, Number(r.costMicros));
+        }
+        await this.alerts.add(alerts);
+        // The orgs' own telemetry: each call counted and exported once.
+        await countCalls(deps.valkey, fresh);
+        await this.otlp.enqueue(fresh);
+      },
+    );
   }
 
   private now = () => this.deps.now?.() ?? new Date();
@@ -269,6 +290,7 @@ export class Worker {
     this.every(i.orgsMs ?? 30_000, 'orgs', () => this.refreshOrgs());
     this.every(i.ledgerMs ?? 500, 'ledger', () => this.ledgerOnce());
     this.every(60_000, 'ledger-claim', () => this.ledger.claimStale(this.orgIds));
+    this.every(2_000, 'otlp-export', () => this.otlp.runOnce());
     this.every(i.sweepMs ?? 10_000, 'sweep', () => this.sweepOnce());
     this.every(6 * 3600_000, 'partitions', () => this.partitionsOnce());
     this.every(6 * 3600_000, 'retention', () => this.retentionOnce());

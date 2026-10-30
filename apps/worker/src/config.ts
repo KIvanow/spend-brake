@@ -17,6 +17,8 @@ const envSchema = z.object({
   /** Optional: open a GitHub issue when a catalog source page changes. */
   GITHUB_TOKEN: z.string().optional(),
   GITHUB_REPO: z.string().optional(),
+  /** Let orgs' OTLP collectors be private addresses (development only). */
+  ALLOW_PRIVATE_COLLECTORS: z.stringbool().default(false),
 });
 
 export type WorkerEnv = z.output<typeof envSchema>;

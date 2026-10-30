@@ -30,6 +30,7 @@ export async function runWorker(opts: RunWorkerOptions = {}): Promise<void> {
     valkey,
     queueConnection,
     workerId: env.WORKER_ID,
+    allowPrivateCollectors: env.ALLOW_PRIVATE_COLLECTORS,
     log,
     metrics,
     intervals: {

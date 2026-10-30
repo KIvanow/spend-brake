@@ -1,7 +1,7 @@
 import rateLimit from '@fastify/rate-limit';
 import { BudgetEngine, Registry, type ValkeyClient } from '@spend-brake/budget';
 import type { Db } from '@spend-brake/db';
-import { type KeyWrapper, redactUrl } from '@spend-brake/shared';
+import { type GuardedClient, type KeyWrapper, guardedAgent, redactUrl } from '@spend-brake/shared';
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
 import { Authenticator } from './auth.js';
 import type { ApiHooks, Ctx } from './common.js';
@@ -19,6 +19,7 @@ import { estimateRoutes } from './routes/estimates.js';
 import { meRoutes } from './routes/me.js';
 import { sessionRoutes } from './routes/sessions.js';
 import { setupRoutes } from './routes/setup.js';
+import { telemetryRoutes } from './routes/telemetry.js';
 import { userRoutes } from './routes/users.js';
 import { webhookRoutes } from './routes/webhooks.js';
 
@@ -41,6 +42,8 @@ export interface ApiDeps {
   checkGoogleKey?: (key: string) => Promise<KeyCheck>;
   /** People sign in with an emailed link (needs the notifier's email settings); off if absent. */
   emailSignIn?: EmailSignIn;
+  /** For test spans to orgs' collectors; refuses private addresses unless told otherwise. */
+  collectorDispatcher?: GuardedClient;
   /** What the dashboard may know before sign-in (GET /v1/auth/options). */
   publicInfo?: PublicInfo;
   /** Add routes and hooks after the core ones (separately licensed features plug in here). */
@@ -139,6 +142,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   estimateRoutes(router, ctx);
   authRoutes(app, router, ctx, deps.emailSignIn, deps.publicInfo ?? {});
   userRoutes(router, ctx, deps.emailSignIn);
+  telemetryRoutes(router, ctx, deps.collectorDispatcher ?? guardedAgent(false, 'collector'));
   for (const extend of deps.extensions ?? []) await extend({ app, router, ctx, authenticator });
 
   const spec = router.document();

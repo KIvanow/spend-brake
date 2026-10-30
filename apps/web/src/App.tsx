@@ -12,6 +12,7 @@ import { Overview } from './pages/Overview.js';
 import { Setup } from './pages/Setup.js';
 import { Spend } from './pages/Spend.js';
 import { Team } from './pages/Team.js';
+import { Telemetry } from './pages/Telemetry.js';
 import { Webhooks } from './pages/Webhooks.js';
 import './styles.css';
 
@@ -25,6 +26,7 @@ const PAGES = {
   Keys,
   Team,
   Webhooks,
+  Telemetry,
   Migration,
   Billing,
 } as const;

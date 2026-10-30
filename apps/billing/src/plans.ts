@@ -21,6 +21,8 @@ export interface Limits {
   retentionDays: number;
   sessionAnalytics: boolean;
   customLoopRules: boolean;
+  /** OpenTelemetry export of calls to the org's own collector. */
+  otelExport: boolean;
 }
 
 const FREE: Limits = {
@@ -32,6 +34,7 @@ const FREE: Limits = {
   retentionDays: 7,
   sessionAnalytics: false,
   customLoopRules: false,
+  otelExport: false,
 };
 
 export const LIMITS: Record<Plan, Limits> = {
@@ -45,6 +48,7 @@ export const LIMITS: Record<Plan, Limits> = {
     retentionDays: 7,
     sessionAnalytics: false,
     customLoopRules: false,
+    otelExport: false,
   },
   team: {
     maxKeys: null,
@@ -55,6 +59,7 @@ export const LIMITS: Record<Plan, Limits> = {
     retentionDays: 30,
     sessionAnalytics: false,
     customLoopRules: false,
+    otelExport: true,
   },
   agents: {
     maxKeys: null,
@@ -65,6 +70,7 @@ export const LIMITS: Record<Plan, Limits> = {
     retentionDays: 365,
     sessionAnalytics: true,
     customLoopRules: true,
+    otelExport: true,
   },
   business: FREE,
   enterprise: FREE,

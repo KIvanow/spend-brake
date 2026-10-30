@@ -85,7 +85,12 @@ export class LedgerConsumer {
     private readonly db: Db,
     private readonly valkey: Redis,
     private readonly consumer: string,
-    private readonly onRows: (rows: LedgerRow[], alerts: Alert[]) => Promise<void> = async () => {},
+    /** `fresh`: the rows this write recorded first (a replayed batch has none). */
+    private readonly onRows: (
+      rows: LedgerRow[],
+      alerts: Alert[],
+      fresh: LedgerRow[],
+    ) => Promise<void> = async () => {},
     private readonly batch = 500,
   ) {}
 
@@ -157,8 +162,17 @@ export class LedgerConsumer {
       rows.push(toRow(orgId, streamId, f));
       alerts.push(...alertsFor(orgId, streamId, f));
     }
-    await this.db.insert(usageEvents).values(rows).onConflictDoNothing();
-    await this.onRows(rows, alerts);
+    const inserted = await this.db
+      .insert(usageEvents)
+      .values(rows)
+      .onConflictDoNothing()
+      .returning({ streamId: usageEvents.streamId });
+    const firstTime = new Set(inserted.map((r) => r.streamId));
+    await this.onRows(
+      rows,
+      alerts,
+      rows.filter((r) => firstTime.has(r.streamId)),
+    );
     await this.valkey.xack(this.stream(orgId), LEDGER_GROUP, ...entries.map((e) => e[0]));
     await this.trim(orgId);
     return rows.length;

@@ -357,3 +357,79 @@ describe('getting started', () => {
     expect(await screen.findByRole('link', { name: 'Get started' })).toBeTruthy();
   });
 });
+
+describe('telemetry', () => {
+  it('gives Prometheus a ready config with a read-only token', async () => {
+    routes['GET /v1/telemetry/otlp'] = () => [200, { otlp: null }];
+    routes['POST /v1/tokens'] = () => [201, { id: 'tok_p', token: 'sbt_promtoken' }];
+    window.location.hash = '/telemetry';
+    signedInByEmail();
+    const user = userEvent.setup();
+    expect(await screen.findByText(/metrics_path: \/v1\/metrics/)).toBeTruthy();
+    await user.click(
+      screen.getByRole('button', { name: 'Create a read-only token for Prometheus' }),
+    );
+    expect(await screen.findByText(/credentials: sbt_promtoken/)).toBeTruthy();
+    expect(calls.find((c) => c.url === '/v1/tokens')!.body).toEqual({
+      name: 'prometheus',
+      role: 'viewer',
+    });
+  });
+
+  it('saves an OTLP destination with headers, then sends a test span', async () => {
+    let saved: Record<string, unknown> | null = null;
+    routes['GET /v1/telemetry/otlp'] = () => [
+      200,
+      {
+        otlp: saved && {
+          endpoint: saved.endpoint,
+          headerNames: Object.keys(saved.headers as object),
+          enabled: true,
+          lastSuccessAt: null,
+          lastErrorAt: null,
+          lastError: null,
+          queued: 0,
+        },
+      },
+    ];
+    routes['PUT /v1/telemetry/otlp'] = (c) => {
+      saved = c.body as Record<string, unknown>;
+      return [200, {}];
+    };
+    routes['POST /v1/telemetry/otlp/test'] = () => [200, { ok: true, status: 200, error: null }];
+    window.location.hash = '/telemetry';
+    signedInByEmail();
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText('OTLP/HTTP endpoint'), 'https://api.honeycomb.io');
+    await user.click(screen.getByRole('button', { name: 'Add header' }));
+    await user.type(screen.getByLabelText('Header'), 'x-honeycomb-team');
+    await user.type(screen.getByLabelText('Value'), 'hc-secret');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(saved).toEqual({
+        endpoint: 'https://api.honeycomb.io',
+        headers: { 'x-honeycomb-team': 'hc-secret' },
+      }),
+    );
+    expect(await screen.findByText(/with x-honeycomb-team/)).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Send test span' }));
+    expect(await screen.findByText(/Delivered/)).toBeTruthy();
+  });
+
+  it('says when the plan does not include OpenTelemetry export', async () => {
+    routes['GET /v1/telemetry/otlp'] = () => [200, { otlp: null }];
+    routes['PUT /v1/telemetry/otlp'] = () => [
+      402,
+      {
+        error: 'plan_feature',
+        message: 'OpenTelemetry export comes with the Team and Agents plans.',
+      },
+    ];
+    window.location.hash = '/telemetry';
+    signedInByEmail();
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText('OTLP/HTTP endpoint'), 'https://api.honeycomb.io');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(await screen.findByText(/comes with the Team and Agents plans/)).toBeTruthy();
+  });
+});

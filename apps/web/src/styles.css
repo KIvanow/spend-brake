@@ -396,3 +396,28 @@ fieldset legend {
 .signin h2 {
   font-size: 20px;
 }
+.codeblock {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin: 8px 0;
+}
+.codeblock pre {
+  margin: 0;
+  padding: 12px;
+  overflow-x: auto;
+}
+.codeblock button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+.ok {
+  color: var(--ok);
+}
+.row.full {
+  width: 100%;
+  align-items: flex-end;
+  justify-content: flex-start;
+}

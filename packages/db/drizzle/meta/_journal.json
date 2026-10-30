@@ -43,6 +43,13 @@
       "when": 1793381710448,
       "tag": "0005_accounts",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793386377392,
+      "tag": "0006_telemetry",
+      "breakpoints": true
     }
   ]
 }
