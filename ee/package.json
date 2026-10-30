@@ -24,6 +24,7 @@
     "@google-cloud/bigquery": "^9.5.0",
     "@node-saml/node-saml": "^5.2.0",
     "@spend-brake/api": "workspace:^",
+    "@spend-brake/budget": "workspace:^",
     "@spend-brake/catalog": "workspace:^",
     "@spend-brake/db": "workspace:^",
     "@spend-brake/shared": "workspace:^",
@@ -35,7 +36,6 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@spend-brake/budget": "workspace:^",
     "drizzle-kit": "^0.31.11",
     "jose": "^6.2.12",
     "testcontainers": "^12.2.1",

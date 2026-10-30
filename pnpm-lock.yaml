@@ -287,6 +287,9 @@ importers:
       '@spend-brake/api':
         specifier: workspace:^
         version: link:../apps/api
+      '@spend-brake/budget':
+        specifier: workspace:^
+        version: link:../packages/budget
       '@spend-brake/catalog':
         specifier: workspace:^
         version: link:../packages/catalog
@@ -315,9 +318,6 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
-      '@spend-brake/budget':
-        specifier: workspace:^
-        version: link:../packages/budget
       drizzle-kit:
         specifier: ^0.31.11
         version: 0.31.11

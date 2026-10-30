@@ -24,7 +24,9 @@ const envSchema = z.object({
 
 export type EeEnv = z.output<typeof envSchema>;
 
-export const loadEeEnv = (env: NodeJS.ProcessEnv = process.env): EeEnv => envSchema.parse(env);
+/** Empty values count as unset: Compose passes `${VAR:-}` through as "". */
+export const loadEeEnv = (env: NodeJS.ProcessEnv = process.env): EeEnv =>
+  envSchema.parse(Object.fromEntries(Object.entries(env).filter(([, v]) => v !== '')));
 
 export function auditSinksFrom(env: EeEnv): AuditSink[] {
   const sinks: AuditSink[] = [];
