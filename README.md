@@ -18,7 +18,7 @@ For a production install (HTTPS, published images, backups, upgrades, scaling), 
 Requirements: Docker, Node 22+ (for the CLI), a Google Maps Platform key.
 
 ```sh
-git clone https://github.com/KIvanow/spend-break && cd spend-break
+git clone https://github.com/KIvanow/spend-brake && cd spend-brake
 cp infra/.env.example infra/.env
 # fill in the secrets, e.g.:
 sed -i "s|^BRAKE_MASTER_KEY=.*|BRAKE_MASTER_KEY=$(openssl rand -base64 32)|; \
