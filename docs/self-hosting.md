@@ -44,6 +44,11 @@ and the proxy and API trust Caddy's `X-Forwarded-For` (Caddy drops one sent by a
 Point the CLI at `https://app.example.com` (API) and `https://brake.example.com` (proxy).
 SAML single sign-on needs HTTPS.
 
+Email alerts and license emails go out through `SMTP_URL` (for example
+`smtps://user:password@smtp.example.com:465`) from `BRAKE_EMAIL_FROM`, on a domain your mail
+provider has verified. Some hosts block outgoing ports 25, 465 and 587 (DigitalOcean does on
+new accounts); use the provider's alternative port, such as 2465 or 2587, if they offer one.
+
 ## 3. Make the proxy the only way to spend
 
 Caps only hold if nothing reaches the provider without the proxy. Give the proxy a fixed
