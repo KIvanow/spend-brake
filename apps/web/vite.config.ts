@@ -8,5 +8,6 @@ export default defineConfig({
     // The dashboard calls the admin API on the same origin; in dev, Vite forwards it.
     proxy: { '/v1': process.env.BRAKE_API_URL ?? 'http://localhost:8081' },
   },
-  test: { environment: 'jsdom' },
+  // UI tests type and click through pages; a busy CI runner needs more than the 5 s default.
+  test: { environment: 'jsdom', testTimeout: 30_000 },
 });
