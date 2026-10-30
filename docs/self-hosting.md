@@ -26,6 +26,10 @@ Business / Enterprise: add `-f infra/docker-compose.ee.yml` right after the base
 Then run `brake init` once (it uses `BRAKE_SETUP_TOKEN`), and remove the setup token from
 `infra/.env` afterwards.
 
+People sign in to the dashboard with an API token by default. With email set up (section 2),
+set `BRAKE_EMAIL_SIGN_IN=true` and invite your team under Team: each person gets a one-time
+sign-in link by email instead of a token to keep.
+
 ## 2. HTTPS
 
 `infra/docker-compose.tls.yml` puts [Caddy](https://caddyserver.com) in front with certificates

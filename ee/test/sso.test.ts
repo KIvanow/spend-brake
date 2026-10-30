@@ -9,7 +9,7 @@ import { SignJWT, exportJWK, generateKeyPair } from 'jose';
 import { SignedXml } from 'xml-crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { roleFor } from '../src/sso/sso.js';
-import { type Env, type Org, bearer, newOrg, startEnv } from './harness.js';
+import { type Env, type Org, bearer, emailPerson, newOrg, startEnv } from './harness.js';
 
 const PUBLIC = 'http://brake.test';
 const DASHBOARD = 'http://dash.test';
@@ -261,9 +261,13 @@ describe('single sign-on with OIDC', () => {
     expect((await caps(asAdmin)).statusCode).toBe(401);
     expect((await caps(again)).statusCode).toBe(401);
     expect((await caps(asOps)).statusCode).toBe(200);
-    // Reconfiguring SSO ends every token it issued; plain tokens keep working.
+    // Reconfiguring SSO ends every token it issued, and email sign-ins (the IdP decides who
+    // gets in now); plain tokens keep working.
+    const byEmail = await emailPerson(env, org.id, 'dana@example.com', 'admin');
+    expect((await caps(byEmail)).statusCode).toBe(200);
     expect((await configureOidc(org)).statusCode).toBe(200);
     expect((await caps(asOps)).statusCode).toBe(401);
+    expect((await caps(byEmail)).statusCode).toBe(401);
     expect((await caps(org.viewer)).statusCode).toBe(200);
   });
 

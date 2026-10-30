@@ -1,5 +1,7 @@
 import type { ApiExtension } from '@spend-brake/api';
 import type { ValkeyClient as Redis } from '@spend-brake/budget';
+import { eq } from '@spend-brake/db';
+import { eeSsoConfigs } from '../schema.js';
 import type { Entitlements } from '../entitlements.js';
 import { type SsoOptions, ssoRoutes } from '../sso/sso.js';
 import { approvalRoutes, holdCapRaise } from './approvals.js';
@@ -22,6 +24,15 @@ export function eeApi(opts: EeApiOptions): ApiExtension {
   return ({ app, router, ctx }) => {
     ctx.hooks.authorize = authorizeEeRoles(ctx, ent);
     ctx.hooks.holdCapRaise = holdCapRaise(ctx, ent);
+    // With single sign-on configured, the IdP decides who gets in: no email sign-in links.
+    ctx.hooks.emailSignInAllowed = async (orgId) =>
+      (
+        await ctx.db
+          .select({ orgId: eeSsoConfigs.orgId })
+          .from(eeSsoConfigs)
+          .where(eq(eeSsoConfigs.orgId, orgId))
+          .limit(1)
+      ).length === 0;
     licenseRoutes(router, ctx, ent);
     roleRoutes(router, ctx, ent);
     approvalRoutes(router, ctx, ent);

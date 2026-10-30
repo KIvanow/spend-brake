@@ -35,8 +35,11 @@ export const users = pgTable(
     email: text('email').notNull(),
     role: text('role', { enum: ['owner', 'admin', 'viewer'] }).notNull(),
     createdAt: created(),
+    /** Removed from the org: cannot sign in; kept so the audit log still names them. */
+    removedAt: timestamp('removed_at', { withTimezone: true }),
   },
-  (t) => [uniqueIndex('users_org_email').on(t.orgId, t.email)],
+  // Emails are stored lower-case; sign-in looks one up across orgs.
+  (t) => [uniqueIndex('users_org_email').on(t.orgId, t.email), index('users_email').on(t.email)],
 );
 
 export const apiTokens = pgTable(
@@ -49,6 +52,11 @@ export const apiTokens = pgTable(
     userId: text('user_id').references(() => users.id),
     name: text('name').notNull(),
     role: text('role', { enum: ['owner', 'admin', 'viewer'] }).notNull(),
+    /**
+     * How a person's token was issued: 'email' for an email sign-in link; null with a user is
+     * single sign-on (the IdP vouches for the person).
+     */
+    signIn: text('sign_in', { enum: ['email'] }),
     /** SHA-256 of the token; the token itself is shown once. */
     tokenHash: text('token_hash').notNull().unique(),
     createdAt: created(),

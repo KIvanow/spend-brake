@@ -15,8 +15,22 @@ const envSchema = z.object({
   BRAKE_SETUP_TOKEN: z.string().min(16).optional(),
   /** Check new Google keys' restrictions with a free call to Google. */
   GOOGLE_KEY_CHECK: z.stringbool().default(true),
+  /** People sign in with emailed links (the notifier sends them; it needs SMTP_URL). */
+  BRAKE_EMAIL_SIGN_IN: z.stringbool().default(false),
+  /** Where the dashboard is, for the links in sign-in emails. */
+  BRAKE_DASHBOARD_URL: z.url().optional(),
+  /** Where apps send provider calls, shown in the dashboard's setup steps. */
+  BRAKE_PUBLIC_PROXY_URL: z.url().optional(),
+  /** Hosted sign-up is open (the billing service serves it). */
+  BRAKE_HOSTED_SIGNUP: z.stringbool().default(false),
 });
 
 export type ApiEnv = z.output<typeof envSchema>;
 
-export const loadEnv = (env: NodeJS.ProcessEnv = process.env): ApiEnv => envSchema.parse(env);
+export function loadEnv(env: NodeJS.ProcessEnv = process.env): ApiEnv {
+  const parsed = envSchema.parse(env);
+  if (parsed.BRAKE_EMAIL_SIGN_IN && !parsed.BRAKE_DASHBOARD_URL) {
+    throw new Error('BRAKE_EMAIL_SIGN_IN needs BRAKE_DASHBOARD_URL (the links point there).');
+  }
+  return parsed;
+}

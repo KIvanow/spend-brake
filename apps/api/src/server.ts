@@ -5,9 +5,11 @@ import { type KeyWrapper, redactUrl } from '@spend-brake/shared';
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
 import { Authenticator } from './auth.js';
 import type { ApiHooks, Ctx } from './common.js';
+import type { EmailSignIn } from './login.js';
 import { ApiError, Router } from './route.js';
 import { actionRoutes } from './routes/actions.js';
 import { adminRoutes } from './routes/admin.js';
+import { type PublicInfo, authRoutes } from './routes/auth.js';
 import { budgetRoutes } from './routes/budget.js';
 import { credentialRoutes } from './routes/credentials.js';
 import { keyRoutes } from './routes/keys.js';
@@ -17,6 +19,7 @@ import { estimateRoutes } from './routes/estimates.js';
 import { meRoutes } from './routes/me.js';
 import { sessionRoutes } from './routes/sessions.js';
 import { setupRoutes } from './routes/setup.js';
+import { userRoutes } from './routes/users.js';
 import { webhookRoutes } from './routes/webhooks.js';
 
 export interface ApiDeps {
@@ -36,6 +39,10 @@ export interface ApiDeps {
   setupToken?: string;
   /** Check new Google keys' restrictions (calls Google); off unless given. */
   checkGoogleKey?: (key: string) => Promise<KeyCheck>;
+  /** People sign in with an emailed link (needs the notifier's email settings); off if absent. */
+  emailSignIn?: EmailSignIn;
+  /** What the dashboard may know before sign-in (GET /v1/auth/options). */
+  publicInfo?: PublicInfo;
   /** Add routes and hooks after the core ones (separately licensed features plug in here). */
   extensions?: ApiExtension[];
 }
@@ -130,6 +137,8 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   setupRoutes(app, router, ctx, deps.setupToken);
   meRoutes(app, router, ctx);
   estimateRoutes(router, ctx);
+  authRoutes(app, router, ctx, deps.emailSignIn, deps.publicInfo ?? {});
+  userRoutes(router, ctx, deps.emailSignIn);
   for (const extend of deps.extensions ?? []) await extend({ app, router, ctx, authenticator });
 
   const spec = router.document();

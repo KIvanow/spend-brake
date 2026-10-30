@@ -1,95 +1,124 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { type FormEvent, useEffect, useState } from 'react';
-import { ApiError, api, getToken, setToken } from './api.js';
+import { useEffect, useState } from 'react';
+import { type AuthOptions, SIGNED_OUT, api, getToken, setToken } from './api.js';
 import { Approvals } from './pages/Approvals.js';
+import { SignIn, Signup, Welcome } from './pages/Auth.js';
 import { Billing } from './pages/Billing.js';
 import { Caps } from './pages/Caps.js';
 import { Events } from './pages/Events.js';
 import { Keys } from './pages/Keys.js';
 import { Migration } from './pages/Migration.js';
 import { Overview } from './pages/Overview.js';
+import { Setup } from './pages/Setup.js';
 import { Spend } from './pages/Spend.js';
+import { Team } from './pages/Team.js';
 import { Webhooks } from './pages/Webhooks.js';
 import './styles.css';
 
 const PAGES = {
   Overview,
+  Setup,
   Spend,
   Events,
   Caps,
   Approvals,
   Keys,
+  Team,
   Webhooks,
   Migration,
   Billing,
 } as const;
 type PageName = keyof typeof PAGES;
+const LABELS: Partial<Record<PageName, string>> = { Setup: 'Get started' };
+
+const route = () => window.location.hash.replace(/^#\/?/, '').split(/[?/]/)[0] ?? '';
 
 // Pages live in the URL hash (#/caps), so links from alerts and bookmarks open the right page.
-const pageFromHash = (): PageName => {
-  const name = window.location.hash.replace(/^#\/?/, '').split(/[?/]/)[0] ?? '';
-  return (
-    (Object.keys(PAGES) as PageName[]).find((p) => p.toLowerCase() === name.toLowerCase()) ??
-    'Overview'
-  );
-};
+const pageFromHash = (): PageName =>
+  (Object.keys(PAGES) as PageName[]).find((p) => p.toLowerCase() === route().toLowerCase()) ??
+  'Overview';
 
-function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
-  const [token, setValue] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    setToken(token.trim());
-    try {
-      await api('/v1/org');
-      onSignedIn();
-    } catch (err) {
-      setToken(null);
-      setError(
-        err instanceof ApiError && err.status === 401
-          ? 'That token is not valid.'
-          : (err as Error).message,
-      );
-    }
-  };
-  return (
-    <main className="signin">
-      <h1>Spend Brake</h1>
-      <form onSubmit={(e) => void submit(e)}>
-        <label>
-          Admin API token
-          <input
-            type="password"
-            value={token}
-            onChange={(e) => setValue(e.target.value)}
-            placeholder="sbt_…"
-            autoComplete="off"
-            required
-          />
-        </label>
-        <button type="submit">Sign in</button>
-        {error && <p className="error">{error}</p>}
-      </form>
-      <p className="muted">
-        `brake init` saves one to ~/.config/brake/config.json; `brake` can create more.
-      </p>
-    </main>
-  );
-}
-
-export function App({ client = new QueryClient() }: { client?: QueryClient }) {
+export function App({
+  client = new QueryClient(),
+  signingIn = null,
+}: {
+  client?: QueryClient;
+  /** An emailed sign-in link being spent: resolves to an error message, or null when signed in. */
+  signingIn?: Promise<string | null> | null;
+}) {
   const [signedIn, setSignedIn] = useState(() => getToken() !== null);
+  const [pending, setPending] = useState(signingIn !== null);
+  const [linkError, setLinkError] = useState<string | null>(null);
+  const [options, setOptions] = useState<AuthOptions | null>(null);
   const [page, setPageState] = useState<PageName>(pageFromHash);
+  const [publicRoute, setPublicRoute] = useState(route);
+
   useEffect(() => {
-    const onHash = () => setPageState(pageFromHash());
+    const onHash = () => {
+      setPageState(pageFromHash());
+      setPublicRoute(route());
+    };
+    const onSignedOut = () => {
+      client.clear();
+      setSignedIn(false);
+    };
     window.addEventListener('hashchange', onHash);
-    return () => window.removeEventListener('hashchange', onHash);
-  }, []);
+    window.addEventListener(SIGNED_OUT, onSignedOut);
+    return () => {
+      window.removeEventListener('hashchange', onHash);
+      window.removeEventListener(SIGNED_OUT, onSignedOut);
+    };
+  }, [client]);
+
+  useEffect(() => {
+    if (signingIn === null) return;
+    let live = true;
+    void signingIn.then((error) => {
+      if (!live) return;
+      setLinkError(error);
+      setSignedIn(error === null);
+      setPending(false);
+    });
+    return () => {
+      live = false;
+    };
+  }, [signingIn]);
+
+  useEffect(() => {
+    if (signedIn) return;
+    api<AuthOptions>('/v1/auth/options')
+      .then(setOptions)
+      .catch(() => setOptions({ emailSignIn: false, signup: false, proxyUrl: null }));
+  }, [signedIn]);
+
   const setPage = (p: PageName) => {
     window.location.hash = `/${p.toLowerCase()}`;
     setPageState(p);
   };
-  if (!signedIn) return <SignIn onSignedIn={() => setSignedIn(true)} />;
+
+  if (pending) {
+    return (
+      <main className="signin">
+        <h1>Spend Brake</h1>
+        <p className="muted">Signing you in…</p>
+      </main>
+    );
+  }
+  if (!signedIn) {
+    if (publicRoute === 'signup') return <Signup />;
+    if (publicRoute === 'welcome') return <Welcome />;
+    if (!options) return null;
+    return (
+      <SignIn
+        options={options}
+        error={linkError}
+        onSignedIn={() => {
+          setLinkError(null);
+          setSignedIn(true);
+        }}
+      />
+    );
+  }
   const Page = PAGES[page];
   return (
     <QueryClientProvider client={client}>
@@ -103,7 +132,7 @@ export function App({ client = new QueryClient() }: { client?: QueryClient }) {
               aria-current={p === page ? 'page' : undefined}
               onClick={() => setPage(p)}
             >
-              {p}
+              {LABELS[p] ?? p}
             </button>
           ))}
         </nav>
@@ -112,6 +141,7 @@ export function App({ client = new QueryClient() }: { client?: QueryClient }) {
           className="link"
           onClick={() => {
             setToken(null);
+            client.clear();
             setSignedIn(false);
           }}
         >

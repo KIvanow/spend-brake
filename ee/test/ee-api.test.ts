@@ -13,6 +13,7 @@ import {
   license,
   newOrg,
   ssoConfigured,
+  emailPerson,
   ssoPerson,
   startEnv,
 } from './harness.js';
@@ -201,6 +202,12 @@ describe('two-person approval for raising caps', () => {
       expect(self.json()).toMatchObject({ error: 'second_person_required' });
     }
     expect((await call('POST', `/v1/approvals/${id}/approve`, org.viewer)).statusCode).toBe(403);
+    // Someone signed in with an email link is not vouched for by the IdP: an owner could invite
+    // a second address of their own.
+    const alias = await emailPerson(env, org.id, 'ana+alias@example.com', 'admin');
+    expect((await call('POST', `/v1/approvals/${id}/approve`, alias)).json()).toMatchObject({
+      error: 'sso_required',
+    });
     expect(await hardCap(org.id)).toBe('500000');
 
     // Another person approves: applied once.

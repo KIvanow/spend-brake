@@ -2,17 +2,36 @@
 //   pnpm --filter @spend-brake/api bootstrap -- --org acme --name "Acme" [--tz Europe/Sofia]
 import { parseArgs } from 'node:util';
 import { DEFAULT_LOOP_POLICY, Registry, connectValkey } from '@spend-brake/budget';
-import { apiTokens, createDb, migrate, orgs } from '@spend-brake/db';
+import { apiTokens, createDb, migrate, orgs, users } from '@spend-brake/db';
 import { loadEnv } from './config.js';
 import { newApiToken, newId, sha256 } from './ids.js';
+import { normalizeEmail } from './login.js';
 
-export async function bootstrapOrg(
-  deps: { db: ReturnType<typeof createDb>['db']; registry: Registry },
+type OrgDeps = { db: ReturnType<typeof createDb>['db']; registry: Registry };
+
+/** Create an org; with an owner email, that person owns it (they sign in by email). */
+export async function createOrg(
+  deps: OrgDeps,
   org: { id: string; name: string; timeZone?: string },
-): Promise<string> {
+  owner?: { email: string },
+): Promise<{ ownerId: string | null }> {
   const timeZone = org.timeZone ?? 'UTC';
   await deps.db.insert(orgs).values({ id: org.id, name: org.name, timeZone, settings: {} });
   await deps.registry.putOrg({ id: org.id, timeZone, providers: {}, loop: DEFAULT_LOOP_POLICY });
+  if (!owner) return { ownerId: null };
+  const ownerId = newId('usr');
+  await deps.db
+    .insert(users)
+    .values({ id: ownerId, orgId: org.id, email: normalizeEmail(owner.email), role: 'owner' });
+  return { ownerId };
+}
+
+/** Create an org with an owner API token (printed once). */
+export async function bootstrapOrg(
+  deps: OrgDeps,
+  org: { id: string; name: string; timeZone?: string },
+): Promise<string> {
+  await createOrg(deps, org);
   const token = newApiToken();
   await deps.db.insert(apiTokens).values({
     id: newId('tok'),

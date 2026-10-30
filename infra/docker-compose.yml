@@ -58,6 +58,10 @@ services:
       BRAKE_MASTER_KEY: ${BRAKE_MASTER_KEY:?set BRAKE_MASTER_KEY in infra/.env}
       BRAKE_ACTION_SECRET: ${BRAKE_ACTION_SECRET:?set BRAKE_ACTION_SECRET in infra/.env}
       BRAKE_SETUP_TOKEN: ${BRAKE_SETUP_TOKEN:-}
+      # Sign in with emailed links (the notifier sends them: it needs SMTP_URL).
+      BRAKE_EMAIL_SIGN_IN: ${BRAKE_EMAIL_SIGN_IN:-false}
+      BRAKE_DASHBOARD_URL: ${BRAKE_DASHBOARD_URL:-http://localhost:3000}
+      BRAKE_PUBLIC_PROXY_URL: ${BRAKE_PUBLIC_PROXY_URL:-http://localhost:8080}
     ports: ['8081:8081']
     depends_on:
       valkey: { condition: service_healthy }

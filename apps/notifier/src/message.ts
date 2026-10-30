@@ -184,12 +184,51 @@ export function buildMessage(alertId: string, job: AlertJob, o: LinkOptions): Me
         text: `The license for org ${String(job.orgId)} is attached (valid until ${String(job.expiresAt).slice(0, 10)}). Install it with: brake license install ${String(job.orgId)}.license. It is also in the dashboard under Billing.`,
         actions: view('/#/billing'),
       };
+    case 'login_link':
+      return { ...base, data: {}, ...loginMessage(job) };
     case 'catalog_drift':
       return {
         ...base,
         title: 'Price catalog source changed',
         text: `The pricing tables at ${String(job.url)} changed. Re-verify the catalog prices.`,
         actions: [{ id: 'view', label: 'View source', url: String(job.url) }],
+      };
+  }
+}
+
+/** Sign-in and invite emails: one link per org the address may sign in to. */
+function loginMessage(job: AlertJob): Pick<Message, 'title' | 'text' | 'actions'> {
+  const links = (Array.isArray(job.links) ? job.links : []) as {
+    orgName: string;
+    url: string;
+  }[];
+  const actions = links.map((l, i) => ({
+    id: `sign_in_${i}`,
+    label: links.length > 1 ? `Sign in to ${l.orgName}` : 'Sign in',
+    url: l.url,
+  }));
+  const org = links[0]?.orgName ?? 'Spend Brake';
+  switch (job.purpose) {
+    case 'invite':
+      return {
+        title: `You're invited to ${org} on Spend Brake`,
+        text: `You were added to ${org} on Spend Brake, which caps what your apps and agents spend on paid APIs. Open the link to sign in.`,
+        actions,
+      };
+    case 'welcome':
+      return {
+        title: 'Welcome to Spend Brake',
+        text: `Your org ${org} is ready. Open the link to sign in and connect your first API.`,
+        actions,
+      };
+    default:
+      return {
+        title: 'Your Spend Brake sign-in link',
+        text:
+          links.length > 1
+            ? 'This address belongs to more than one org. Pick the one to sign in to.'
+            : `Open the link to sign in to ${org}.`,
+        actions,
       };
   }
 }

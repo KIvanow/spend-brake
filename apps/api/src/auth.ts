@@ -13,6 +13,11 @@ export interface Auth {
   role: Role;
   /** Audit actor. */
   actor: string;
+  /**
+   * How the person behind the token signed in: 'sso' when an identity provider vouches for
+   * them, 'email' for an email sign-in link; null for tokens not issued to a person.
+   */
+  signIn: 'sso' | 'email' | null;
 }
 
 export const atLeast = (have: Role, need: Role) => ROLES.indexOf(have) >= ROLES.indexOf(need);
@@ -49,9 +54,10 @@ export class Authenticator {
         .set({ lastUsedAt: this.now() })
         .where(eq(apiTokens.id, row.id))
         .catch(() => undefined);
-      // Tokens issued to a person (single sign-on) act as that person, whichever token it is.
+      // Tokens issued to a person act as that person, whichever token it is.
       const actor = row.userId ? `user:${row.userId}` : `token:${row.id}`;
-      return { orgId: row.orgId, tokenId: row.id, role: row.role, actor };
+      const signIn = row.userId ? (row.signIn ?? 'sso') : null;
+      return { orgId: row.orgId, tokenId: row.id, role: row.role, actor, signIn };
     });
   }
 

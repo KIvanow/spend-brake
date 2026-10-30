@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type ScopeStatus, api, usd } from '../api.js';
 import { Meter, Table, windowName } from '../ui.js';
+import { useCredentials } from './Keys.js';
 
 interface Status {
   killed: string[];
@@ -15,6 +16,7 @@ export function Overview() {
     queryFn: () => api<Status>('/v1/status'),
     refetchInterval: 5_000,
   });
+  const credentials = useCredentials();
   const toggle = useMutation({
     mutationFn: ({ target, kill }: { target: string; kill: boolean }) =>
       api(`/v1/${kill ? 'kill' : 'unkill'}`, {
@@ -34,6 +36,12 @@ export function Overview() {
 
   return (
     <section>
+      {credentials.data?.items.length === 0 && (
+        <div className="callout">
+          <strong>Welcome!</strong> Connect your first API in a few minutes.{' '}
+          <a href="#/setup">Get started</a>
+        </div>
+      )}
       <h2>Live budget</h2>
       <p className="muted">Refreshes every 5 seconds. Held = reserved by requests in flight.</p>
       <Table

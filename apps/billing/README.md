@@ -20,14 +20,15 @@ Free limits.
 
 ## Endpoints (behind the dashboard at `/v1/billing`)
 
-| Method | Path                   | Who    | What                                                                                                        |
-| ------ | ---------------------- | ------ | ----------------------------------------------------------------------------------------------------------- |
-| POST   | `/v1/billing/signup`   | public | Create a Free org (owner token shown once); a paid plan returns a Checkout URL (`BRAKE_HOSTED_SIGNUP=true`) |
-| GET    | `/v1/billing`          | viewer | Plan, status, usage against limits, licenses                                                                |
-| POST   | `/v1/billing/checkout` | owner  | Stripe Checkout for a plan (first purchase)                                                                 |
-| POST   | `/v1/billing/portal`   | owner  | Stripe Customer Portal: card, plan change, cancel                                                           |
-| GET    | `/v1/billing/license`  | owner  | The latest license file                                                                                     |
-| POST   | `/v1/billing/webhook`  | Stripe | Signed events, each applied once                                                                            |
+| Method | Path                   | Who    | What                                                                                                                  |
+| ------ | ---------------------- | ------ | --------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/v1/billing/signup`   | public | Create a Free org and email its owner a sign-in link; a paid plan returns a Checkout URL (`BRAKE_HOSTED_SIGNUP=true`) |
+| GET    | `/v1/billing/plans`    | public | Plans with monthly prices and limits (the sign-up page and website read it)                                           |
+| GET    | `/v1/billing`          | viewer | Plan, status, usage against limits, licenses                                                                          |
+| POST   | `/v1/billing/checkout` | owner  | Stripe Checkout for a plan (first purchase)                                                                           |
+| POST   | `/v1/billing/portal`   | owner  | Stripe Customer Portal: card, plan change, cancel                                                                     |
+| GET    | `/v1/billing/license`  | owner  | The latest license file                                                                                               |
+| POST   | `/v1/billing/webhook`  | Stripe | Signed events, each applied once                                                                                      |
 
 Webhook events: `checkout.session.completed`, `customer.subscription.created`, `.updated`,
 `.deleted`, `invoice.paid` (clears a failed payment; issues or renews the license for Business

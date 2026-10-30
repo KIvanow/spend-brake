@@ -322,6 +322,28 @@ describe('fallbacks and mutes', () => {
     expect(r.got).toHaveLength(0);
   });
 
+  it('emails sign-in links to that person only: never webhooks or the operator', async () => {
+    const o = await org();
+    const r = await receiver();
+    await webhook(o.owner, r.url);
+    await alert({
+      type: 'login_link',
+      orgId: null,
+      email: 'pat@example.com',
+      purpose: 'invite',
+      links: [{ orgId: o.id, orgName: 'Acme', url: 'https://app.example.com/#login=abc' }],
+    });
+    await until(() => mails.some((m) => m.to === 'pat@example.com'));
+    const m = mails.find((x) => x.to === 'pat@example.com')!;
+    expect(m.subject).toBe("[Spend Brake] You're invited to Acme on Spend Brake");
+    expect(m.text).toContain('Sign in: https://app.example.com/#login=abc');
+    expect(m.text).toContain('works once, for 15 minutes');
+    expect(m.text).not.toContain('Action links');
+    await new Promise((res) => setTimeout(res, 200));
+    expect(r.got).toHaveLength(0);
+    expect(mails.some((x) => x.to === 'ops@test' && x.text.includes('#login='))).toBe(false);
+  });
+
   it('sends operator alerts to the operator email', async () => {
     await alert({ type: 'catalog_drift', orgId: null, url: 'https://developers.google.com/x' });
     await until(() => mails.some((m) => m.to === 'ops@test'));

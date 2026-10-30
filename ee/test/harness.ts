@@ -195,6 +195,28 @@ export async function ssoPerson(
   return t;
 }
 
+/** A token as an email sign-in link issues it: a person, but not vouched for by an IdP. */
+export async function emailPerson(
+  env: Env,
+  orgId: string,
+  email: string,
+  role: 'owner' | 'admin' | 'viewer',
+): Promise<string> {
+  const userId = newId('usr');
+  await env.db.insert(users).values({ id: userId, orgId, email, role });
+  const t = newApiToken();
+  await env.db.insert(apiTokens).values({
+    id: newId('tok'),
+    orgId,
+    userId,
+    name: `email:${email}`,
+    role,
+    signIn: 'email',
+    tokenHash: sha256(t),
+  });
+  return t;
+}
+
 /** Another token for a person who already has one (a second login). */
 export async function anotherLogin(env: Env, token: string): Promise<string> {
   const [row] = await env.db

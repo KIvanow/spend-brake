@@ -27,6 +27,19 @@ First release.
   Business license by subscription and Enterprise by invoice, each paid invoice issuing or
   renewing a signed license; Checkout, Customer Portal, idempotent webhooks.
 
+### Accounts
+
+- Sign in to the dashboard with an emailed one-time link (`BRAKE_EMAIL_SIGN_IN`), alongside API
+  tokens and single sign-on. Links work once for 15 minutes; sessions last 7 days. Orgs with
+  single sign-on configured refuse email sign-in, and email sign-ins never count as an
+  approver for two-person approval.
+- Team page: invite people by email as viewer, admin or owner, change roles, remove people
+  (their sessions end at once); an org always keeps an owner.
+- Hosted sign-up page with plan choice (paid plans continue to Stripe Checkout), and a Get
+  started page: add a provider key, create a Spend Brake key with the exact change to make in
+  the app, set caps, see the first call. Provider keys and Spend Brake keys can now be managed
+  in the dashboard.
+
 ### Business / Enterprise (`ee/`, LICENSE-EE)
 
 - Offline-verified licenses with a 14-day grace period; single sign-on (OIDC, SAML); operator,

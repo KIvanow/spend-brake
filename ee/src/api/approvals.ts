@@ -66,8 +66,12 @@ function view(row: Row, now: Date) {
  * The person behind a request: only single sign-on tokens name one (`user:<id>`). Plain API
  * tokens do not: any owner can mint more of them, so two tokens are never two people.
  */
+/**
+ * The person behind a token, when an identity provider vouches for them. Email sign-in links
+ * do not count: an owner could invite a second address of their own and approve themselves.
+ */
 export const personOf = (auth: Auth): string | null =>
-  auth.actor.startsWith('user:') ? auth.actor : null;
+  auth.signIn === 'sso' && auth.actor.startsWith('user:') ? auth.actor : null;
 
 const SSO_REQUIRED =
   'With two-person approval on, changes are requested and approved by people signed in with single sign-on.';

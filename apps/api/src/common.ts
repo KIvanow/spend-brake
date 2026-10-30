@@ -37,6 +37,8 @@ export interface ApiHooks {
   authorize?: (auth: Auth, route: RouteRef) => Promise<boolean>;
   /** Hold a cap raise for approval: return its id, or null to apply it now. */
   holdCapRaise?: (change: CapRaise) => Promise<string | null>;
+  /** Whether people of the org may sign in with an emailed link (false when SSO is required). */
+  emailSignInAllowed?: (orgId: string) => Promise<boolean>;
 }
 
 export interface Ctx {

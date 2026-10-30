@@ -55,6 +55,16 @@ export async function processAlert(
   alertId: string,
   job: AlertJob,
 ): Promise<AlertOutcome> {
+  // Sign-in links go to that person only: never to webhooks, the operator, or the logs.
+  if (job.type === 'login_link') {
+    if (!deps.mail || typeof job.email !== 'string') {
+      deps.log.warn({ alertId }, 'sign-in link not emailed: no SMTP or address');
+      return 'none';
+    }
+    const message = buildMessage(alertId, job, deps.links);
+    await sendMail(deps, job.email, message, [], LOGIN_FOOTER);
+    return 'email';
+  }
   if (!job.orgId) {
     const message = buildMessage(alertId, job, deps.links);
     if (deps.mail?.operator) {
@@ -112,18 +122,22 @@ export async function processAlert(
   return 'none';
 }
 
+const LOGIN_FOOTER =
+  "Each link works once, for 15 minutes. If you didn't ask for it, ignore this email: nobody can sign in without it.";
+
 async function sendMail(
   deps: ProcessorDeps,
   to: string,
   m: Message,
   attachments: { filename: string; content: string }[] = [],
+  footer = `Action links work once and expire after ${Math.round(deps.links.ttlSec / 60)} minutes.`,
 ): Promise<void> {
   const links = m.actions.map((a) => `${a.label}: ${a.url}`).join('\n');
   await deps.mail!.transport.sendMail({
     from: deps.mail!.from,
     to,
     subject: `[Spend Brake] ${m.title}`,
-    text: `${m.text}\n\n${links}\n\nAction links work once and expire after ${Math.round(deps.links.ttlSec / 60)} minutes.`,
+    text: `${m.text}\n\n${links}\n\n${footer}`,
     ...(attachments.length ? { attachments } : {}),
   });
 }

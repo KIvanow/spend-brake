@@ -81,7 +81,13 @@ export function actionRoutes(
     const claimed = await ctx.valkey.set(`bk:{o:${c.org}}:action:${c.jti}`, '1', 'EX', ttl, 'NX');
     if (claimed !== 'OK') throw new ApiError(409, 'link_used', 'This link was already used.');
 
-    const auth: Auth = { orgId: c.org, tokenId: c.jti, role: 'admin', actor: `link:${c.jti}` };
+    const auth: Auth = {
+      orgId: c.org,
+      tokenId: c.jti,
+      role: 'admin',
+      actor: `link:${c.jti}`,
+      signIn: null,
+    };
     const result = await execute(ctx, auth, c, amount);
     reply.code(200);
     return { ok: true, action: c.act, target: c.target, ...result };

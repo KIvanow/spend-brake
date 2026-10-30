@@ -1,5 +1,5 @@
 import { generateKeyPairSync, randomBytes } from 'node:crypto';
-import { buildApi } from '@spend-brake/api';
+import { type LoginMail, buildApi, redeemLoginLink } from '@spend-brake/api';
 import { BudgetEngine, connectValkey, type ValkeyClient } from '@spend-brake/budget';
 import {
   type Db,
@@ -568,5 +568,79 @@ describe('setup', () => {
     // Only the seed script opts in to live mode.
     expect(() => stripeClient('rk_live_abc', { allowLive: true })).not.toThrow();
     expect(() => stripeClient('sk_org_live_abc', { allowLive: true })).toThrow();
+  });
+});
+
+describe('sign-up with email sign-in', () => {
+  it('makes the owner a person and emails them a welcome link instead of a token', async () => {
+    const sent: LoginMail[] = [];
+    const hosted = await buildServer({
+      db,
+      valkey,
+      stripe: fakeStripe,
+      webhookSecret: SECRET,
+      dashboardUrl: 'https://app.example.com',
+      licenseKey: null,
+      sendLicense: () => Promise.resolve(),
+      signup: true,
+      signIn: {
+        dashboardUrl: 'https://app.example.com',
+        mailer: { send: (m) => Promise.resolve(void sent.push(m)) },
+      },
+      now: () => NOW,
+    });
+    const res = await hosted.inject({
+      method: 'POST',
+      url: '/v1/billing/signup',
+      payload: {
+        name: 'Acme, Inc.',
+        email: ' Founder@Acme.test ',
+        plan: 'team',
+        timeZone: 'Europe/Sofia',
+      },
+    });
+    expect(res.statusCode, res.body).toBe(201);
+    const body = res.json<{ orgId: string; emailSent: boolean; checkoutUrl: string }>();
+    expect(body.orgId).toMatch(/^acme-inc-[0-9a-z]{6}$/);
+    expect(body).not.toHaveProperty('ownerToken');
+    expect(body.emailSent).toBe(true);
+    // From sign-up the buyer comes back to the welcome page (they are not signed in yet).
+    expect(checkouts.at(-1)).toMatchObject({
+      client_reference_id: body.orgId,
+      success_url: 'https://app.example.com/#/welcome',
+    });
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ email: 'founder@acme.test', purpose: 'welcome' });
+    expect(sent[0]!.links[0]).toMatchObject({ orgId: body.orgId, orgName: 'Acme, Inc.' });
+    const code = /#login=(.+)$/.exec(sent[0]!.links[0]!.url)![1]!;
+    const signedIn = await redeemLoginLink(
+      { db, valkey, now: () => NOW, allowed: () => Promise.resolve(true) },
+      code,
+    );
+    expect(signedIn).toMatchObject({
+      orgId: body.orgId,
+      role: 'owner',
+      email: 'founder@acme.test',
+    });
+    const org = await api.inject({ url: '/v1/org', headers: bearer(signedIn!.token) });
+    expect(org.json()).toMatchObject({ id: body.orgId, timeZone: 'Europe/Sofia' });
+    await hosted.close();
+  });
+
+  it('lists the plans publicly, with prices and limits', async () => {
+    const res = await billing.inject('/v1/billing/plans');
+    expect(res.statusCode).toBe(200);
+    const { plans } = res.json<{
+      plans: { id: string; monthlyUsd: number | null; purchasable: boolean; selfHosted: boolean }[];
+    }>();
+    expect(plans.map((p) => [p.id, p.monthlyUsd, p.purchasable, p.selfHosted])).toEqual([
+      ['free', 0, true, false],
+      ['indie', 9, true, false],
+      ['team', 49, true, false],
+      ['agents', 149, true, false],
+      ['business', 299, true, true],
+      ['enterprise', null, false, true],
+    ]);
   });
 });

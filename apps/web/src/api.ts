@@ -1,23 +1,40 @@
-// Admin API client. The token lives in sessionStorage (cleared when the tab closes); the API is
-// on the same origin (nginx in Docker, the Vite proxy in dev).
+// Admin API client. The API is on the same origin (nginx in Docker, the Vite proxy in dev).
+//
+// Where the token lives: a pasted or single sign-on token in sessionStorage (cleared when the
+// tab closes); an email sign-in's token, which expires on its own after 7 days, in localStorage
+// so people stay signed in across tabs.
 
 const TOKEN_KEY = 'brake.adminToken';
 
-export function getToken(): string | null {
+function store(kind: 'session' | 'local'): Storage | null {
   try {
-    return sessionStorage.getItem(TOKEN_KEY);
+    return kind === 'session' ? window.sessionStorage : window.localStorage;
   } catch {
     return null;
   }
 }
 
-export function setToken(token: string | null): void {
+export function getToken(): string | null {
   try {
-    if (token) sessionStorage.setItem(TOKEN_KEY, token);
-    else sessionStorage.removeItem(TOKEN_KEY);
+    return store('session')?.getItem(TOKEN_KEY) ?? store('local')?.getItem(TOKEN_KEY) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function setToken(token: string | null, opts: { remember?: boolean } = {}): void {
+  try {
+    store('session')?.removeItem(TOKEN_KEY);
+    store('local')?.removeItem(TOKEN_KEY);
+    if (token) store(opts.remember ? 'local' : 'session')?.setItem(TOKEN_KEY, token);
   } catch {
     // storage blocked: the token only lives in memory for this page
   }
+}
+
+/** Drop a one-time value from the address bar and history, keeping the page's route. */
+function clearHash(location: Location, route = '#/'): void {
+  window.history.replaceState(null, '', `${location.pathname}${location.search}${route}`);
 }
 
 /**
@@ -28,8 +45,25 @@ export function takeSsoToken(location: Location = window.location): boolean {
   const m = /^#sso_token=(sbt_[0-9A-Za-z]{32})$/.exec(location.hash);
   if (!m) return false;
   setToken(m[1]!);
-  window.history.replaceState(null, '', `${location.pathname}${location.search}#/`);
+  clearHash(location);
   return true;
+}
+
+/** An emailed sign-in link opens `#login=<code>`: take the code (it is spent by the API). */
+export function takeLoginCode(location: Location = window.location): string | null {
+  const m = /^#login=([A-Za-z0-9_-]{43})$/.exec(location.hash);
+  if (!m) return null;
+  clearHash(location);
+  return m[1]!;
+}
+
+/** Fired when the API stops accepting the stored token. */
+export const SIGNED_OUT = 'brake:signed-out';
+
+export interface AuthOptions {
+  emailSignIn: boolean;
+  signup: boolean;
+  proxyUrl: string | null;
 }
 
 export class ApiError extends Error {
@@ -55,6 +89,11 @@ export async function api<T>(
     ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
   });
   const data = (await res.json().catch(() => ({}))) as { message?: string };
+  if (res.status === 401 && token) {
+    // Expired or revoked (sessions end when a role changes): back to the sign-in page.
+    setToken(null);
+    window.dispatchEvent(new Event(SIGNED_OUT));
+  }
   if (!res.ok) throw new ApiError(res.status, data.message ?? `HTTP ${res.status}`);
   return data as T;
 }

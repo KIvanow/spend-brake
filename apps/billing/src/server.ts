@@ -4,8 +4,13 @@ import {
   Authenticator,
   type Role,
   apiContext,
+  type EmailSignIn,
+  allowLinkTo,
   atLeast,
   bootstrapOrg,
+  createLoginLink,
+  createOrg,
+  random62,
   writeCap,
 } from '@spend-brake/api';
 import type { ValkeyClient } from '@spend-brake/budget';
@@ -27,7 +32,15 @@ import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import type Stripe from 'stripe';
 import { z } from 'zod';
 import { planOf, setPlan } from './entitlements.js';
-import { CHECKOUT_PLANS, type CheckoutPlan, LIMITS, PLAN_NAMES, lookupKey } from './plans.js';
+import {
+  CHECKOUT_PLANS,
+  type CheckoutPlan,
+  LIMITS,
+  MONTHLY_CENTS,
+  PLAN_NAMES,
+  PLANS,
+  lookupKey,
+} from './plans.js';
 import { type LicenseMail, applyEvent } from './webhooks.js';
 
 export interface BillingDeps {
@@ -44,6 +57,11 @@ export interface BillingDeps {
   sendLicense: (mail: LicenseMail) => Promise<void>;
   /** Public sign-up (hosted service only). */
   signup?: boolean;
+  /**
+   * Sign-up emails the owner a sign-in link (the owner is a person). Without it, sign-up answers
+   * with an owner API token instead.
+   */
+  signIn?: EmailSignIn;
   now?: () => Date;
   logger?: boolean | object;
 }
@@ -120,7 +138,11 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
     return customer.id;
   }
 
-  async function checkout(orgId: string, plan: CheckoutPlan) {
+  async function checkout(
+    orgId: string,
+    plan: CheckoutPlan,
+    from: 'billing' | 'signup' = 'billing',
+  ) {
     const current = await planOf(deps.db, orgId);
     if (current?.stripeSubscriptionId) {
       throw new ApiError(
@@ -136,14 +158,39 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
       client_reference_id: orgId,
       line_items: [{ price: await priceId(plan), quantity: 1 }],
       subscription_data: { metadata: { orgId } },
-      success_url: `${dashboard}/#/billing?checkout=done`,
-      cancel_url: `${dashboard}/#/billing?checkout=cancelled`,
+      // From sign-up the buyer is not signed in yet: the welcome page says to check their email.
+      success_url:
+        from === 'signup' ? `${dashboard}/#/welcome` : `${dashboard}/#/billing?checkout=done`,
+      cancel_url:
+        from === 'signup' ? `${dashboard}/#/welcome` : `${dashboard}/#/billing?checkout=cancelled`,
     });
     if (!session.url) throw new ApiError(502, 'stripe_error', 'Stripe returned no checkout URL.');
     return session.url;
   }
 
   app.get('/healthz', { config: { rateLimit: false } }, () => ({ ok: true, service: 'billing' }));
+
+  // The plans and what each includes, for the sign-up page and the website (public).
+  app.get('/v1/billing/plans', () => ({
+    signup: deps.signup ?? false,
+    plans: PLANS.map((id) => {
+      const l = LIMITS[id];
+      return {
+        id,
+        name: PLAN_NAMES[id],
+        monthlyUsd:
+          id === 'free' ? 0 : id in MONTHLY_CENTS ? MONTHLY_CENTS[id as CheckoutPlan] / 100 : null,
+        selfHosted: id === 'business' || id === 'enterprise',
+        // Sold through Checkout (Enterprise is arranged with us).
+        purchasable: id === 'free' || (CHECKOUT_PLANS as readonly string[]).includes(id),
+        limits: {
+          ...l,
+          maxOrgMonthCapMicros:
+            l.maxOrgMonthCapMicros === null ? null : Number(l.maxOrgMonthCapMicros),
+        },
+      };
+    }),
+  }));
 
   app.get('/v1/billing', async (req) => {
     const a = await auth(req, 'viewer');
@@ -265,44 +312,90 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
     return latest.raw;
   });
 
-  // Hosted sign-up: a Free org now (its owner token is shown once), Checkout for a paid plan.
+  // Hosted sign-up: a Free org now, Checkout for a paid plan. The owner gets a sign-in link by
+  // email (or, without email sign-in, an owner token shown once).
   const signupBody = z.object({
-    orgId: z.string().regex(ORG_ID),
-    name: z.string().min(1).max(200),
-    email: z.email(),
+    orgId: z.string().regex(ORG_ID).optional(),
+    name: z.string().trim().min(1).max(200),
+    email: z.string().trim().pipe(z.email().max(320)),
     plan: z.enum(['free', ...CHECKOUT_PLANS]).default('free'),
+    timeZone: z.string().max(64).optional(),
   });
+  const validZone = (tz: string | undefined) => {
+    if (!tz) return 'UTC';
+    try {
+      new Intl.DateTimeFormat('en-US', { timeZone: tz });
+      return tz;
+    } catch {
+      return 'UTC';
+    }
+  };
+  // "Acme, Inc." -> "acme-inc-x7k2p9": readable, and unlikely to be taken.
+  const orgIdFor = (name: string) => {
+    const slug = name
+      .normalize('NFKD')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 40);
+    return `${slug || 'org'}-${random62(6).toLowerCase()}`;
+  };
   app.post(
     '/v1/billing/signup',
     { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } },
     async (req, reply) => {
       if (!deps.signup) throw new ApiError(404, 'not_found', 'Sign-up is not open here.');
       const body = parse(signupBody, req.body);
-      const ownerToken = await deps.db.transaction(async (tx) => {
+      const email = body.email.trim().toLowerCase();
+      // Each sign-up emails the address: keep anyone from flooding someone else's inbox.
+      if (deps.signIn && !(await allowLinkTo(deps.valkey, email))) {
+        throw new ApiError(429, 'rate_limited', 'Too many emails to that address; try in an hour.');
+      }
+      const orgId = body.orgId ?? orgIdFor(body.name);
+      const org = { id: orgId, name: body.name, timeZone: validZone(body.timeZone) };
+      const created = await deps.db.transaction(async (tx) => {
         await tx.execute(sql`select pg_advisory_xact_lock(424242)`);
         const [taken] = await tx
           .select({ id: orgs.id })
           .from(orgs)
-          .where(eq(orgs.id, body.orgId))
+          .where(eq(orgs.id, orgId))
           .limit(1);
         if (taken) throw new ApiError(409, 'conflict', 'That org id is taken.');
-        const token = await bootstrapOrg(
-          { db: tx as unknown as Db, registry: ctx.registry },
-          { id: body.orgId, name: body.name },
-        );
-        await setPlan(tx, body.orgId, { plan: 'free', billingEmail: body.email }, now());
-        return token;
+        const orgDeps = { db: tx as unknown as Db, registry: ctx.registry };
+        const result = deps.signIn
+          ? { ownerToken: null, ...(await createOrg(orgDeps, org, { email })) }
+          : { ownerToken: await bootstrapOrg(orgDeps, org), ownerId: null };
+        await setPlan(tx, orgId, { plan: 'free', billingEmail: email }, now());
+        return result;
       });
       // The Free plan protects up to its monthly amount from the first request.
-      await writeCap(ctx, body.orgId, 'org', 'm', {
+      await writeCap(ctx, orgId, 'org', 'm', {
         hard: LIMITS.free.maxOrgMonthCapMicros,
         soft: null,
       });
+      if (deps.signIn && created.ownerId) {
+        await deps.signIn.mailer.send({
+          email,
+          purpose: 'welcome',
+          links: [
+            {
+              orgId,
+              orgName: body.name,
+              url: await createLoginLink(deps.valkey, deps.signIn.dashboardUrl, {
+                id: created.ownerId,
+                orgId,
+              }),
+            },
+          ],
+        });
+      }
       reply.code(201);
       return {
-        orgId: body.orgId,
-        ownerToken,
-        ...(body.plan !== 'free' ? { checkoutUrl: await checkout(body.orgId, body.plan) } : {}),
+        orgId,
+        ...(created.ownerToken ? { ownerToken: created.ownerToken } : { emailSent: true }),
+        ...(body.plan !== 'free'
+          ? { checkoutUrl: await checkout(orgId, body.plan, 'signup') }
+          : {}),
       };
     },
   );

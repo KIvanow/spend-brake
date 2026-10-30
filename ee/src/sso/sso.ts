@@ -281,8 +281,19 @@ export function ssoRoutes(
         .onConflictDoUpdate({ target: eeSsoConfigs.orgId, set: row })
         .returning();
       oidcConfigs.delete(auth.orgId);
-      // Tokens issued under the old settings (IdP, role map) end now.
+      // Tokens issued under the old settings (IdP, role map) end now, and so do email sign-ins:
+      // from here on the IdP decides who gets in.
       const revoked = await revokeSsoTokens(auth.orgId);
+      await ctx.db
+        .update(apiTokens)
+        .set({ revokedAt: ctx.now() })
+        .where(
+          and(
+            eq(apiTokens.orgId, auth.orgId),
+            eq(apiTokens.signIn, 'email'),
+            isNull(apiTokens.revokedAt),
+          ),
+        );
       await audit(ctx, auth, 'sso.configure', body.protocol, {
         roleMap: body.roleMap,
         defaultRole: body.defaultRole,
@@ -508,6 +519,8 @@ export function ssoRoutes(
         and(
           eq(apiTokens.orgId, orgId),
           userId ? eq(apiTokens.userId, userId) : sql`${apiTokens.userId} is not null`,
+          // Email sign-ins are not single sign-on's to end.
+          isNull(apiTokens.signIn),
           isNull(apiTokens.revokedAt),
           except.length ? notInArray(apiTokens.id, except) : undefined,
         ),
@@ -574,7 +587,13 @@ export function ssoRoutes(
         expiresAt,
       });
     }
-    const actor: Auth = { orgId: row.orgId, tokenId, role: coreRole, actor: `user:${userId}` };
+    const actor: Auth = {
+      orgId: row.orgId,
+      tokenId,
+      role: coreRole,
+      actor: `user:${userId}`,
+      signIn: 'sso',
+    };
     await audit(ctx, actor, 'sso.login', `user:${userId}`, { email, role, protocol: row.protocol });
     return token;
   }

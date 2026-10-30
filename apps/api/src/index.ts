@@ -5,5 +5,6 @@ export * from './route.js';
 export * from './common.js';
 export * from './auth.js';
 export * from './ids.js';
-export { bootstrapOrg } from './bootstrap.js';
+export { bootstrapOrg, createOrg } from './bootstrap.js';
+export * from './login.js';
 export * from './entitlements.js';

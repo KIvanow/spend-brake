@@ -2,6 +2,12 @@
 # /v1/billing to it; Stripe sends webhooks to https://<app domain>/v1/billing/webhook.
 #   docker compose -f infra/docker-compose.yml -f infra/docker-compose.hosted.yml up -d --build
 services:
+  # Customers sign up and sign in with emailed links.
+  api:
+    environment:
+      BRAKE_HOSTED_SIGNUP: ${BRAKE_HOSTED_SIGNUP:-false}
+      BRAKE_EMAIL_SIGN_IN: ${BRAKE_EMAIL_SIGN_IN:-true}
+
   billing:
     build: { context: .., dockerfile: infra/Dockerfile, args: { APP: billing } }
     restart: unless-stopped

@@ -3,6 +3,7 @@ import { type Db, createDb, migrate } from '@spend-brake/db';
 import { keyWrapperFromEnv, redactingLoggerOptions } from '@spend-brake/shared';
 import { loadEnv } from './config.js';
 import { checkGoogleKey } from './google-check.js';
+import { queueLoginMailer } from './login.js';
 import { resyncValkey } from './resync.js';
 import { type ApiExtension, apiContext, buildApi } from './server.js';
 
@@ -23,6 +24,7 @@ export async function runApi(opts: RunApiOptions = {}): Promise<void> {
   // Postgres is the source of truth: heal Valkey (lost data, half-finished writes) before serving.
   const wrapper = await keyWrapperFromEnv(process.env);
   const synced = await resyncValkey(apiContext({ db, valkey, wrapper }));
+  const mailer = env.BRAKE_EMAIL_SIGN_IN ? queueLoginMailer(valkey) : null;
 
   const app = await buildApi({
     db,
@@ -34,6 +36,13 @@ export async function runApi(opts: RunApiOptions = {}): Promise<void> {
     ...(env.BRAKE_ACTION_SECRET ? { actionSecret: env.BRAKE_ACTION_SECRET } : {}),
     ...(env.BRAKE_SETUP_TOKEN ? { setupToken: env.BRAKE_SETUP_TOKEN } : {}),
     ...(env.GOOGLE_KEY_CHECK ? { checkGoogleKey: (key: string) => checkGoogleKey(key) } : {}),
+    ...(mailer && env.BRAKE_DASHBOARD_URL
+      ? { emailSignIn: { dashboardUrl: env.BRAKE_DASHBOARD_URL, mailer } }
+      : {}),
+    publicInfo: {
+      signup: env.BRAKE_HOSTED_SIGNUP,
+      ...(env.BRAKE_PUBLIC_PROXY_URL ? { proxyUrl: env.BRAKE_PUBLIC_PROXY_URL } : {}),
+    },
     extensions: (await opts.extensions?.(db, valkey)) ?? [],
   });
 
@@ -41,6 +50,7 @@ export async function runApi(opts: RunApiOptions = {}): Promise<void> {
     process.once(signal, () => {
       void app
         .close()
+        .then(() => mailer?.queue.close())
         .then(() => Promise.all([valkey.quit(), pool.end()]))
         .then(() => process.exit(0));
     });

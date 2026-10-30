@@ -12,12 +12,31 @@ interface Call {
   auth: string | undefined;
 }
 
+// Node 26 defines its own (empty) localStorage global, which hides jsdom's: stand one in.
+if (!window.localStorage) {
+  const data = new Map<string, string>();
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: (k: string) => data.get(k) ?? null,
+      setItem: (k: string, v: string) => void data.set(k, String(v)),
+      removeItem: (k: string) => void data.delete(k),
+      clear: () => data.clear(),
+      key: (i: number) => [...data.keys()][i] ?? null,
+      get length() {
+        return data.size;
+      },
+    },
+  });
+}
+
 let calls: Call[];
 let routes: Record<string, (c: Call) => [number, unknown]>;
 
 beforeEach(() => {
   calls = [];
   sessionStorage.clear();
+  window.localStorage.clear();
   window.location.hash = '';
   routes = {
     'GET /v1/org': (c) =>
@@ -102,7 +121,7 @@ const client = () => new QueryClient({ defaultOptions: { queries: { retry: false
 async function signIn() {
   const user = userEvent.setup();
   render(<App client={client()} />);
-  await user.type(screen.getByLabelText('Admin API token'), 'sbt_good');
+  await user.type(await screen.findByLabelText('Admin API token'), 'sbt_good');
   await user.click(screen.getByRole('button', { name: 'Sign in' }));
   await screen.findByRole('heading', { name: 'Live budget' });
   return user;
@@ -136,7 +155,7 @@ describe('dashboard', () => {
   it('rejects a bad token and keeps it out of storage', async () => {
     const user = userEvent.setup();
     render(<App client={client()} />);
-    await user.type(screen.getByLabelText('Admin API token'), 'sbt_bad');
+    await user.type(await screen.findByLabelText('Admin API token'), 'sbt_bad');
     await user.click(screen.getByRole('button', { name: 'Sign in' }));
     expect(await screen.findByText('That token is not valid.')).toBeTruthy();
     expect(sessionStorage.getItem('brake.adminToken')).toBeNull();
@@ -157,7 +176,12 @@ describe('dashboard', () => {
     const k2 = screen.getByText('key:k2', { selector: '.kills code' }).closest('li')!;
     await user.click(within(k2).getByRole('button', { name: 'Lift kill' }));
     await waitFor(() => expect(calls.some((c) => c.url === '/v1/unkill')).toBe(true));
-    expect(calls.every((c) => c.auth === 'Bearer sbt_good' || c.url === '/v1/org')).toBe(true);
+    // Only the sign-in check and the public sign-in options go without the token.
+    expect(
+      calls.every(
+        (c) => c.auth === 'Bearer sbt_good' || c.url === '/v1/org' || c.url === '/v1/auth/options',
+      ),
+    ).toBe(true);
   });
 
   it('edits caps in exact micros and rejects malformed amounts', async () => {

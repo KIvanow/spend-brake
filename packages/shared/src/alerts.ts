@@ -15,6 +15,8 @@ export const ALERT_TYPES = [
   'reconcile_drift',
   'catalog_price_change',
   'license_issued',
+  // Email sign-in and invite links: emailed to that person only, never to webhooks.
+  'login_link',
 ] as const;
 
 export type AlertType = (typeof ALERT_TYPES)[number];

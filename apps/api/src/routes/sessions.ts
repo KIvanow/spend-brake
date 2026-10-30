@@ -105,7 +105,13 @@ export function sessionRoutes(
       return {
         kind: 'key',
         key,
-        auth: { orgId: key.orgId, tokenId: key.id, role: 'viewer', actor: `key:${key.id}` },
+        auth: {
+          orgId: key.orgId,
+          tokenId: key.id,
+          role: 'viewer',
+          actor: `key:${key.id}`,
+          signIn: null,
+        },
       };
     }
     const a = await auth.authenticate(req);
