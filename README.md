@@ -12,6 +12,9 @@ only ever hold revocable virtual keys.
 
 ## 5-minute quickstart
 
+For a production install (HTTPS, published images, backups, upgrades, scaling), see
+[docs/self-hosting.md](docs/self-hosting.md).
+
 Requirements: Docker, Node 22+ (for the CLI), a Google Maps Platform key.
 
 ```sh

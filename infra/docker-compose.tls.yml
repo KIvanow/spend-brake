@@ -1,0 +1,51 @@
+# HTTPS with automatic certificates (Caddy), on top of the core stack (and the ee overlay):
+#   docker compose -f infra/docker-compose.yml [-f infra/docker-compose.ee.yml] \
+#     -f infra/docker-compose.tls.yml up -d --build --wait
+# Set BRAKE_PROXY_DOMAIN, BRAKE_APP_DOMAIN and ACME_EMAIL in infra/.env. Only Caddy publishes
+# ports; the services are reachable through it alone. Scale the proxy with --scale proxy=3.
+services:
+  caddy:
+    image: caddy:2.8.4
+    restart: unless-stopped
+    ports:
+      - '${BRAKE_HTTP_PORT:-80}:80'
+      - '${BRAKE_HTTPS_PORT:-443}:443'
+      - '${BRAKE_HTTPS_PORT:-443}:443/udp'
+    environment:
+      BRAKE_PROXY_DOMAIN: ${BRAKE_PROXY_DOMAIN:?set BRAKE_PROXY_DOMAIN in infra/.env}
+      BRAKE_APP_DOMAIN: ${BRAKE_APP_DOMAIN:?set BRAKE_APP_DOMAIN in infra/.env}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in infra/.env (certificate notices)}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    depends_on:
+      proxy: { condition: service_healthy }
+      web: { condition: service_healthy }
+      notifier: { condition: service_healthy }
+
+  proxy:
+    ports: !reset []
+    environment:
+      # Client addresses come from Caddy's X-Forwarded-For (it drops one sent by the client).
+      TRUST_PROXY: 'true'
+
+  api:
+    ports: !reset []
+    environment:
+      TRUST_PROXY: 'true'
+      BRAKE_PUBLIC_API_URL: https://${BRAKE_APP_DOMAIN}
+      BRAKE_DASHBOARD_URL: https://${BRAKE_APP_DOMAIN}
+
+  notifier:
+    ports: !reset []
+    environment:
+      BRAKE_PUBLIC_URL: https://${BRAKE_APP_DOMAIN}
+      BRAKE_DASHBOARD_URL: https://${BRAKE_APP_DOMAIN}
+
+  web:
+    ports: !reset []
+
+volumes:
+  caddydata:
+  caddyconfig:

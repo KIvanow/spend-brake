@@ -8,7 +8,7 @@ import {
   credentialContext,
   decryptSecret,
 } from '@spend-brake/shared';
-import type { Redis } from 'ioredis';
+import type { ValkeyClient as Redis } from '@spend-brake/budget';
 
 export const TWILIO_API = 'https://api.twilio.com/2010-04-01';
 export const SETTLE_GIVE_UP_MS = 48 * 3600_000;

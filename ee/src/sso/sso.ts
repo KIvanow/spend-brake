@@ -15,7 +15,7 @@ import {
 import { and, apiTokens, eq, isNull, notInArray, sql, users } from '@spend-brake/db';
 import { type Envelope, decryptSecret, encryptSecret } from '@spend-brake/shared';
 import type { FastifyInstance } from 'fastify';
-import type { Redis } from 'ioredis';
+import type { ValkeyClient as Redis } from '@spend-brake/budget';
 import * as oidc from 'openid-client';
 import { z } from 'zod';
 import { approvalsOn } from '../api/approvals.js';

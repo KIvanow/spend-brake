@@ -1,0 +1,30 @@
+# Run published images instead of building from source:
+#   BRAKE_VERSION=0.1.0 docker compose -f infra/docker-compose.yml \
+#     -f infra/docker-compose.release.yml pull
+#   ... up -d --wait
+# With the ee overlay, list it before this file and set BRAKE_API_IMAGE=ee-api and
+# BRAKE_WORKER_IMAGE=ee-worker. Pin BRAKE_VERSION in infra/.env; upgrade by changing it.
+x-registry: &registry
+  pull_policy: always
+
+services:
+  api:
+    <<: *registry
+    image: ghcr.io/kivanow/spend-brake-${BRAKE_API_IMAGE:-api}:${BRAKE_VERSION:?set BRAKE_VERSION}
+    build: !reset null
+  worker:
+    <<: *registry
+    image: ghcr.io/kivanow/spend-brake-${BRAKE_WORKER_IMAGE:-worker}:${BRAKE_VERSION:?set BRAKE_VERSION}
+    build: !reset null
+  proxy:
+    <<: *registry
+    image: ghcr.io/kivanow/spend-brake-proxy:${BRAKE_VERSION:?set BRAKE_VERSION}
+    build: !reset null
+  notifier:
+    <<: *registry
+    image: ghcr.io/kivanow/spend-brake-notifier:${BRAKE_VERSION:?set BRAKE_VERSION}
+    build: !reset null
+  web:
+    <<: *registry
+    image: ghcr.io/kivanow/spend-brake-web:${BRAKE_VERSION:?set BRAKE_VERSION}
+    build: !reset null

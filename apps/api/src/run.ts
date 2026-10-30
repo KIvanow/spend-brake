@@ -1,6 +1,6 @@
+import { type ValkeyClient, connectValkey } from '@spend-brake/budget';
 import { type Db, createDb, migrate } from '@spend-brake/db';
 import { keyWrapperFromEnv, redactingLoggerOptions } from '@spend-brake/shared';
-import { Redis } from 'ioredis';
 import { loadEnv } from './config.js';
 import { checkGoogleKey } from './google-check.js';
 import { resyncValkey } from './resync.js';
@@ -9,7 +9,7 @@ import { type ApiExtension, apiContext, buildApi } from './server.js';
 export interface RunApiOptions {
   /** Runs after the core migrations, before the server is built (e.g. more migrations). */
   prepare?: (db: Db) => Promise<void>;
-  extensions?: (db: Db, valkey: Redis) => ApiExtension[] | Promise<ApiExtension[]>;
+  extensions?: (db: Db, valkey: ValkeyClient) => ApiExtension[] | Promise<ApiExtension[]>;
 }
 
 /** Start the admin API from the environment (the `main` of the core and extended builds). */
@@ -18,7 +18,7 @@ export async function runApi(opts: RunApiOptions = {}): Promise<void> {
   const { db, pool } = createDb(env.DATABASE_URL);
   await migrate(db);
   await opts.prepare?.(db);
-  const valkey = new Redis(env.VALKEY_URL, { maxRetriesPerRequest: 2 });
+  const valkey = connectValkey(env.VALKEY_URL, { maxRetriesPerRequest: 2 });
 
   // Postgres is the source of truth: heal Valkey (lost data, half-finished writes) before serving.
   const wrapper = await keyWrapperFromEnv(process.env);

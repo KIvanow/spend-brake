@@ -1,5 +1,5 @@
 import type { ApiExtension } from '@spend-brake/api';
-import type { Redis } from 'ioredis';
+import type { ValkeyClient as Redis } from '@spend-brake/budget';
 import type { Entitlements } from '../entitlements.js';
 import { type SsoOptions, ssoRoutes } from '../sso/sso.js';
 import { approvalRoutes, holdCapRaise } from './approvals.js';

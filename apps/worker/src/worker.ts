@@ -7,7 +7,7 @@ import {
 } from '@spend-brake/catalog';
 import { type Db, ensureUsagePartitions, orgs } from '@spend-brake/db';
 import type { KeyWrapper } from '@spend-brake/shared';
-import type { Redis } from 'ioredis';
+import type { ValkeyClient as Redis } from '@spend-brake/budget';
 import { type Alert, AlertQueue } from './alerts.js';
 import { checkSources, openDriftIssue } from './drift.js';
 import { LedgerConsumer } from './ledger.js';

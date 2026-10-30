@@ -1,5 +1,5 @@
 import { type Db, usageEvents } from '@spend-brake/db';
-import type { Redis } from 'ioredis';
+import type { ValkeyClient as Redis } from '@spend-brake/budget';
 import { type Alert, alertsFor } from './alerts.js';
 
 export const LEDGER_GROUP = 'ledger';

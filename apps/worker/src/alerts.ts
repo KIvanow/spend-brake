@@ -1,6 +1,6 @@
 import { ALERT_QUEUE, type AlertType, QUEUE_PREFIX } from '@spend-brake/shared';
 import { Queue } from 'bullmq';
-import type { Redis } from 'ioredis';
+import type { ValkeyClient as Redis } from '@spend-brake/budget';
 import type { Metrics } from './metrics.js';
 
 export type { AlertType };

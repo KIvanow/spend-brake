@@ -1,7 +1,7 @@
 import { type Db, and, eq, isNull, orgs, webhookDeliveries, webhooks } from '@spend-brake/db';
 import { type AlertJob, type Envelope, type KeyWrapper, decryptSecret } from '@spend-brake/shared';
 import type { Queue } from 'bullmq';
-import type { Redis } from 'ioredis';
+import type { ValkeyClient as Redis } from '@spend-brake/budget';
 import type { Transporter } from 'nodemailer';
 import { type WebhookClient, postWebhook } from './deliver.js';
 import { type LinkOptions, type Message, buildMessage } from './message.js';

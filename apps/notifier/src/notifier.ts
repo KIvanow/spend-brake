@@ -1,6 +1,6 @@
 import { ALERT_QUEUE, type AlertJob, QUEUE_PREFIX } from '@spend-brake/shared';
 import { Queue, Worker } from 'bullmq';
-import type { Redis } from 'ioredis';
+import type { ValkeyClient as Redis } from '@spend-brake/budget';
 import {
   type DeliveryJob,
   type ProcessorDeps,

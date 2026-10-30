@@ -1,8 +1,7 @@
 // Dev helper: create an org and a virtual key in Valkey and print the key once.
 //   pnpm --filter @spend-brake/proxy seed -- --org dev --credential cred-google [--no-loop]
 import { parseArgs } from 'node:util';
-import { Registry } from '@spend-brake/budget';
-import { Redis } from 'ioredis';
+import { Registry, connectValkey } from '@spend-brake/budget';
 import { loadEnv } from './config.js';
 
 const { values } = parseArgs({
@@ -15,7 +14,7 @@ const { values } = parseArgs({
 });
 
 const env = loadEnv();
-const valkey = new Redis(env.VALKEY_URL);
+const valkey = connectValkey(env.VALKEY_URL);
 const registry = new Registry(valkey);
 await registry.putOrg({ id: values.org });
 const { token } = await registry.createKey({

@@ -12,16 +12,15 @@ import {
   catalogOverrideDir,
   withCatalogDir,
 } from '@spend-brake/catalog';
-import { Registry } from '@spend-brake/budget';
+import { Registry, connectValkey } from '@spend-brake/budget';
 import { keyWrapperFromEnv } from '@spend-brake/shared';
-import { Redis } from 'ioredis';
 import { loadEnv } from './config.js';
 import { ProxyMetrics } from './metrics.js';
 import { CachingSecretStore, EnvelopeSecretStore, StaticSecretStore } from './secrets.js';
 import { buildServer, loggerOptions } from './server.js';
 
 const env = loadEnv();
-const valkey = new Redis(env.VALKEY_URL, {
+const valkey = connectValkey(env.VALKEY_URL, {
   // Fail fast instead of queueing, so an outage turns into 503 (or fail-open) right away.
   enableOfflineQueue: false,
   maxRetriesPerRequest: 1,

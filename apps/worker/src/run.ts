@@ -1,6 +1,6 @@
+import { connectValkey } from '@spend-brake/budget';
 import { type Db, createDb, migrate } from '@spend-brake/db';
 import { keyWrapperFromEnv } from '@spend-brake/shared';
-import { Redis } from 'ioredis';
 import pino from 'pino';
 import { loadEnv } from './config.js';
 import { Metrics } from './metrics.js';
@@ -19,8 +19,8 @@ export async function runWorker(opts: RunWorkerOptions = {}): Promise<void> {
   const { db, pool } = createDb(env.DATABASE_URL);
   await migrate(db);
   await opts.prepare?.(db);
-  const valkey = new Redis(env.VALKEY_URL);
-  const queueConnection = new Redis(env.VALKEY_URL, { maxRetriesPerRequest: null });
+  const valkey = connectValkey(env.VALKEY_URL);
+  const queueConnection = connectValkey(env.VALKEY_URL, { maxRetriesPerRequest: null });
   const metrics = new Metrics();
   const server = metrics.serve(env.METRICS_PORT);
 
