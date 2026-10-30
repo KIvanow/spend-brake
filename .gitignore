@@ -7,3 +7,5 @@ coverage/
 .env.*
 !.env.example
 *.tsbuildinfo
+# License signing key mounted by docker-compose.hosted.yml.
+infra/license-key/
