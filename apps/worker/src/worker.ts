@@ -5,37 +5,42 @@ import {
   loadPlacesFields,
   loadTavilyCatalog,
 } from '@spend-brake/catalog';
-import { type Db, ensureUsagePartitions, orgs, reconciliationConfigs } from '@spend-brake/db';
-import {
-  type Envelope,
-  type KeyWrapper,
-  billingExportContext,
-  decryptSecret,
-  redactText,
-} from '@spend-brake/shared';
+import { type Db, ensureUsagePartitions, orgs } from '@spend-brake/db';
+import type { KeyWrapper } from '@spend-brake/shared';
 import type { Redis } from 'ioredis';
 import { type Alert, AlertQueue } from './alerts.js';
 import { checkSources, openDriftIssue } from './drift.js';
 import { LedgerConsumer } from './ledger.js';
 import { Metrics } from './metrics.js';
-import {
-  type BillingSource,
-  bigQuerySource,
-  daysToCheck,
-  markRun,
-  reconcileDay,
-} from './reconcile.js';
-import {
-  type SettleResult,
-  type TwilioDeps,
-  reconcileTwilio,
-  settleTwilioPending,
-} from './twilio.js';
+import { type SettleResult, type TwilioDeps, settleTwilioPending } from './twilio.js';
 
 export interface Logger {
   info(obj: object, msg?: string): void;
   warn(obj: object, msg?: string): void;
   error(obj: object, msg?: string): void;
+}
+
+export interface WorkerHost {
+  db: Db;
+  valkey: Redis;
+  engine: BudgetEngine;
+  alerts: AlertQueue;
+  metrics: Metrics;
+  log: Logger;
+  wrapper: KeyWrapper | null;
+  fetch: typeof fetch;
+  now: () => Date;
+  /** Orgs as of the last refresh. */
+  orgIds: () => string[];
+  /** Twilio calls with this worker's credentials; null without a key wrapper. */
+  twilio: TwilioDeps | null;
+}
+
+/** A loop the worker runs every `everyMs` (errors are logged, never overlap). */
+export interface WorkerJob {
+  name: string;
+  everyMs: number;
+  run(host: WorkerHost): Promise<unknown>;
 }
 
 export interface WorkerDeps {
@@ -51,15 +56,15 @@ export interface WorkerDeps {
     sweepMs?: number;
     driftMs?: number;
     orgsMs?: number;
-    reconcileMs?: number;
     settleMs?: number;
   };
   /** For calls to providers (Twilio settlement and usage); tests inject one. */
   fetch?: typeof fetch;
   fetchPage?: (url: string) => Promise<string>;
-  /** Decrypts billing-export service accounts; reconciliation is off without it. */
+  /** Decrypts provider credentials; Twilio settlement is off without it. */
   wrapper?: KeyWrapper | null;
-  billingSource?: (table: string, serviceAccountJson: string) => Promise<BillingSource>;
+  /** More loops (separately licensed features plug in here). */
+  jobs?: WorkerJob[];
   github?: { repo: string; token: string };
   now?: () => Date;
 }
@@ -100,6 +105,23 @@ export class Worker {
   }
 
   private now = () => this.deps.now?.() ?? new Date();
+
+  /** What an extra job gets to work with. */
+  host(): WorkerHost {
+    return {
+      db: this.deps.db,
+      valkey: this.deps.valkey,
+      engine: this.engine,
+      alerts: this.alerts,
+      metrics: this.metrics,
+      log: this.deps.log,
+      wrapper: this.deps.wrapper ?? null,
+      fetch: this.deps.fetch ?? fetch,
+      now: this.now,
+      orgIds: () => this.orgIds,
+      twilio: this.deps.wrapper ? this.twilioDeps(this.deps.wrapper) : null,
+    };
+  }
 
   async refreshOrgs(): Promise<string[]> {
     this.orgIds = (await this.deps.db.select({ id: orgs.id }).from(orgs)).map((o) => o.id);
@@ -180,15 +202,7 @@ export class Worker {
     return settleTwilioPending(this.twilioDeps(this.deps.wrapper), this.orgIds);
   }
 
-  /** Twilio Usage Records vs the ledger for the last three UTC days. */
-  async reconcileTwilioOnce(): Promise<number> {
-    if (!this.deps.wrapper) return 0;
-    const alerts = await reconcileTwilio(this.twilioDeps(this.deps.wrapper));
-    await this.alerts.add(alerts);
-    return alerts.length;
-  }
-
-  private twilioDeps(wrapper: KeyWrapper): TwilioDeps {
+  twilioDeps(wrapper: KeyWrapper): TwilioDeps {
     return {
       db: this.deps.db,
       engine: this.engine,
@@ -199,49 +213,6 @@ export class Worker {
       now: this.now,
       log: this.deps.log,
     };
-  }
-
-  /**
-   * Compare the ledger with each configured org's Google billing export for the last few billing
-   * days (the export lags); upserts results, alerts on drift above 5%.
-   */
-  async reconcileOnce(): Promise<number> {
-    if (!this.deps.wrapper) return 0;
-    const catalog = loadGoogleMapsCatalog();
-    const configs = await this.deps.db.select().from(reconciliationConfigs);
-    let checked = 0;
-    for (const cfg of configs) {
-      let saJson = '';
-      try {
-        saJson = await decryptSecret(
-          this.deps.wrapper,
-          cfg.envelope as Envelope,
-          billingExportContext(cfg.orgId),
-        );
-        const source = await (this.deps.billingSource ?? bigQuerySource)(cfg.exportTable, saJson);
-        const alerts: Alert[] = [];
-        let latest: number | null = null;
-        for (const day of daysToCheck(this.now(), catalog.billingTimeZone)) {
-          const r = await reconcileDay(this.deps.db, source, catalog, cfg, day, this.now());
-          latest ??= r.total.driftRatio;
-          if (r.alert) alerts.push(r.alert);
-          checked++;
-        }
-        if (latest !== null) this.metrics.reconcileDrift.set({ org: cfg.orgId }, latest);
-        await this.alerts.add(alerts);
-        await markRun(this.deps.db, cfg.orgId, this.now(), null);
-      } catch (err) {
-        // Errors are stored and logged: keep the service account's key out of them.
-        const secrets = saJson
-          ? [saJson, (JSON.parse(saJson) as { private_key?: string }).private_key ?? '']
-          : [];
-        const message = redactText((err as Error).message, secrets).slice(0, 500);
-        this.deps.log.warn({ orgId: cfg.orgId, err: message }, 'reconciliation failed');
-        await markRun(this.deps.db, cfg.orgId, this.now(), message);
-      }
-    }
-    this.metrics.lastLoop.set({ loop: 'reconcile' }, Date.now() / 1000);
-    return checked;
   }
 
   private every(ms: number, name: string, fn: () => Promise<unknown>): void {
@@ -273,9 +244,10 @@ export class Worker {
     this.every(i.sweepMs ?? 10_000, 'sweep', () => this.sweepOnce());
     this.every(6 * 3600_000, 'partitions', () => this.partitionsOnce());
     this.every(i.driftMs ?? 24 * 3600_000, 'drift', () => this.driftOnce());
-    this.every(i.reconcileMs ?? 6 * 3600_000, 'reconcile', () => this.reconcileOnce());
     this.every(i.settleMs ?? 60_000, 'twilio-settle', () => this.settleTwilioOnce());
-    this.every(i.reconcileMs ?? 6 * 3600_000, 'twilio-reconcile', () => this.reconcileTwilioOnce());
+    for (const job of this.deps.jobs ?? []) {
+      this.every(job.everyMs, job.name, () => job.run(this.host()));
+    }
     this.deps.log.info({ workerId: this.deps.workerId }, 'worker started');
   }
 

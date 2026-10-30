@@ -354,3 +354,36 @@ describe('brake search', () => {
     expect(tooMany.f.calls).toHaveLength(0);
   });
 });
+
+describe('brake license', () => {
+  it('installs a license file and shows the status', async () => {
+    const { mkdtempSync, writeFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const file = join(mkdtempSync(join(tmpdir(), 'lic-')), 'acme.license');
+    writeFileSync(file, '{"format":"spend-brake-license/1","payload":"e30","signature":"AA"}\n');
+    const status = {
+      status: 'active',
+      readOnlyAt: null,
+      license: {
+        edition: 'business',
+        org: 'acme',
+        expiresAt: '2027-01-01T00:00:00Z',
+        features: ['sso'],
+      },
+    };
+    const f = fake({ ...ENV, BRAKE_ADMIN_TOKEN: `sbt_${'a'.repeat(32)}` }, () => ({
+      status: 201,
+      body: status,
+    }));
+    expect(await run(['license', 'install', file], f.io)).toBe(0);
+    expect(f.calls[0]).toMatchObject({ url: 'http://api/v1/license', method: 'POST' });
+    expect(JSON.parse(f.calls[0]!.body!)).toEqual({
+      license: '{"format":"spend-brake-license/1","payload":"e30","signature":"AA"}\n',
+    });
+    expect(await run(['license', 'status', '--pretty'], f.io)).toBe(0);
+    expect(f.out.at(-1)).toMatch(/^status +edition +org/);
+    expect(f.out.at(-1)).toContain('active  business  acme');
+    expect(await run(['license', 'install', '/no/such/file'], f.io)).toBe(EXIT.usage);
+  });
+});

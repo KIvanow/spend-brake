@@ -252,10 +252,53 @@ export function adminCommands(program: Command, io: Io, done: (code: number) => 
       },
     );
 
+  // --- license -------------------------------------------------------------------------------
+  const lic = program
+    .command('license')
+    .description('Business and Enterprise license (verified offline by the API)');
+  leaf(lic, 'install')
+    .description('Install a license file (owner token of the licensed org)')
+    .argument('<file>')
+    .action(async (file: string, _o: unknown, cmd: Command) => {
+      const { readFileSync } = await import('node:fs');
+      let text: string;
+      try {
+        text = readFileSync(file, 'utf8');
+      } catch {
+        throw new CliError(`cannot read ${file}`, EXIT.usage);
+      }
+      print(io, await apiCall(io, 'POST', '/v1/license', { license: text }), pretty(cmd));
+      done(EXIT.ok);
+    });
+  leaf(lic, 'status').action(async (_o: unknown, cmd: Command) => {
+    const r = await apiCall<{
+      status: string;
+      readOnlyAt: string | null;
+      license: { edition: string; org: string; expiresAt: string; features: string[] } | null;
+    }>(io, 'GET', '/v1/license');
+    print(
+      io,
+      r,
+      pretty(cmd),
+      [
+        {
+          status: r.status,
+          edition: r.license?.edition ?? '',
+          org: r.license?.org ?? '',
+          expires: r.license?.expiresAt ?? '',
+          readOnlyAt: r.readOnlyAt ?? '',
+          features: r.license?.features.join(',') ?? '',
+        },
+      ],
+      ['status', 'edition', 'org', 'expires', 'readOnlyAt', 'features'],
+    );
+    done(EXIT.ok);
+  });
+
   // --- reconciliation ------------------------------------------------------------------------
   const rec = program
     .command('reconcile')
-    .description("Compare the ledger with Google's billing export");
+    .description("Compare the ledger with Google's billing export (Business and Enterprise)");
   leaf(rec, 'status').action(async (_o: unknown, cmd: Command) => {
     print(io, await apiCall(io, 'GET', '/v1/reconciliation'), pretty(cmd));
     done(EXIT.ok);

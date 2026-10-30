@@ -25,14 +25,26 @@ const MIGRATION_LOCK = 7_212_024;
  * lock makes them take turns, so two fresh processes never race to create the same tables.
  */
 export async function migrate(db: Db): Promise<void> {
+  await migrateFolder(db, {
+    folder: fileURLToPath(new URL('../drizzle', import.meta.url)),
+    lock: MIGRATION_LOCK,
+  });
+}
+
+/** Apply a folder of drizzle migrations under an advisory lock, tracked in `table`. */
+export async function migrateFolder(
+  db: Db,
+  opts: { folder: string; lock: number; table?: string },
+): Promise<void> {
   const lock = await db.$client.connect();
   try {
-    await lock.query('select pg_advisory_lock($1)', [MIGRATION_LOCK]);
+    await lock.query('select pg_advisory_lock($1)', [opts.lock]);
     await runMigrations(db, {
-      migrationsFolder: fileURLToPath(new URL('../drizzle', import.meta.url)),
+      migrationsFolder: opts.folder,
+      ...(opts.table ? { migrationsTable: opts.table } : {}),
     });
   } finally {
-    await lock.query('select pg_advisory_unlock($1)', [MIGRATION_LOCK]).catch(() => undefined);
+    await lock.query('select pg_advisory_unlock($1)', [opts.lock]).catch(() => undefined);
     lock.release();
   }
 }
@@ -52,4 +64,20 @@ export async function ensureUsagePartitions(db: Db, now = new Date()): Promise<s
 
 // Apps import query helpers from here so there is one drizzle-orm instance (a second copy with
 // different optional peers has incompatible types).
-export { type SQL, and, asc, desc, eq, gte, inArray, isNull, like, lt, or, sql } from 'drizzle-orm';
+export {
+  type SQL,
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gt,
+  gte,
+  inArray,
+  isNull,
+  like,
+  lt,
+  ne,
+  or,
+  sql,
+} from 'drizzle-orm';

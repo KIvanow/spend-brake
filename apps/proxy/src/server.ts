@@ -72,6 +72,8 @@ declare module 'fastify' {
     /** Record fail-open spend in Valkey now; returns how many entries were written. */
     brakeReplayFailOpen(): Promise<number>;
     brakeMetrics: ProxyMetrics;
+    /** Swap in adapters built from reloaded catalogs (same prefixes and upstreams). */
+    brakeSetAdapters(adapters: ProviderAdapter[]): void;
   }
 }
 
@@ -153,9 +155,10 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
   const timeout = deps.upstreamTimeoutMs ?? 30_000;
   const maxBuffered = deps.maxBufferedBytes ?? 32 * 1024 * 1024;
 
-  const routes: Route[] = deps.adapters.flatMap((adapter) =>
-    adapter.upstreams.map((upstream) => ({ adapter, upstream })),
-  );
+  const routesOf = (adapters: ProviderAdapter[]): Route[] =>
+    adapters.flatMap((adapter) => adapter.upstreams.map((upstream) => ({ adapter, upstream })));
+  // Replaced as a whole when catalogs are reloaded; a request keeps the route it matched.
+  let routes = routesOf(deps.adapters);
 
   const app = Fastify({
     logger: deps.logger ?? false,
@@ -218,6 +221,9 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
 
   app.decorate('brakeReplayFailOpen', replayFailOpen);
   app.decorate('brakeMetrics', metrics);
+  app.decorate('brakeSetAdapters', (adapters: ProviderAdapter[]) => {
+    routes = routesOf(adapters);
+  });
 
   app.decorate('brakeDrain', async () => {
     while (pending.size > 0) await Promise.allSettled([...pending]);

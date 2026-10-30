@@ -20,6 +20,18 @@ export function setToken(token: string | null): void {
   }
 }
 
+/**
+ * Single sign-on ends with the token in the URL fragment (`#sso_token=...`), which never reaches
+ * a server. Keep it like a pasted token and drop it from the address bar and history.
+ */
+export function takeSsoToken(location: Location = window.location): boolean {
+  const m = /^#sso_token=(sbt_[0-9A-Za-z]{32})$/.exec(location.hash);
+  if (!m) return false;
+  setToken(m[1]!);
+  window.history.replaceState(null, '', `${location.pathname}${location.search}#/`);
+  return true;
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,

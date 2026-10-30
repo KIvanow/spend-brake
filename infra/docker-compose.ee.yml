@@ -1,0 +1,36 @@
+# Business / Enterprise: the API and worker with ee/ features, on top of the core stack.
+#   docker compose -f infra/docker-compose.yml -f infra/docker-compose.ee.yml up -d --build --wait
+# Then install the license: brake license install acme.license
+# Without a license this runs exactly like the core stack.
+x-catalog: &catalog # Verified catalog updates land here; the proxy reloads prices from it.
+  BRAKE_CATALOG_DIR: /catalog
+
+services:
+  api:
+    build: { context: .., dockerfile: infra/Dockerfile, args: { APP: ee, START: start:api } }
+    environment:
+      <<: *catalog
+      # Single sign-on: where browsers reach this API and the dashboard.
+      BRAKE_PUBLIC_API_URL: ${BRAKE_PUBLIC_API_URL:-}
+      BRAKE_DASHBOARD_URL: ${BRAKE_DASHBOARD_URL:-}
+    volumes: ['catalog:/catalog:ro']
+
+  worker:
+    build: { context: .., dockerfile: infra/Dockerfile, args: { APP: ee, START: start:worker } }
+    environment:
+      <<: *catalog
+      BRAKE_CATALOG_FEED_URL: ${BRAKE_CATALOG_FEED_URL:-}
+      BRAKE_AUDIT_FILE: ${BRAKE_AUDIT_FILE:-}
+      BRAKE_AUDIT_S3_BUCKET: ${BRAKE_AUDIT_S3_BUCKET:-}
+      BRAKE_AUDIT_S3_PREFIX: ${BRAKE_AUDIT_S3_PREFIX:-}
+      BRAKE_AUDIT_S3_REGION: ${BRAKE_AUDIT_S3_REGION:-}
+      BRAKE_AUDIT_SYSLOG: ${BRAKE_AUDIT_SYSLOG:-}
+    volumes: ['catalog:/catalog']
+
+  proxy:
+    environment:
+      <<: *catalog
+    volumes: ['catalog:/catalog:ro']
+
+volumes:
+  catalog:

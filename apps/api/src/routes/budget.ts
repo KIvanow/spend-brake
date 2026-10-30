@@ -8,13 +8,19 @@ import {
   killLabel,
   micros,
   n,
+  raisesCap,
   scopeLabel,
   toKillTarget,
   toScope,
+  writeCap,
 } from '../common.js';
 import { type Router, notFound } from '../route.js';
 
 const capValues = z.object({ hard: micros.nullable(), soft: micros.nullable().optional() });
+
+const pendingView = z
+  .object({ scope: z.string(), kind: z.enum(['d', 'm']), approvalId: z.string() })
+  .openapi('PendingCapChange');
 
 const capView = z
   .object({
@@ -43,10 +49,11 @@ export function budgetRoutes(r: Router, ctx: Ctx): void {
     body: z
       .object({ day: capValues.optional(), month: capValues.optional() })
       .refine((b) => b.day || b.month, 'Give day and/or month.'),
-    response: z.object({ items: z.array(capView) }),
+    response: z.object({ items: z.array(capView), pending: z.array(pendingView).optional() }),
     handler: async ({ auth, params, body }) => {
       const scope = toScope(params.scope);
       const items = [];
+      const pending = [];
       for (const [kind, values] of [
         ['d', body.day],
         ['m', body.month],
@@ -54,21 +61,24 @@ export function budgetRoutes(r: Router, ctx: Ctx): void {
         if (!values) continue;
         const hard = values.hard;
         const soft = values.soft ?? null;
+        const current = await ctx.engine.getCap(auth.orgId, scope, kind);
+        if (ctx.hooks.holdCapRaise && raisesCap(current?.hard, hard)) {
+          const approvalId = await ctx.hooks.holdCapRaise({
+            auth,
+            orgId: auth.orgId,
+            scope: params.scope,
+            kind,
+            from: { hard: current?.hard ?? null, soft: current?.soft ?? null },
+            to: { hard, soft },
+            via: 'api',
+          });
+          if (approvalId) {
+            pending.push({ scope: params.scope, kind, approvalId });
+            continue;
+          }
+        }
         // Valkey first: enforcement changes on the next request.
-        const version = await ctx.engine.setCap(auth.orgId, scope, kind, { hard, soft });
-        const row = {
-          orgId: auth.orgId,
-          scope: params.scope,
-          kind,
-          hardMicros: hard,
-          softMicros: soft,
-          version,
-          updatedAt: ctx.now(),
-        };
-        await ctx.db
-          .insert(caps)
-          .values(row)
-          .onConflictDoUpdate({ target: [caps.orgId, caps.scope, caps.kind], set: row });
+        const version = await writeCap(ctx, auth.orgId, params.scope, kind, { hard, soft });
         await audit(ctx, auth, 'cap.set', `${params.scope}:${kind}`, {
           hard: n(hard),
           soft: n(soft),
@@ -76,7 +86,7 @@ export function budgetRoutes(r: Router, ctx: Ctx): void {
         });
         items.push({ scope: params.scope, kind, hard: n(hard), soft: n(soft), version });
       }
-      return { items };
+      return pending.length ? { items, pending } : { items };
     },
   });
 
@@ -109,9 +119,33 @@ export function budgetRoutes(r: Router, ctx: Ctx): void {
     summary: 'Remove the caps of a scope',
     params: z.object({ scope: scopeLabel }),
     query: z.object({ kind: z.enum(['d', 'm']).optional() }),
-    response: z.object({ scope: z.string(), deleted: z.array(z.enum(['d', 'm'])) }),
+    response: z.object({
+      scope: z.string(),
+      deleted: z.array(z.enum(['d', 'm'])),
+      pending: z.array(pendingView).optional(),
+    }),
     handler: async ({ auth, params, query }) => {
-      const kinds = query.kind ? [query.kind] : (['d', 'm'] as const);
+      const kinds: ('d' | 'm')[] = [];
+      const pending = [];
+      for (const kind of query.kind ? [query.kind] : (['d', 'm'] as const)) {
+        const current = await ctx.engine.getCap(auth.orgId, toScope(params.scope), kind);
+        if (ctx.hooks.holdCapRaise && raisesCap(current?.hard, null)) {
+          const approvalId = await ctx.hooks.holdCapRaise({
+            auth,
+            orgId: auth.orgId,
+            scope: params.scope,
+            kind,
+            from: { hard: current?.hard ?? null, soft: current?.soft ?? null },
+            to: null,
+            via: 'api',
+          });
+          if (approvalId) {
+            pending.push({ scope: params.scope, kind, approvalId });
+            continue;
+          }
+        }
+        kinds.push(kind);
+      }
       for (const kind of kinds) {
         await ctx.engine.deleteCap(auth.orgId, toScope(params.scope), kind);
         await ctx.db
@@ -120,8 +154,10 @@ export function budgetRoutes(r: Router, ctx: Ctx): void {
             and(eq(caps.orgId, auth.orgId), eq(caps.scope, params.scope), eq(caps.kind, kind)),
           );
       }
-      await audit(ctx, auth, 'cap.delete', params.scope, { kinds });
-      return { scope: params.scope, deleted: [...kinds] };
+      if (kinds.length) await audit(ctx, auth, 'cap.delete', params.scope, { kinds });
+      return pending.length
+        ? { scope: params.scope, deleted: kinds, pending }
+        : { scope: params.scope, deleted: kinds };
     },
   });
 

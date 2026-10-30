@@ -49,7 +49,9 @@ export class Authenticator {
         .set({ lastUsedAt: this.now() })
         .where(eq(apiTokens.id, row.id))
         .catch(() => undefined);
-      return { orgId: row.orgId, tokenId: row.id, role: row.role, actor: `token:${row.id}` };
+      // Tokens issued to a person (single sign-on) act as that person, whichever token it is.
+      const actor = row.userId ? `user:${row.userId}` : `token:${row.id}`;
+      return { orgId: row.orgId, tokenId: row.id, role: row.role, actor };
     });
   }
 

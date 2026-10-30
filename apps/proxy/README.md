@@ -85,16 +85,17 @@ Metrics (`:9465/metrics`): `brake_requests_total{provider,sku,outcome}`,
 
 ## Configuration (env)
 
-| Variable                   | Default                   |                                             |
-| -------------------------- | ------------------------- | ------------------------------------------- |
-| `PORT`, `HOST`             | `8080`, `0.0.0.0`         |                                             |
-| `VALKEY_URL`               | `redis://localhost:16379` |                                             |
-| `UPSTREAM_TIMEOUT_MS`      | `30000`                   |                                             |
-| `TRUST_PROXY`              | `false`                   | Use `X-Forwarded-For` for IP allow-lists    |
-| `BRAKE_DEV_SECRETS`        |                           | Dev only: `{"<credentialId>": "<secret>"}`  |
-| `BRAKE_UPSTREAM_OVERRIDES` |                           | Dev/test only: `{"<origin>": "<base url>"}` |
-| `BRAKE_SERPAPI_PLAN`       | `starter`                 | SerpApi plan whose per-search price applies |
-| `BRAKE_GENERIC_PROVIDERS`  |                           | JSON array of generic adapter configs       |
+| Variable                   | Default                   |                                                       |
+| -------------------------- | ------------------------- | ----------------------------------------------------- |
+| `PORT`, `HOST`             | `8080`, `0.0.0.0`         |                                                       |
+| `VALKEY_URL`               | `redis://localhost:16379` |                                                       |
+| `UPSTREAM_TIMEOUT_MS`      | `30000`                   |                                                       |
+| `TRUST_PROXY`              | `false`                   | Use `X-Forwarded-For` for IP allow-lists              |
+| `BRAKE_DEV_SECRETS`        |                           | Dev only: `{"<credentialId>": "<secret>"}`            |
+| `BRAKE_UPSTREAM_OVERRIDES` |                           | Dev/test only: `{"<origin>": "<base url>"}`           |
+| `BRAKE_CATALOG_DIR`        |                           | Updated catalog data (`current/`); checked every 30 s |
+| `BRAKE_SERPAPI_PLAN`       | `starter`                 | SerpApi plan whose per-search price applies           |
+| `BRAKE_GENERIC_PROVIDERS`  |                           | JSON array of generic adapter configs                 |
 
 Provider credentials come from `BRAKE_DEV_SECRETS` until Phase 4 adds encrypted storage. Keys and
 orgs are created with `pnpm --filter @spend-brake/proxy seed` until the admin API exists.

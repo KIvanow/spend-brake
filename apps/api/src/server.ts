@@ -4,7 +4,7 @@ import type { Db } from '@spend-brake/db';
 import { type KeyWrapper, redactUrl } from '@spend-brake/shared';
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
 import { Authenticator } from './auth.js';
-import type { Ctx } from './common.js';
+import type { ApiHooks, Ctx } from './common.js';
 import { ApiError, Router } from './route.js';
 import { actionRoutes } from './routes/actions.js';
 import { adminRoutes } from './routes/admin.js';
@@ -15,7 +15,6 @@ import { ledgerRoutes } from './routes/ledger.js';
 import type { KeyCheck } from './google-check.js';
 import { estimateRoutes } from './routes/estimates.js';
 import { meRoutes } from './routes/me.js';
-import { reconciliationRoutes } from './routes/reconciliation.js';
 import { sessionRoutes } from './routes/sessions.js';
 import { setupRoutes } from './routes/setup.js';
 import { webhookRoutes } from './routes/webhooks.js';
@@ -37,10 +36,22 @@ export interface ApiDeps {
   setupToken?: string;
   /** Check new Google keys' restrictions (calls Google); off unless given. */
   checkGoogleKey?: (key: string) => Promise<KeyCheck>;
+  /** Add routes and hooks after the core ones (separately licensed features plug in here). */
+  extensions?: ApiExtension[];
 }
 
-export function apiContext(deps: ApiDeps): Ctx {
+export interface ApiHost {
+  app: FastifyInstance;
+  router: Router;
+  ctx: Ctx;
+  authenticator: Authenticator;
+}
+
+export type ApiExtension = (host: ApiHost) => void | Promise<void>;
+
+export function apiContext(deps: ApiDeps, hooks: ApiHooks = {}): Ctx {
   return {
+    hooks,
     db: deps.db,
     valkey: deps.valkey,
     engine: new BudgetEngine(deps.valkey),
@@ -97,12 +108,17 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
 
   const perToken = deps.rateLimitPerMinute ?? 600;
   const authenticator = new Authenticator(deps.db, now, deps.authCacheMs);
-  const router = new Router(app, authenticator, async (auth) => {
-    const key = `bk:rl:api:tok:${auth.tokenId}:${Math.floor(now().getTime() / 60_000)}`;
-    const n = await deps.valkey.incr(key);
-    if (n === 1) await deps.valkey.expire(key, 120);
-    return n <= perToken;
-  });
+  const router = new Router(
+    app,
+    authenticator,
+    async (auth) => {
+      const key = `bk:rl:api:tok:${auth.tokenId}:${Math.floor(now().getTime() / 60_000)}`;
+      const n = await deps.valkey.incr(key);
+      if (n === 1) await deps.valkey.expire(key, 120);
+      return n <= perToken;
+    },
+    ctx.hooks,
+  );
   credentialRoutes(router, ctx);
   keyRoutes(router, ctx);
   budgetRoutes(router, ctx);
@@ -114,7 +130,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   setupRoutes(app, router, ctx, deps.setupToken);
   meRoutes(app, router, ctx);
   estimateRoutes(router, ctx);
-  reconciliationRoutes(router, ctx);
+  for (const extend of deps.extensions ?? []) await extend({ app, router, ctx, authenticator });
 
   const spec = router.document();
   app.get('/v1/openapi.json', { config: { rateLimit: false } }, () => spec);

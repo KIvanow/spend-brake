@@ -52,6 +52,13 @@ provider spends from the one session budget. Each `maps` command uses the cheape
 is one JSON object per call (`ok`, `status`, `costMicros`, `cost`, `remainingMicros`,
 `requestId`, `data`); `--pretty` prints a summary line and indented data instead.
 
+## License (Business / Enterprise)
+
+```sh
+brake license install acme.license   # owner token of the licensed org
+brake license status --pretty
+```
+
 ## Exit codes
 
 | Code | Meaning                                                                |

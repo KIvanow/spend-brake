@@ -13,6 +13,7 @@ export const ALERT_TYPES = [
   'reservations_expired',
   'catalog_drift',
   'reconcile_drift',
+  'catalog_price_change',
 ] as const;
 
 export type AlertType = (typeof ALERT_TYPES)[number];
@@ -20,7 +21,7 @@ export type AlertType = (typeof ALERT_TYPES)[number];
 /** Job data on the alerts queue. Fields beyond these depend on the type. */
 export interface AlertJob {
   type: AlertType;
-  /** null for operator alerts (catalog drift). */
+  /** null for operator alerts (catalog drift, catalog price changes). */
   orgId: string | null;
   scope?: string;
   window?: string;

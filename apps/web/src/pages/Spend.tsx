@@ -69,9 +69,11 @@ export function Spend() {
       )}
       <h3>Compared with Google's bill</h3>
       <p className={rec.data?.lastError ? 'error' : 'muted'}>
-        {rec.data?.lastError
-          ? `Last check failed: ${rec.data.lastError}`
-          : (rec.data?.message ?? '')}
+        {rec.isError
+          ? 'Comparing spend with the bill is part of the Business and Enterprise editions.'
+          : rec.data?.lastError
+            ? `Last check failed: ${rec.data.lastError}`
+            : (rec.data?.message ?? '')}
       </p>
       {rec.data?.configured && (
         <Table

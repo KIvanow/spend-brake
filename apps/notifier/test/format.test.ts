@@ -116,6 +116,23 @@ describe('alert messages', () => {
     ]);
   });
 
+  it('lists catalog price changes from the verified feed', () => {
+    const m = buildMessage(
+      'a',
+      {
+        type: 'catalog_price_change',
+        orgId: null,
+        version: '2026-11-01.1',
+        changes: [
+          { file: 'mapbox/catalog.yaml', sku: 'mapbox.directions', from: '2.00', to: '2.40' },
+        ],
+      },
+      links,
+    );
+    expect(m.title).toBe('Catalog update 2026-11-01.1 changed 1 prices');
+    expect(m.text).toContain('mapbox.directions: 2.00 -> 2.40 per 1,000');
+  });
+
   it('maps scopes to the kill target that stops them', () => {
     expect(killTargetFor('key:k1')).toBe('key:k1');
     expect(killTargetFor('sess:s1')).toBe('sess:s1');

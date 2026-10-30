@@ -3,7 +3,7 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../src/App.js';
-import { toMicros, usd } from '../src/api.js';
+import { getToken, setToken, takeSsoToken, toMicros, usd } from '../src/api.js';
 
 interface Call {
   method: string;
@@ -107,6 +107,20 @@ async function signIn() {
   await screen.findByRole('heading', { name: 'Live budget' });
   return user;
 }
+
+describe('single sign-on', () => {
+  it('keeps a token from the fragment and clears it from the address bar', () => {
+    setToken(null);
+    const token = `sbt_${'A'.repeat(32)}`;
+    window.history.replaceState(null, '', `/#sso_token=${token}`);
+    expect(takeSsoToken()).toBe(true);
+    expect(getToken()).toBe(token);
+    expect(window.location.hash).toBe('#/');
+    window.history.replaceState(null, '', '/#sso_token=not-a-token');
+    expect(takeSsoToken()).toBe(false);
+    setToken(null);
+  });
+});
 
 describe('money helpers', () => {
   it('parses dollars exactly and formats micros', () => {

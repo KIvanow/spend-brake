@@ -11,7 +11,7 @@ import {
   sql,
   usageEvents,
 } from '@spend-brake/db';
-import type { Alert } from './alerts.js';
+import type { Alert } from '@spend-brake/worker';
 
 export interface BillingRow {
   skuId: string;

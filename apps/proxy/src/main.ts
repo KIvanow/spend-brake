@@ -9,6 +9,7 @@ import {
   SerpApiAdapter,
   TavilyAdapter,
   TwilioAdapter,
+  catalogOverrideDir,
 } from '@spend-brake/catalog';
 import { Registry } from '@spend-brake/budget';
 import { keyWrapperFromEnv } from '@spend-brake/shared';
@@ -28,7 +29,8 @@ const valkey = new Redis(env.VALKEY_URL, {
   // most of the per-request write syscalls.
   enableAutoPipelining: true,
 });
-const adapters: ProviderAdapter[] = [
+// Built again when an updated catalog is installed (BRAKE_CATALOG_DIR).
+const makeAdapters = (): ProviderAdapter[] => [
   new GoogleMapsAdapter(),
   new TwilioAdapter(),
   new MapboxAdapter(),
@@ -41,6 +43,8 @@ const adapters: ProviderAdapter[] = [
     (cfg) => new GenericAdapter(cfg as ConstructorParameters<typeof GenericAdapter>[0]),
   ),
 ];
+let catalogVersion = catalogOverrideDir();
+const adapters = makeAdapters();
 
 // Encrypted credentials from the admin API; BRAKE_DEV_SECRETS only when no master key is set.
 const wrapper = await keyWrapperFromEnv(process.env);
@@ -62,8 +66,26 @@ const app = buildServer({
   ...(env.BRAKE_UPSTREAM_OVERRIDES ? { upstreamOverrides: env.BRAKE_UPSTREAM_OVERRIDES } : {}),
 });
 
+// An installed catalog update switches `current` to a new directory: rebuild the adapters from
+// it. A catalog that fails to load keeps the previous adapters serving.
+const catalogTimer = setInterval(() => {
+  let next: string | null;
+  try {
+    next = catalogOverrideDir();
+    if (next === catalogVersion) return;
+    app.brakeSetAdapters(makeAdapters());
+  } catch (err) {
+    app.log.error({ err: (err as Error).message }, 'catalog reload failed; keeping current prices');
+    return;
+  }
+  catalogVersion = next;
+  app.log.info({ catalog: next ?? 'bundled' }, 'catalog reloaded');
+}, 30_000);
+catalogTimer.unref();
+
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, () => {
+    clearInterval(catalogTimer);
     metricsServer.close();
     void app
       .close()

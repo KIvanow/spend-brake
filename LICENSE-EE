@@ -1,0 +1,39 @@
+Spend Brake Enterprise Edition (EE) License
+
+Copyright (c) 2026 Kristiyan Ivanov. All rights reserved.
+
+This license applies to everything in the `ee/` directory of this repository ("the EE
+Software"). Everything outside `ee/` is licensed under the Apache License 2.0 (see LICENSE).
+
+1. Production use. You may use the EE Software in production only while you hold a valid,
+   paid Spend Brake Business or Enterprise license key ("License Key") that covers the number
+   of organizations you run, and only for the features and term that License Key names.
+
+2. Development and testing. Without a License Key you may copy, modify and run the EE Software
+   for development, testing and evaluation, but not in production.
+
+3. Modifications. You may modify the EE Software and keep modified copies, provided that the
+   modified copies are used only as permitted in sections 1 and 2. You may not remove, alter or
+   work around the license-key checks, nor change the public keys used to verify License Keys
+   or catalog updates, in order to use features without a valid License Key.
+
+4. Distribution. You may not distribute, sublicense, sell or offer the EE Software (modified or
+   not) as a hosted service to third parties, except as a part of this repository as published
+   by the copyright holder.
+
+5. Third-party components. Third-party components used by the EE Software are licensed under
+   their own terms, which this license does not change.
+
+6. Contributions. Contributions to `ee/` are accepted under the Developer Certificate of
+   Origin (see CONTRIBUTING.md) and are licensed to the copyright holder under these terms.
+
+7. Termination. This license ends automatically if you breach it. Section 8 survives.
+
+8. No warranty; limitation of liability. THE EE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY
+   OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+   PARTICULAR PURPOSE AND NON-INFRINGEMENT. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR
+   ANY CLAIM, DAMAGES OR OTHER LIABILITY ARISING FROM, OUT OF OR IN CONNECTION WITH THE EE
+   SOFTWARE OR ITS USE.
+
+An expired License Key never stops the Apache-licensed core: the proxy, budget engine, caps,
+kill switch and CLI keep working with or without one.

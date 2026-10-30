@@ -1,0 +1,10 @@
+Spend Brake
+Copyright 2026 Kristiyan Ivanov
+
+Everything outside the ee/ directory is licensed under the Apache License, Version 2.0
+(LICENSE). The ee/ directory is licensed under the Spend Brake Enterprise Edition License
+(LICENSE-EE).
+
+Price catalog data in packages/catalog/data is transcribed from each provider's public pricing
+pages, cited by URL and verification date in each file. Provider names are trademarks of their
+owners and are used only to identify the APIs Spend Brake works with.

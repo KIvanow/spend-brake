@@ -21,8 +21,9 @@ import {
   daysToCheck,
   reconcileDay,
   validExportTable,
-} from '../src/reconcile.js';
-import { Worker } from '../src/worker.js';
+} from '../src/reconciliation/google.js';
+import { reconcileGoogle } from '../src/reconciliation/jobs.js';
+import { Worker } from '@spend-brake/worker';
 
 const catalog = loadGoogleMapsCatalog();
 const SA = JSON.stringify({
@@ -228,19 +229,19 @@ describe('worker reconciliation loop', () => {
       log: { info() {}, warn() {}, error() {} },
       wrapper,
       now: () => new Date('2026-10-29T20:00:00Z'),
-      billingSource: (table, sa) => {
-        seen.push({ table, sa });
-        if (seen.length === 2)
-          return Promise.reject(
-            new Error('permission denied for PRIVATE-KEY-MATERIAL? no: bigquery.jobs.create'),
-          );
-        return Promise.resolve(
-          fixed([{ skuId: 'BAC8-4E68-E261', currency: 'USD', costMicros: 3_000_000n }]),
-        );
-      },
     });
     await worker.alerts.queue.obliterate({ force: true });
-    expect(await worker.reconcileOnce()).toBe(3);
+    const checked = await reconcileGoogle(worker.host(), (table, sa) => {
+      seen.push({ table, sa });
+      if (seen.length === 2)
+        return Promise.reject(
+          new Error('permission denied for PRIVATE-KEY-MATERIAL? no: bigquery.jobs.create'),
+        );
+      return Promise.resolve(
+        fixed([{ skuId: 'BAC8-4E68-E261', currency: 'USD', costMicros: 3_000_000n }]),
+      );
+    });
+    expect(checked).toBe(3);
     expect(seen[0]).toEqual({ table: 'p.ds.t', sa: SA });
     const jobs = await worker.alerts.queue.getJobs(['waiting', 'delayed']);
     expect(jobs.map((j) => (j.data as { type: string }).type)).toContain('reconcile_drift');

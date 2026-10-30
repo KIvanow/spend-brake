@@ -6,6 +6,7 @@ import {
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { type Auth, type Authenticator, type Role, atLeast } from './auth.js';
+import type { ApiHooks } from './common.js';
 
 extendZodWithOpenApi(z);
 
@@ -59,6 +60,7 @@ export class Router {
     private readonly auth: Authenticator,
     /** Per-token rate limit; false means the token is over it. */
     private readonly allow: (auth: Auth) => Promise<boolean> = () => Promise.resolve(true),
+    private readonly hooks: ApiHooks = {},
   ) {
     this.registry.registerComponent('securitySchemes', 'bearer', {
       type: 'http',
@@ -117,7 +119,14 @@ export class Router {
             'Too many requests for this token; retry in a minute.',
           );
         }
-        if (!atLeast(auth.role, def.role)) {
+        if (
+          !atLeast(auth.role, def.role) &&
+          !(await this.hooks.authorize?.(auth, {
+            method: def.method,
+            path: def.path,
+            role: def.role,
+          }))
+        ) {
           throw new ApiError(403, 'forbidden', `This needs the ${def.role} role.`);
         }
         const parse = <T extends z.ZodType>(

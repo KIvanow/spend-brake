@@ -9,8 +9,8 @@ import {
 } from '@spend-brake/db';
 import { billingExportContext, encryptSecret } from '@spend-brake/shared';
 import { z } from 'zod';
-import { type Ctx, audit, n } from '../common.js';
-import { ApiError, type Router } from '../route.js';
+import { ApiError, type Ctx, type Router, audit, n } from '@spend-brake/api';
+import type { Entitlements } from '../entitlements.js';
 
 const TABLE = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_]+\.[A-Za-z0-9_]+$/;
 
@@ -33,7 +33,7 @@ const NOT_CONFIGURED =
  * Optional reconciliation against the Cloud Billing export in BigQuery. The service account
  * should only be able to read the export (BigQuery Data Viewer on the dataset and Job User).
  */
-export function reconciliationRoutes(r: Router, ctx: Ctx): void {
+export function reconciliationRoutes(r: Router, ctx: Ctx, ent: Entitlements): void {
   r.add({
     method: 'get',
     path: '/v1/reconciliation',
@@ -42,6 +42,7 @@ export function reconciliationRoutes(r: Router, ctx: Ctx): void {
     summary: 'Billing-export reconciliation settings and last run',
     response: statusView,
     handler: async ({ auth }) => {
+      await ent.require('reconciliation', 'read');
       const [cfg] = await ctx.db
         .select()
         .from(reconciliationConfigs)
@@ -92,6 +93,7 @@ export function reconciliationRoutes(r: Router, ctx: Ctx): void {
     }),
     response: statusView,
     handler: async ({ auth, body }) => {
+      await ent.require('reconciliation', 'write');
       if (!ctx.wrapper) {
         throw new ApiError(503, 'no_master_key', 'Set BRAKE_MASTER_KEY or BRAKE_KMS_KEY_ID first.');
       }
@@ -159,6 +161,7 @@ export function reconciliationRoutes(r: Router, ctx: Ctx): void {
     summary: 'Disconnect the billing export (keeps past results)',
     response: z.object({ deleted: z.boolean() }),
     handler: async ({ auth }) => {
+      await ent.require('reconciliation', 'write');
       const rows = await ctx.db
         .delete(reconciliationConfigs)
         .where(eq(reconciliationConfigs.orgId, auth.orgId))
@@ -196,6 +199,7 @@ export function reconciliationRoutes(r: Router, ctx: Ctx): void {
       ),
     }),
     handler: async ({ auth, query }) => {
+      await ent.require('reconciliation', 'read');
       const where = [eq(reconciliationResults.orgId, auth.orgId)];
       if (query.from) where.push(gte(reconciliationResults.day, query.from));
       if (query.to) where.push(lt(reconciliationResults.day, query.to));

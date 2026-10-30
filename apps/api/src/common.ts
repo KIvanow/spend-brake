@@ -1,13 +1,46 @@
 import type { BudgetEngine, Registry } from '@spend-brake/budget';
 import { type KillTarget, MAX_MICROS, type Scope, type ValkeyClient } from '@spend-brake/budget';
-import { type Db, auditLog } from '@spend-brake/db';
+import { type Db, auditLog, caps } from '@spend-brake/db';
 import type { KeyWrapper } from '@spend-brake/shared';
 import { z } from 'zod';
-import type { Auth } from './auth.js';
+import type { Auth, Role } from './auth.js';
 import type { KeyCheck } from './google-check.js';
 import { ApiError } from './route.js';
 
+/** A route as the authorization hook sees it. */
+export interface RouteRef {
+  method: string;
+  /** OpenAPI-style path, e.g. `/v1/keys/{id}`. */
+  path: string;
+  role: Role;
+}
+
+/** A cap about to be raised or removed (lowering and new caps apply directly). */
+export interface CapRaise {
+  auth: Auth;
+  orgId: string;
+  /** Scope label, e.g. `key:k_1`. */
+  scope: string;
+  kind: 'd' | 'm';
+  from: { hard: bigint | null; soft: bigint | null };
+  /** null `to` removes the cap. */
+  to: { hard: bigint | null; soft: bigint | null } | null;
+  via: 'api' | 'action_link';
+}
+
+/**
+ * Extension points for builds that add features on top of the core (see buildApi's
+ * `extensions`). Every hook is optional; without them the core behaves as documented.
+ */
+export interface ApiHooks {
+  /** Allow a route the token's core role does not reach (extra roles). */
+  authorize?: (auth: Auth, route: RouteRef) => Promise<boolean>;
+  /** Hold a cap raise for approval: return its id, or null to apply it now. */
+  holdCapRaise?: (change: CapRaise) => Promise<string | null>;
+}
+
 export interface Ctx {
+  hooks: ApiHooks;
   db: Db;
   valkey: ValkeyClient;
   engine: BudgetEngine;
@@ -94,6 +127,37 @@ export async function audit(
     data,
     at: ctx.now(),
   });
+}
+
+/** Set a cap in Valkey (enforced on the next request), then record it in Postgres. */
+export async function writeCap(
+  ctx: Ctx,
+  orgId: string,
+  label: string,
+  kind: 'd' | 'm',
+  values: { hard: bigint | null; soft: bigint | null },
+): Promise<number> {
+  const version = await ctx.engine.setCap(orgId, toScope(label), kind, values);
+  const row = {
+    orgId,
+    scope: label,
+    kind,
+    hardMicros: values.hard,
+    softMicros: values.soft,
+    version,
+    updatedAt: ctx.now(),
+  };
+  await ctx.db
+    .insert(caps)
+    .values(row)
+    .onConflictDoUpdate({ target: [caps.orgId, caps.scope, caps.kind], set: row });
+  return version;
+}
+
+/** Whether a change takes a hard cap up (or away). Soft caps only alert, so they never count. */
+export function raisesCap(from: bigint | null | undefined, to: bigint | null | undefined): boolean {
+  if (from === null || from === undefined) return false;
+  return to === null || to === undefined || to > from;
 }
 
 /** JSON-safe micros: bigint -> number (all values are below 2^53). */

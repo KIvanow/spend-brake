@@ -17,6 +17,10 @@ prices live in data files that cite their source and verification date.
 | `data/serpapi/catalog.yaml`                     | https://serpapi.com/pricing (verified 2026-10-30)                                                |
 | `data/migration/alternatives.yaml`, `payg.yaml` | Plans and SKU mappings for the migration estimator                                               |
 
+With `BRAKE_CATALOG_DIR` set, `readDataFile` prefers `$BRAKE_CATALOG_DIR/current/<file>` (a
+symlink to one complete version, switched atomically) over the bundled copy; the proxy rebuilds
+its adapters when `current` changes. The verified catalog feed in `ee/` fills it.
+
 Both were verified on 2026-10-29. Prices are copied as USD per 1,000 events, exactly as on the
 page, with Google's SKU ID next to each. A SKU whose price is not verified has `per1000: null`;
 routes that bill it are unpriced and the proxy denies them by default.

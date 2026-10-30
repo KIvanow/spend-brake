@@ -18,6 +18,13 @@ export interface Message {
   actions: Action[];
 }
 
+/** One SKU price change in a catalog update (USD per 1,000, first band; null = unpriced). */
+interface PriceChange {
+  sku: string;
+  from: string | null;
+  to: string | null;
+}
+
 export interface LinkOptions {
   publicUrl: string;
   dashboardUrl?: string | undefined;
@@ -154,6 +161,19 @@ export function buildMessage(alertId: string, job: AlertJob, o: LinkOptions): Me
         ...base,
         title: `Spend differs from Google's bill by ${ratio ?? '?'}% on ${String(job.day)}`,
         text: `The proxy recorded ${usd(job.ledgerMicros)} and the billing export shows ${usd(job.billedMicros)} for ${String(job.day)} (Pacific time). Check for traffic that bypasses the proxy or a catalog price that changed.`,
+        actions: view('/#/spend'),
+      };
+    }
+    case 'catalog_price_change': {
+      const changes = Array.isArray(job.changes) ? (job.changes as PriceChange[]) : [];
+      const lines = changes
+        .slice(0, 10)
+        .map((c) => `${c.sku}: ${c.from ?? 'unpriced'} -> ${c.to ?? 'unpriced'} per 1,000`);
+      if (changes.length > 10) lines.push(`and ${changes.length - 10} more`);
+      return {
+        ...base,
+        title: `Catalog update ${String(job.version)} changed ${changes.length} prices`,
+        text: `The verified catalog feed installed new prices. ${lines.join('; ')}.`,
         actions: view('/#/spend'),
       };
     }

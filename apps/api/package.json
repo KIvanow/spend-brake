@@ -30,8 +30,8 @@
   },
   "exports": {
     ".": {
-      "types": "./dist/server.d.ts",
-      "default": "./dist/server.js"
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
     },
     "./bootstrap": {
       "types": "./dist/bootstrap.d.ts",

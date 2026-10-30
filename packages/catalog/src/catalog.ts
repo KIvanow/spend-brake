@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { join } from 'node:path';
 import { parse } from 'yaml';
 import { z } from 'zod';
 import { type SkuPrice, parseUsd } from './pricing.js';
@@ -84,7 +85,28 @@ export function parseCatalog(yamlText: string): Catalog {
   };
 }
 
-/** Files under the package's data/ directory; works from both src/ and dist/. */
-export function readDataFile(relative: string): string {
+/**
+ * Where updated catalog data lives, if anywhere: `$BRAKE_CATALOG_DIR/current` (a symlink to one
+ * complete version, swapped atomically). Files missing there come from the bundled data.
+ */
+export function catalogOverrideDir(env: NodeJS.ProcessEnv = process.env): string | null {
+  const dir = env.BRAKE_CATALOG_DIR;
+  if (!dir) return null;
+  const current = join(dir, 'current');
+  return existsSync(current) ? realpathSync(current) : null;
+}
+
+/** The catalog data shipped with this package; works from both src/ and dist/. */
+export function readBundledDataFile(relative: string): string {
   return readFileSync(new URL(`../data/${relative}`, import.meta.url), 'utf8');
+}
+
+/** A data file: the updated copy when one is installed, otherwise the bundled one. */
+export function readDataFile(relative: string): string {
+  const dir = catalogOverrideDir();
+  if (dir) {
+    const path = join(dir, relative);
+    if (existsSync(path)) return readFileSync(path, 'utf8');
+  }
+  return readBundledDataFile(relative);
 }

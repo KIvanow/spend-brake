@@ -1,9 +1,8 @@
 import { MAX_MICROS } from '@spend-brake/budget';
-import { caps } from '@spend-brake/db';
 import { type ActionClaims, verifyAction } from '@spend-brake/shared';
 import { z } from 'zod';
 import type { Auth } from '../auth.js';
-import { type Ctx, audit, n, toKillTarget, toScope } from '../common.js';
+import { type Ctx, audit, n, toKillTarget, toScope, writeCap } from '../common.js';
 import { ApiError, type Router, errorSchema } from '../route.js';
 import type { FastifyInstance } from 'fastify';
 import { loadOrg } from './admin.js';
@@ -139,20 +138,17 @@ async function execute(
       if (hard > MAX_MICROS) {
         throw new ApiError(400, 'invalid_request', 'The raised cap would be too large.');
       }
-      const version = await ctx.engine.setCap(c.org, scope, kind, { hard, soft: current.soft });
-      const row = {
+      const approvalId = await ctx.hooks.holdCapRaise?.({
+        auth,
         orgId: c.org,
         scope: c.target,
         kind,
-        hardMicros: hard,
-        softMicros: current.soft,
-        version,
-        updatedAt: ctx.now(),
-      };
-      await ctx.db
-        .insert(caps)
-        .values(row)
-        .onConflictDoUpdate({ target: [caps.orgId, caps.scope, caps.kind], set: row });
+        from: { hard: current.hard, soft: current.soft },
+        to: { hard, soft: current.soft },
+        via: 'action_link',
+      });
+      if (approvalId) return { kind, pendingApproval: approvalId };
+      const version = await writeCap(ctx, c.org, c.target, kind, { hard, soft: current.soft });
       await audit(ctx, auth, 'cap.raise', `${c.target}:${kind}`, {
         ...data,
         by: n(amount),
