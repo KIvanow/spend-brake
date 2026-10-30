@@ -1,10 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, useEffect, useState } from 'react';
 import { type Cap, api, toMicros, usd } from '../api.js';
 import { useRole } from '../role.js';
 import { Table } from '../ui.js';
 import { useKeys } from './Keys.js';
 import { ScopeName } from './Overview.js';
+
+/** Micros as the dollars someone would type (5, 12.5), exactly. */
+const dollars = (micros: number | null): string => {
+  if (micros === null) return '';
+  const fraction = String(micros % 1_000_000)
+    .padStart(6, '0')
+    .replace(/0+$/, '');
+  return `${Math.floor(micros / 1_000_000)}${fraction ? `.${fraction}` : ''}`;
+};
 
 export function Caps() {
   const qc = useQueryClient();
@@ -18,6 +27,15 @@ export function Caps() {
   const [hard, setHard] = useState('');
   const [soft, setSoft] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
+  // The form starts from the scope's current cap, so saving a soft limit alone keeps the hard
+  // cap (an empty field removes that limit).
+  const current = caps.data?.items.find((c) => c.scope === scope.trim() && c.kind === kind);
+  const currentKey = current ? `${current.scope}|${current.kind}|${current.version}` : '';
+  useEffect(() => {
+    setHard(dollars(current?.hard ?? null));
+    setSoft(dollars(current?.soft ?? null));
+    // Only when the cap being edited (or its saved version) changes, not on every keystroke.
+  }, [currentKey]);
   const [notice, setNotice] = useState<string | null>(null);
   const held = (r: { pending?: unknown[] }) =>
     setNotice(
@@ -36,8 +54,6 @@ export function Caps() {
       held(r);
       void qc.invalidateQueries({ queryKey: ['caps'] });
       void qc.invalidateQueries({ queryKey: ['status'] });
-      setHard('');
-      setSoft('');
     },
   });
   const remove = useMutation({
@@ -146,6 +162,11 @@ export function Caps() {
           <button type="submit" disabled={save.isPending}>
             Save
           </button>
+          <p className="muted full">
+            {current
+              ? 'Showing the current cap for this scope and window. An empty field removes that limit.'
+              : 'An empty field means no limit.'}
+          </p>
           {(formError ?? save.error?.message ?? remove.error?.message) && (
             <p className="error">{formError ?? save.error?.message ?? remove.error?.message}</p>
           )}

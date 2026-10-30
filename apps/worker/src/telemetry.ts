@@ -2,7 +2,7 @@
 // OpenTelemetry spans sent to the org's collector. Never on the request path: the worker does it
 // as calls reach the ledger.
 import type { ValkeyClient as Redis } from '@spend-brake/budget';
-import { type Db, and, eq, isNull, or, orgEntitlements, telemetryExports } from '@spend-brake/db';
+import { type Db, eq, orgEntitlements, sql, telemetryExports } from '@spend-brake/db';
 import {
   type CallRecord,
   type Envelope,
@@ -74,16 +74,19 @@ export class OtlpExporter {
     if (now - this.loadedAt < CONFIG_TTL_MS) return this.config;
     // Export is a plan feature on hosted orgs: an org that downgraded stops exporting (orgs
     // with no entitlements row, i.e. self-hosted, always may).
-    const rows = await this.deps.db
-      .select({ orgId: telemetryExports.orgId, endpoint: telemetryExports.endpoint })
+    const all = await this.deps.db
+      .select({
+        orgId: telemetryExports.orgId,
+        endpoint: telemetryExports.endpoint,
+        enabled: telemetryExports.enabled,
+        planAllows: sql<boolean>`(${orgEntitlements.orgId} is null or ${orgEntitlements.otelExport})`,
+      })
       .from(telemetryExports)
-      .leftJoin(orgEntitlements, eq(orgEntitlements.orgId, telemetryExports.orgId))
-      .where(
-        and(
-          eq(telemetryExports.enabled, true),
-          or(isNull(orgEntitlements.orgId), eq(orgEntitlements.otelExport, true)),
-        ),
-      );
+      .leftJoin(orgEntitlements, eq(orgEntitlements.orgId, telemetryExports.orgId));
+    // Spans queued before the downgrade would otherwise wait for good: drop them.
+    const offPlan = all.filter((r) => !r.planAllows).map((r) => otlpQueueKey(r.orgId));
+    for (const key of offPlan) await this.deps.valkey.del(key);
+    const rows = all.filter((r) => r.enabled && r.planAllows);
     const next = new Map<string, Exporter>();
     for (const r of rows) {
       // Headers are decrypted when sending; an endpoint change resets them.

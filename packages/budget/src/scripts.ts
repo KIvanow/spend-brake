@@ -18,7 +18,8 @@ export type ValkeyClient = Redis | Cluster;
  *       | {'OK', {{scope, window, mark}, ...}, minRemaining}
  *
  * Loop check: `loop` counts identical requests in a fixed window, `rate` counts requests per
- * minute; going over either opens `circuit` for cooldownSec. tripped is 1 when this request
+ * minute; going over either opens `circuit` for cooldownSec (its value is the rate key, or '1'
+ * without a session). tripped is 1 when this request
  * opened it. minRemaining is the smallest (hard - used) after this reservation, -1 if uncapped.
  *
  * defaultHard (may be '') creates the scope's hard cap on first use, e.g. a session budget.
@@ -56,7 +57,10 @@ if ARGV[4] == '1' then
     redis.call('EXPIRE', KEYS[6], 60, 'NX')
   end
   if same > tonumber(ARGV[5]) or (ARGV[7] ~= '0' and perMinute > tonumber(ARGV[7])) then
-    redis.call('SET', KEYS[4], '1', 'EX', ARGV[8])
+    -- The circuit holds the session's rate counter (if any), so a reset can clear it too.
+    local rate = '1'
+    if ARGV[7] ~= '0' then rate = KEYS[6] end
+    redis.call('SET', KEYS[4], rate, 'EX', ARGV[8])
     return {'LOOP', tonumber(ARGV[8]), 1}
   end
 end

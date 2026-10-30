@@ -221,7 +221,8 @@ export function budgetRoutes(r: Router, ctx: Ctx): void {
     path: '/v1/keys/{id}/resume',
     role: 'admin',
     tag: 'Kill switch',
-    summary: 'Resume a key paused by the loop breaker (close its circuit before the cooldown ends)',
+    summary:
+      'Resume a key paused by the loop breaker (close its circuit before the cooldown ends and reset its repeat counts)',
     params: z.object({ id }),
     response: z.object({ keyId: z.string(), resumed: z.literal(true) }),
     handler: async ({ auth, params }) => {

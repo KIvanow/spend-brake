@@ -72,6 +72,8 @@ export function Overview() {
         <div className="callout">
           <strong>Paused by the loop breaker.</strong> These keys sent the same request too many
           times in a row, so Spend Brake refuses their calls (HTTP 429 loop_detected) for a while.
+          Stop the app repeating the request first: resuming clears the count, but the same repeats
+          trip it again.
           <ul>
             {paused.map((p) => (
               <li key={p.keyId}>

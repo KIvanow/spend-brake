@@ -41,6 +41,7 @@ beforeEach(() => {
   routes = {
     'GET /v1/org': (c) =>
       c.auth === 'Bearer sbt_good' ? [200, { id: 'acme' }] : [401, { message: 'bad token' }],
+    'GET /v1/auth/session': () => [200, { orgId: 'acme', role: 'owner', actor: 'token:t1' }],
     'GET /v1/status': () => [
       200,
       {
@@ -206,6 +207,38 @@ describe('dashboard', () => {
     });
   });
 
+  it("keeps a scope's hard cap when only the soft limit changes, and says why a save failed", async () => {
+    routes['PUT /v1/caps/org'] = () => [
+      400,
+      {
+        error: 'invalid_request',
+        message: 'Request failed validation.',
+        issues: [
+          {
+            in: 'body',
+            path: 'day',
+            message: 'The soft cap (alert) must not be above the hard cap.',
+          },
+        ],
+      },
+    ];
+    const user = await signIn();
+    await user.click(screen.getByRole('button', { name: 'Caps' }));
+    const form = await screen.findByRole('form', { name: 'Set a cap' });
+    // The org's daily cap is $5: the form starts from it.
+    await waitFor(() =>
+      expect(within(form).getByLabelText<HTMLInputElement>('Hard cap ($)').value).toBe('5'),
+    );
+    await user.type(within(form).getByLabelText('Soft limit ($)'), '6');
+    await user.click(within(form).getByRole('button', { name: 'Save' }));
+    expect(
+      await screen.findByText('The soft cap (alert) must not be above the hard cap.'),
+    ).toBeTruthy();
+    expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({
+      day: { hard: 5_000_000, soft: 6_000_000 },
+    });
+  });
+
   it('says when a raise waits for approval, and lets a second person approve it', async () => {
     routes['PUT /v1/caps/org'] = () => [
       200,
@@ -286,6 +319,28 @@ describe('dashboard', () => {
         body: { plan: 'indie' },
       }),
     );
+  });
+
+  it('tells admins that owners manage billing, without buy buttons', async () => {
+    routes['GET /v1/auth/session'] = () => [200, { orgId: 'acme', role: 'admin', actor: 'u' }];
+    routes['GET /v1/billing'] = () => [
+      200,
+      {
+        plan: 'free',
+        planName: 'Free',
+        status: 'active',
+        currentPeriodEnd: null,
+        hasSubscription: false,
+        limits: null,
+        usage: { keys: 0, providers: 0, agentSessionsThisMonth: 0, requestsThisMonth: 0 },
+        plans: [{ id: 'indie', name: 'Indie' }],
+        licenses: [],
+      },
+    ];
+    const user = await signIn();
+    await user.click(screen.getByRole('button', { name: 'Billing' }));
+    expect(await screen.findByText('Owners manage billing.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Buy Indie' })).toBeNull();
   });
 
   it('says billing is not part of a self-hosted install', async () => {

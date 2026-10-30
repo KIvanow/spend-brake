@@ -73,6 +73,44 @@ describe('alert messages', () => {
     expect(reset.ok && reset.claims).toMatchObject({ act: 'reset', target: 'k9' });
   });
 
+  it('names keys and providers where it can', () => {
+    const loop = buildMessage(
+      'a',
+      { type: 'loop', orgId: 'o', keyId: 'k9', keyName: 'web app' },
+      links,
+    );
+    expect(loop.title).toBe('Loop detected on key "web app"');
+    const threshold = buildMessage(
+      'a',
+      { type: 'threshold', orgId: 'o', scope: 'key:k9', scopeName: 'web app', mark: '50' },
+      links,
+    );
+    expect(threshold.title).toBe('Spend at 50% of cap: key "web app" (this month)');
+    const rejected = buildMessage(
+      'a',
+      {
+        type: 'upstream_key_error',
+        orgId: 'o',
+        provider: 'google-maps',
+        status: '200',
+        keyId: 'k9',
+        keyName: 'web app',
+        credentialHint: 'a1b2',
+      },
+      links,
+    );
+    expect(rejected.title).toBe('Google Maps Platform rejected your API key');
+    expect(rejected.text).toBe(
+      'Google Maps Platform refused your Google Maps Platform key …a1b2 when Spend Brake key "web app" called it. Check that the key is valid and allows the APIs you call, or add a working one on the Keys page.',
+    );
+    const forbidden = buildMessage(
+      'a',
+      { type: 'upstream_key_error', orgId: 'o', provider: 'mapbox', status: '403', keyId: 'k1' },
+      links,
+    );
+    expect(forbidden.text).toContain('refused your Mapbox key (HTTP 403) when Spend Brake key k1');
+  });
+
   it('kills the originating key, not the org, for agent and env alerts', () => {
     const m = buildMessage(
       'a',

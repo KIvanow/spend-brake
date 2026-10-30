@@ -75,6 +75,8 @@ export function keys(orgId: string) {
     /** Identical-request counter for one key. */
     loop: (keyId: string, hash: string) =>
       `${p}:loop:${part(keyId, 'key id')}:${part(hash, 'hash')}`,
+    /** SCAN pattern for every identical-request counter of one key. */
+    loops: (keyId: string) => `${p}:loop:${part(keyId, 'key id')}:*`,
     /** Requests per minute for a key or session scope label. */
     rate: (scope: string) => `${p}:rate:${scope}`,
     /** Units of one SKU billed in a month window, for volume bands and free allowances. */

@@ -8,6 +8,8 @@
 # docker compose ... up -d --scale proxy=3
 {$BRAKE_PROXY_DOMAIN} {
 	header -Server
+	# HTTPS only from the first visit on (the same policy nginx sends for the dashboard).
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
 	reverse_proxy {
 		dynamic a {
 			name proxy
@@ -27,6 +29,8 @@
 	# No software versions in responses (nginx behind sends none either: server_tokens off).
 	header -Server
 	handle /a/* {
+		# nginx sends HSTS for the dashboard; the action pages come from the notifier.
+		header Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		reverse_proxy notifier:8082
 	}
 	handle {

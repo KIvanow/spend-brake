@@ -205,6 +205,9 @@ describe('provider credentials', () => {
     expect(refused.statusCode).toBe(409);
     expect(refused.json()).toMatchObject({ error: 'credential_in_use' });
     expect(refused.json<{ message: string }>().message).toContain('"k"');
+    expect(refused.json<{ message: string }>().message).toContain(
+      'Add another Google Maps Platform key',
+    );
     expect(await env.registry.getCredential(org.id, first)).not.toBeNull();
 
     const second = await credential(org);

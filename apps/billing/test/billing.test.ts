@@ -147,11 +147,12 @@ afterAll(async () => {
 let seq = 0;
 const bearer = (t: string) => ({ authorization: `Bearer ${t}` });
 
-async function signup(plan: Plan | 'free' = 'free') {
+async function signup(plan: Plan | 'free' = 'free', remoteAddress?: string) {
   const orgId = `org_${++seq}_${randomBytes(2).toString('hex')}`;
   const res = await billing.inject({
     method: 'POST',
     url: '/v1/billing/signup',
+    ...(remoteAddress ? { remoteAddress } : {}),
     payload: { orgId, name: orgId, email: `${orgId}@example.com`, plan },
   });
   expect(res.statusCode, res.body).toBe(201);
@@ -311,6 +312,20 @@ describe('sign-up and checkout', () => {
 
     const paid = await signup('team');
     expect(paid.checkoutUrl).toMatch(/^https:\/\/checkout\.stripe\.test\//);
+  });
+
+  it('offers only the hosted plans to a hosted org without a license', async () => {
+    // Its own client address: sign-ups are rate limited per client.
+    const { orgId, ownerToken } = await signup('free', '10.0.0.77');
+    const view = async () =>
+      (await billing.inject({ url: '/v1/billing', headers: bearer(ownerToken) }))
+        .json<{ plans: { id: string }[] }>()
+        .plans.map((p) => p.id);
+    expect(await view()).toEqual(['indie', 'team', 'agents']);
+    await post(
+      event('customer.subscription.created', subscription(orgId, 'cus_lic', 'business', 'active')),
+    );
+    expect(await view()).toContain('business');
   });
 
   it('only lets owners buy, and sends existing subscribers to the portal', async () => {

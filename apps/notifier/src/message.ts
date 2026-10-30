@@ -1,4 +1,4 @@
-import { type ActionKind, type AlertJob, signAction } from '@spend-brake/shared';
+import { type ActionKind, type AlertJob, providerName, signAction } from '@spend-brake/shared';
 
 export interface Action {
   id: string;
@@ -102,14 +102,19 @@ export function buildMessage(alertId: string, job: AlertJob, o: LinkOptions): Me
     data: job as Record<string, unknown>,
   };
   const scope = String(job.scope ?? 'org');
+  // Keys by name where the notifier found one (see withNames), else by id.
+  const named = (name: unknown, fallback: string) =>
+    typeof name === 'string' && name ? `key "${name}"` : fallback;
+  const where = named(job.scopeName, scope);
+  const keyRef = named(job.keyName, job.keyId ? `key ${String(job.keyId)}` : 'a key');
   switch (job.type) {
     case 'threshold': {
       const kill = killTargetFor(scope, job.keyId);
       const what = job.mark === 'soft' ? 'Soft limit reached' : `Spend at ${job.mark}% of cap`;
       return {
         ...base,
-        title: `${what}: ${scope} (${windowName(job.window)})`,
-        text: `Spending for ${scope} ${windowName(job.window)} crossed ${job.mark === 'soft' ? 'its soft limit' : `${job.mark}% of its hard cap`}.`,
+        title: `${what}: ${where} (${windowName(job.window)})`,
+        text: `Spending for ${where} ${windowName(job.window)} crossed ${job.mark === 'soft' ? 'its soft limit' : `${job.mark}% of its hard cap`}.`,
         actions: [
           ...(kill ? [{ id: 'kill', label: `Kill ${kill}`, url: link('kill', kill) }] : []),
           ...raise(scope, job.window),
@@ -120,15 +125,15 @@ export function buildMessage(alertId: string, job: AlertJob, o: LinkOptions): Me
     case 'blocked':
       return {
         ...base,
-        title: `Request blocked: cap reached for ${scope} (${windowName(job.window)})`,
-        text: `A request needing up to ${usd(job.worstMicros)} was refused because ${scope} reached its hard cap ${windowName(job.window)}.`,
+        title: `Request blocked: cap reached for ${where} (${windowName(job.window)})`,
+        text: `A request needing up to ${usd(job.worstMicros)} was refused because ${where} reached its hard cap ${windowName(job.window)}.`,
         actions: [...raise(scope, job.window), ...view('/#/caps')],
       };
     case 'loop':
       return {
         ...base,
-        title: `Loop detected on key ${String(job.keyId)}`,
-        text: `Repeated identical requests tripped the circuit for key ${String(job.keyId)}${job.session ? ` (session ${String(job.session)})` : ''}; it is paused for the cool-down.`,
+        title: `Loop detected on ${keyRef}`,
+        text: `Repeated identical requests tripped the circuit for ${keyRef}${job.session ? ` (session ${String(job.session)})` : ''}; it is paused for the cool-down. Stop the app repeating the request before resetting it, or the repeats trip it again.`,
         actions: [
           { id: 'kill', label: 'Kill key', url: link('kill', `key:${String(job.keyId)}`) },
           { id: 'reset', label: 'Reset circuit', url: link('reset', String(job.keyId)) },
@@ -141,13 +146,20 @@ export function buildMessage(alertId: string, job: AlertJob, o: LinkOptions): Me
         text: `A ${String(job.route)} request cost ${usd(job.costMicros)} but only ${usd(job.worstMicros)} was reserved. The price catalog needs a fix.`,
         actions: view('/#/events'),
       };
-    case 'upstream_key_error':
+    case 'upstream_key_error': {
+      const provider = providerName(String(job.provider));
+      const stored = `your ${provider} key${typeof job.credentialHint === 'string' ? ` …${job.credentialHint}` : ''}`;
+      // Google reports some key errors inside HTTP 200, where the status says nothing.
+      const code =
+        typeof job.status === 'string' || typeof job.status === 'number' ? job.status : '';
+      const status = code !== '' && String(code) !== '200' ? ` (HTTP ${code})` : '';
       return {
         ...base,
-        title: `${String(job.provider)} rejected the API key (${String(job.status)})`,
-        text: `The provider refused the stored credential. Check that the key is valid and allows the APIs you call.`,
+        title: `${provider} rejected your API key`,
+        text: `${provider} refused ${stored}${status} when Spend Brake ${keyRef} called it. Check that the key is valid and allows the APIs you call, or add a working one on the Keys page.`,
         actions: view('/#/keys'),
       };
+    }
     case 'reservations_expired':
       return {
         ...base,

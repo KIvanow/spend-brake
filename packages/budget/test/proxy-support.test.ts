@@ -88,6 +88,28 @@ describe('loop detection', () => {
     expect((await engine.reserve(req(org, 1n, { loop: check(99) }))).outcome).toBe('loop_detected');
   });
 
+  it('clears the loop counters on reset, so the next repeat does not trip it again', async () => {
+    const org = newOrg();
+    const other = newOrg();
+    const check = (hash: string) => loop(hash, { rateScope: sess, perMinute: 6 });
+    for (let i = 0; i < 3; i++) {
+      expect((await engine.reserve(req(org, 1n, { loop: check('h1') }))).outcome).toBe('ok');
+      expect((await engine.reserve(req(other, 1n, { loop: check('h1') }))).outcome).toBe('ok');
+    }
+    expect((await engine.reserve(req(org, 1n, { loop: check('h1') }))).outcome).toBe(
+      'loop_detected',
+    );
+    await engine.resetCircuit(org, 'k1');
+    const k = orgKeys(org);
+    expect(await valkey.client.exists(k.loop('k1', 'h1'), k.rate('sess:s1'))).toBe(0);
+    // Three more identical requests fit again, and the session's rate starts over.
+    for (let i = 0; i < 3; i++) {
+      expect((await engine.reserve(req(org, 1n, { loop: check('h1') }))).outcome).toBe('ok');
+    }
+    // Other orgs' counters are left alone.
+    expect(await valkey.client.get(orgKeys(other).loop('k1', 'h1'))).toBe('3');
+  });
+
   it('checks the kill set before the loop counters', async () => {
     const org = newOrg();
     await engine.kill(org, { kind: 'org' });

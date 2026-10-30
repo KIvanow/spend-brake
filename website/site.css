@@ -142,6 +142,8 @@ svg {
   display: flex;
   align-items: center;
   gap: 10px;
+  white-space: nowrap;
+  flex-shrink: 0;
   color: var(--text);
   font-weight: 650;
   letter-spacing: -0.01em;
@@ -175,27 +177,35 @@ svg {
   gap: 8px;
   align-items: center;
 }
-/* Narrow screens: the sections fold into a menu (details/summary, no script). */
+/*
+ * Narrow screens: the sections fold into a menu, without script (the CSP allows none). "Menu"
+ * links to #menu, which opens it (:target); picking a section changes the target, which closes
+ * it, and "Close" links to a fragment that matches nothing.
+ */
 .top .menu {
   order: 3;
 }
-.top .menu summary {
-  list-style: none;
-  cursor: pointer;
+.top .menu .toggle {
+  display: inline-block;
   color: var(--text);
   font-size: 14px;
   padding: 6px 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
 }
-.top .menu summary::-webkit-details-marker {
+.top .menu .toggle:hover {
+  text-decoration: none;
+}
+.top .menu .close,
+.top .menu:target .open {
   display: none;
 }
-.top .menu[open] summary {
+.top .menu:target .close {
+  display: inline-block;
   background: var(--surface-2);
 }
 .top .menu nav {
-  display: flex;
+  display: none;
   flex-direction: column;
   position: absolute;
   top: 58px;
@@ -205,12 +215,23 @@ svg {
   background: var(--bg);
   border-bottom: 1px solid var(--border);
 }
+.top .menu:target nav {
+  display: flex;
+}
 .top .menu nav a {
   padding: 10px;
 }
 @media (max-width: 419px) {
   .top .cta .ghost {
     display: none;
+  }
+  /* 320px wide: brand, Menu and Start free on one line. */
+  .top .wrap {
+    gap: 8px;
+  }
+  .top .cta .btn {
+    padding: 8px 12px;
+    font-size: 14px;
   }
 }
 @media (min-width: 860px) {
@@ -271,6 +292,8 @@ svg {
 section {
   padding: 56px 0;
   border-top: 1px solid var(--border);
+  /* Clear of the 58px sticky header when a link jumps here. */
+  scroll-margin-top: 64px;
 }
 @media (min-width: 860px) {
   section {

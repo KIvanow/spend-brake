@@ -295,6 +295,39 @@ describe('fallbacks and mutes', () => {
     const m = mails.find((x) => x.to === 'owner@example.com')!;
     expect(m.subject).toContain('Request blocked');
     expect(m.text).toContain('Raise +$25: https://brake.example.com/a/');
+    expect(m.text).toContain('Action links work once and expire after 15 minutes.');
+  });
+
+  it('names the key and the stored provider key in a key-rejected email', async () => {
+    const o = await org();
+    await call(o.owner, 'PUT', '/v1/org', { alertEmail: 'keys@example.com' });
+    const cred = await call(o.owner, 'POST', '/v1/providers/credentials', {
+      provider: 'mapbox',
+      name: 'Mapbox',
+      secret: 'pk.test-secret-9z8y',
+    });
+    expect(cred.statusCode).toBe(201);
+    const key = await call(o.owner, 'POST', '/v1/keys', {
+      name: 'web app',
+      credentials: { mapbox: cred.json<{ id: string }>().id },
+    });
+    expect(key.statusCode).toBe(201);
+    await alert({
+      type: 'upstream_key_error',
+      orgId: o.id,
+      provider: 'mapbox',
+      status: '401',
+      keyId: key.json<{ id: string }>().id,
+    });
+    await until(() => mails.some((m) => m.to === 'keys@example.com'));
+    const m = mails.find((x) => x.to === 'keys@example.com')!;
+    expect(m.subject).toBe('[Spend Brake] Mapbox rejected your API key');
+    expect(m.text).toContain(
+      'refused your Mapbox key …9z8y (HTTP 401) when Spend Brake key "web app"',
+    );
+    // No signed action links, so no note about them expiring; and where the address is set.
+    expect(m.text).not.toContain('Action links');
+    expect(m.text).toContain('Webhooks → Alert email');
   });
 
   it('emails a license to the billing contact as an attachment, never to webhooks', async () => {

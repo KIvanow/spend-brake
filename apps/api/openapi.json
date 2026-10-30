@@ -1820,7 +1820,7 @@
     },
     "/v1/keys/{id}/resume": {
       "post": {
-        "summary": "Resume a key paused by the loop breaker (close its circuit before the cooldown ends) (admin)",
+        "summary": "Resume a key paused by the loop breaker (close its circuit before the cooldown ends and reset its repeat counts) (admin)",
         "tags": [
           "Kill switch"
         ],

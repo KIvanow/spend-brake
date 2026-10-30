@@ -35,6 +35,7 @@ import { planOf, setPlan } from './entitlements.js';
 import {
   CHECKOUT_PLANS,
   type CheckoutPlan,
+  LICENSE_PLANS,
   LIMITS,
   MONTHLY_CENTS,
   PLAN_NAMES,
@@ -266,6 +267,13 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
       .orderBy(desc(issuedLicenses.issuedAt))
       .limit(10);
     const limits = LIMITS[plan?.plan ?? 'free'];
+    // Where sign-up is open (the hosted service), self-hosted licenses are not offered to orgs
+    // that use the hosted plans; an org that already has one keeps seeing it.
+    const licensed =
+      licenses.length > 0 || (LICENSE_PLANS as readonly string[]).includes(plan?.plan ?? '');
+    const offered = CHECKOUT_PLANS.filter(
+      (p) => !deps.signup || licensed || !(LICENSE_PLANS as readonly string[]).includes(p),
+    );
     return {
       plan: plan?.plan ?? null,
       planName: plan ? PLAN_NAMES[plan.plan] : null,
@@ -280,7 +288,7 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
           }
         : null,
       usage,
-      plans: CHECKOUT_PLANS.map((p) => ({ id: p, name: PLAN_NAMES[p] })),
+      plans: offered.map((p) => ({ id: p, name: PLAN_NAMES[p] })),
       licenses: licenses.map((l) => ({
         ...l,
         expiresAt: l.expiresAt.toISOString(),

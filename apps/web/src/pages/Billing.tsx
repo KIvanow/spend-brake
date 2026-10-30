@@ -1,5 +1,6 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { api, usd } from '../api.js';
+import { useRole } from '../role.js';
 import { Table } from '../ui.js';
 
 interface BillingView {
@@ -31,6 +32,7 @@ const of = (used: number, max: number | null | undefined) =>
 
 /** The hosted plan: usage against limits, buying and managing it, license files. */
 export function Billing() {
+  const { can } = useRole();
   const billing = useQuery({
     queryKey: ['billing'],
     queryFn: () => api<BillingView>('/v1/billing'),
@@ -115,8 +117,9 @@ export function Billing() {
           ]}
         />
       )}
+      {!can('owner') && <p className="muted">Owners manage billing.</p>}
       <div className="row">
-        {b.hasSubscription ? (
+        {!can('owner') ? null : b.hasSubscription ? (
           <button type="button" disabled={go.isPending} onClick={() => go.mutate('portal')}>
             Manage billing
           </button>
@@ -147,9 +150,11 @@ export function Billing() {
               { label: 'Valid until', render: (l) => new Date(l.expiresAt).toLocaleDateString() },
             ]}
           />
-          <button type="button" onClick={() => download.mutate()} disabled={download.isPending}>
-            Download the latest license
-          </button>
+          {can('owner') && (
+            <button type="button" onClick={() => download.mutate()} disabled={download.isPending}>
+              Download the latest license
+            </button>
+          )}
           {download.error && <p className="error">{download.error.message}</p>}
         </>
       )}

@@ -246,7 +246,8 @@ describe('OpenTelemetry export', () => {
     await call(org, { reqId: 'r1' });
     await worker.ledgerOnce();
     expect(await valkey.llen(otlpQueueKey(org))).toBe(1);
-    // Downgraded to Free before the queue was sent: nothing more is queued or sent.
+    // Downgraded to Free before the queue was sent: nothing more is queued or sent, and what
+    // was waiting is dropped rather than kept for good.
     await db
       .update(orgEntitlements)
       .set({ plan: 'free', otelExport: false })
@@ -254,7 +255,7 @@ describe('OpenTelemetry export', () => {
     worker.otlp.reload();
     await call(org, { reqId: 'r2' });
     await worker.ledgerOnce();
-    expect(await valkey.llen(otlpQueueKey(org))).toBe(1);
+    expect(await valkey.llen(otlpQueueKey(org))).toBe(0);
     expect(await worker.otlp.runOnce()).toBe(0);
     expect(received).toHaveLength(0);
   });

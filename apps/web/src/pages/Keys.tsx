@@ -340,7 +340,8 @@ function KeyCredentials({ k, credentials }: { k: Key; credentials: Credential[] 
         method: 'PATCH',
         body: { credentials: next },
       }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['keys'] }),
+    // Refetched on failure too, so the picker shows what is really saved.
+    onSettled: () => void qc.invalidateQueries({ queryKey: ['keys'] }),
   });
   // Session keys follow the key that minted them.
   const editable = can('admin') && k.status === 'active' && !k.config.sessionId;
@@ -358,7 +359,15 @@ function KeyCredentials({ k, credentials }: { k: Key; credentials: Credential[] 
               aria-label={`${info?.name ?? provider} key used by ${k.name}`}
               value={current ? credId : ''}
               disabled={rebind.isPending}
-              onChange={(e) => rebind.mutate({ ...bound, [provider]: e.target.value })}
+              onChange={(e) =>
+                rebind.mutate({
+                  // Bindings to deleted provider keys are dropped: the API refuses them.
+                  ...Object.fromEntries(
+                    Object.entries(bound).filter(([, id]) => credentials.some((c) => c.id === id)),
+                  ),
+                  [provider]: e.target.value,
+                })
+              }
             >
               {!current && <option value="">deleted: pick another</option>}
               {same.map((c) => (
@@ -435,11 +444,24 @@ export function Keys() {
                       disabled={removeCredential.isPending}
                       onClick={() => {
                         const users = usedBy(c);
-                        // The API moves its keys to another key of the provider, or refuses.
+                        const provider = providerById(c.provider)?.name ?? c.provider;
+                        const who = `${users.map((k) => k.name).join(', ')} use${users.length === 1 ? 's' : ''} this key.`;
+                        const them = users.length === 1 ? 'that key' : 'those keys';
+                        // The API moves its keys to the newest other key of the provider, or
+                        // refuses when there is none.
+                        const other = (credentials.data?.items ?? []).some(
+                          (o) => o.provider === c.provider && o.id !== c.id,
+                        );
+                        if (users.length > 0 && !other) {
+                          window.alert(
+                            `${who} There is no other ${provider} key to move ${them} to, so it can't be deleted yet. Add another ${provider} key first, or revoke ${them}.`,
+                          );
+                          return;
+                        }
                         if (
                           users.length === 0 ||
                           window.confirm(
-                            `${users.map((k) => k.name).join(', ')} use${users.length === 1 ? 's' : ''} this key. Delete it and move ${users.length === 1 ? 'that key' : 'those keys'} to your other ${providerById(c.provider)?.name ?? c.provider} key?`,
+                            `${who} Delete it and move ${them} to your other ${provider} key?`,
                           )
                         ) {
                           removeCredential.mutate(c.id);

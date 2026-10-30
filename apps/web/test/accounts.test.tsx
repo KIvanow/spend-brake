@@ -54,6 +54,10 @@ beforeEach(() => {
           ],
     'GET /v1/org': (c) =>
       c.auth === 'Bearer sbt_email' ? [200, { id: 'acme' }] : [401, { message: 'bad token' }],
+    'GET /v1/auth/session': (c) =>
+      c.auth === 'Bearer sbt_email'
+        ? [200, { orgId: 'acme', role: 'owner', actor: 'user:u1', signIn: 'email' }]
+        : [401, { message: 'bad token' }],
     'GET /v1/status': () => [200, { killed: [], scopes: [] }],
     'GET /v1/providers/credentials': () => [200, { items: [] }],
     'GET /v1/keys': () => [200, { items: [] }],
@@ -217,6 +221,51 @@ describe('sessions', () => {
     expect(window.location.hash).toBe('#/');
   });
 
+  // As main.tsx renders it: no client passed in, and the link spent before the first render.
+  it('signs out of a tab that signed in with an emailed link', async () => {
+    routes['DELETE /v1/auth/session'] = () => [200, { revoked: true }];
+    render(<App signingIn={redeemLoginCode(CODE)} />);
+    const user = userEvent.setup();
+    await screen.findByRole('heading', { name: 'Live budget' });
+    await user.click(screen.getByRole('button', { name: 'Sign out' }));
+    expect(await screen.findByLabelText('Email')).toBeTruthy();
+    // It stays signed out: nothing signs the tab back in on a later render.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
+    expect(getToken()).toBeNull();
+  });
+
+  it('shows the sign-in page when the API ends a session that started with a link', async () => {
+    render(<App signingIn={redeemLoginCode(CODE)} />);
+    await screen.findByRole('heading', { name: 'Live budget' });
+    routes['GET /v1/users'] = () => [401, { message: 'Missing or invalid API token.' }];
+    window.location.hash = '/team';
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+    expect(await screen.findByText(/Your session ended/)).toBeTruthy();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
+  });
+
+  it("loads the role of a link sign-in in an open tab, and shows no controls until it's known", async () => {
+    let role: string | null = null;
+    routes['GET /v1/auth/session'] = () =>
+      role ? [200, { orgId: 'acme', role, actor: 'user:u1', signIn: 'email' }] : [500, {}];
+    window.location.hash = '/keys';
+    signedInByEmail();
+    // The role could not be loaded: controls stay hidden.
+    expect(await screen.findByText(/Admins and owners can add/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Add key' })).toBeNull();
+
+    // A new link (another person's) pasted into this tab: their role is loaded afresh.
+    role = 'admin';
+    window.history.replaceState(null, '', `/#login=${CODE}`);
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+    await screen.findByRole('heading', { name: 'Live budget' });
+    window.location.hash = '/keys';
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+    expect(await screen.findByRole('button', { name: 'Add key' })).toBeTruthy();
+  });
+
   it('says why when the session ended', async () => {
     signedInByEmail();
     await screen.findByRole('heading', { name: 'Live budget' });
@@ -240,7 +289,7 @@ describe('alerts', () => {
     signedInByEmail();
     const user = userEvent.setup();
     expect(await screen.findByText(/No address set/)).toBeTruthy();
-    await user.type(screen.getByLabelText('Email alerts to'), 'ops@acme.test');
+    await user.type(await screen.findByLabelText('Email alerts to'), 'ops@acme.test');
     await user.click(
       within(screen.getByRole('form', { name: 'Alert email' })).getByRole('button', {
         name: 'Save',
@@ -288,7 +337,8 @@ describe('roles', () => {
             status: 'active',
             createdAt: '2026-10-30T10:00:00Z',
             expiresAt: null,
-            config: { credentials: { 'google-maps': 'cred_1' } },
+            // Its Mapbox key was deleted, with no other one to move to.
+            config: { credentials: { 'google-maps': 'cred_1', mapbox: 'cred_gone' } },
           },
         ],
       },
@@ -331,7 +381,8 @@ describe('roles', () => {
             status: 'active',
             createdAt: '2026-10-30T10:00:00Z',
             expiresAt: null,
-            config: { credentials: { 'google-maps': 'cred_1' } },
+            // Its Mapbox key was deleted, with no other one to move to.
+            config: { credentials: { 'google-maps': 'cred_1', mapbox: 'cred_gone' } },
           },
         ],
       },
@@ -369,12 +420,67 @@ describe('roles', () => {
     window.location.hash = '/keys';
     window.dispatchEvent(new HashChangeEvent('hashchange'));
     const select = await screen.findByLabelText('Google Maps Platform key used by web app');
+    const listed = calls.filter((c) => c.url === '/v1/keys').length;
     await user.selectOptions(select, 'cred_2');
+    // The binding to the deleted key is not sent back (the API would refuse it).
     await waitFor(() =>
       expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({
         credentials: { 'google-maps': 'cred_2' },
       }),
     );
+    // The list is fetched again, so the picker and "Used by" show what was saved.
+    await waitFor(() =>
+      expect(calls.filter((c) => c.url === '/v1/keys').length).toBeGreaterThan(listed),
+    );
+  });
+
+  it("says a provider key can't be deleted while keys use it and there is no other", async () => {
+    routes['GET /v1/keys'] = () => [
+      200,
+      {
+        items: [
+          {
+            id: 'key_1',
+            name: 'web app',
+            prefix: 'sb_live_abcd',
+            status: 'active',
+            createdAt: '2026-10-30T10:00:00Z',
+            expiresAt: null,
+            config: { credentials: { 'google-maps': 'cred_1' } },
+          },
+        ],
+      },
+    ];
+    routes['GET /v1/providers/credentials'] = () => [
+      200,
+      {
+        items: [
+          {
+            id: 'cred_1',
+            provider: 'google-maps',
+            name: 'Google Maps Platform',
+            hint: 'AAAA',
+            createdAt: '2026-10-30T10:00:00Z',
+          },
+        ],
+      },
+    ];
+    const alert = vi.fn();
+    const confirm = vi.fn(() => true);
+    vi.stubGlobal('alert', alert);
+    vi.stubGlobal('confirm', confirm);
+    window.location.hash = '/keys';
+    signedInByEmail();
+    const user = userEvent.setup();
+    await screen.findAllByText('web app');
+    await user.click(
+      await screen.findByRole('button', { name: 'Delete Google Maps Platform key …AAAA' }),
+    );
+    expect(alert).toHaveBeenCalledWith(
+      "web app uses this key. There is no other Google Maps Platform key to move that key to, so it can't be deleted yet. Add another Google Maps Platform key first, or revoke that key.",
+    );
+    expect(confirm).not.toHaveBeenCalled();
+    expect(calls.some((c) => c.method === 'DELETE')).toBe(false);
   });
 });
 
@@ -524,7 +630,10 @@ describe('getting started', () => {
     const user = userEvent.setup();
     await screen.findByRole('heading', { name: 'Get started' });
 
-    await user.type(screen.getByLabelText(/Your Google Maps Platform API key/), 'AIzaRealKey1234');
+    await user.type(
+      await screen.findByLabelText(/Your Google Maps Platform API key/),
+      'AIzaRealKey1234',
+    );
     await user.click(screen.getByRole('button', { name: 'Add key' }));
     await waitFor(() =>
       expect(
@@ -601,7 +710,7 @@ describe('telemetry', () => {
     const user = userEvent.setup();
     expect(await screen.findByText(/metrics_path: \/v1\/metrics/)).toBeTruthy();
     await user.click(
-      screen.getByRole('button', { name: 'Create a read-only token for Prometheus' }),
+      await screen.findByRole('button', { name: 'Create a read-only token for Prometheus' }),
     );
     expect(await screen.findByText(/credentials: sbt_promtoken/)).toBeTruthy();
     expect(calls.find((c) => c.url === '/v1/tokens')!.body).toEqual({

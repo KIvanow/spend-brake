@@ -67,13 +67,16 @@ const pageFromHash = (): PageName =>
   'Overview';
 
 export function App({
-  client = new QueryClient(),
+  client: givenClient,
   signingIn: firstLink = null,
 }: {
   client?: QueryClient;
   /** An emailed sign-in link being spent: resolves to an error message, or null when signed in. */
   signingIn?: Promise<string | null> | null;
 }) {
+  // One cache for the life of the page: a new client on every render would drop queries in
+  // flight and re-run every effect that depends on it.
+  const [client] = useState(() => givenClient ?? new QueryClient());
   const [signedIn, setSignedIn] = useState(() => getToken() !== null);
   const [signingIn, setSigningIn] = useState(firstLink);
   const [pending, setPending] = useState(firstLink !== null);
@@ -95,6 +98,8 @@ export function App({
     };
     const onSignedOut = () => {
       client.clear();
+      setSigningIn(null);
+      setPending(false);
       setSignedIn(false);
       setLinkError(
         'Your session ended: it expired, you were signed out, or your role changed. Sign in again.',
@@ -113,6 +118,8 @@ export function App({
     let live = true;
     void signingIn.then((error) => {
       if (!live) return;
+      // Handled once: later renders must not sign the tab back in (after Sign out, say).
+      setSigningIn(null);
       if (error === null) client.clear();
       setLinkError(error);
       setSignedIn(error === null || getToken() !== null);

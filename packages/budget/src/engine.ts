@@ -6,6 +6,7 @@ import {
   killLabel,
   scopeLabel,
 } from './keys.js';
+import type { Cluster, Redis } from 'ioredis';
 import { type ValkeyClient, runScript, scripts } from './scripts.js';
 import { windowResetsAt, windowsFor } from './windows.js';
 
@@ -558,9 +559,43 @@ export class BudgetEngine {
     return Number(res?.[0]?.[1] ?? 0) === 1;
   }
 
-  /** Close a key's loop circuit early (the alert's "Reset circuit" action). */
+  /**
+   * Close a key's loop circuit early (Resume, the alert's "Reset circuit" action). Its
+   * identical-request counters and the session's rate counter go too: left in place, the next
+   * repeat of the request would trip the circuit again at once.
+   */
   async resetCircuit(orgId: string, keyId: string): Promise<void> {
-    await this.client.del(orgKeys(orgId).circuit(keyId));
+    const k = orgKeys(orgId);
+    const circuit = k.circuit(keyId);
+    const tripped = await this.client.get(circuit);
+    const counters = await this.scan(k.loops(keyId));
+    // Only ever a rate key of this org (the script stores KEYS[6]); '1' for no session.
+    if (tripped?.startsWith(k.rate(''))) counters.push(tripped);
+    // Every key shares the org's hash tag, so one DEL is fine on a cluster too.
+    for (let i = 0; i < counters.length; i += 500) {
+      await this.client.del(...counters.slice(i, i + 500));
+    }
+    await this.client.del(circuit);
+  }
+
+  /**
+   * Keys matching a pattern, with SCAN rather than KEYS (which blocks the server). A cluster
+   * spreads keys over its primaries, so each is scanned.
+   */
+  private async scan(pattern: string): Promise<string[]> {
+    const nodes = this.client.isCluster
+      ? (this.client as Cluster).nodes('master')
+      : [this.client as Redis];
+    const found = new Set<string>();
+    for (const node of nodes) {
+      let cursor = '0';
+      do {
+        const [next, batch] = await node.scan(cursor, 'MATCH', pattern, 'COUNT', 1000);
+        cursor = next;
+        for (const key of batch) found.add(key);
+      } while (cursor !== '0');
+    }
+    return [...found];
   }
 
   /** Keys whose loop circuit is open, with the seconds until it closes by itself. */

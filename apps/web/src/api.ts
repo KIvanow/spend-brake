@@ -90,13 +90,23 @@ export async function api<T>(
     },
     ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
   });
-  const data = (await res.json().catch(() => ({}))) as { message?: string };
-  if (res.status === 401 && token) {
-    // Expired or revoked (sessions end when a role changes): back to the sign-in page.
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string;
+    issues?: { message?: string }[];
+  };
+  // Expired or revoked (sessions end when a role changes): back to the sign-in page. A request
+  // that was in flight when the person signed out (or in again) changes nothing.
+  if (res.status === 401 && token && getToken() === token) {
     setToken(null);
     window.dispatchEvent(new Event(SIGNED_OUT));
   }
-  if (!res.ok) throw new ApiError(res.status, data.message ?? `HTTP ${res.status}`);
+  if (!res.ok) {
+    // A validation error's top-level message is generic; the first issue says what is wrong.
+    throw new ApiError(
+      res.status,
+      data.issues?.[0]?.message ?? data.message ?? `HTTP ${res.status}`,
+    );
+  }
   return data as T;
 }
 

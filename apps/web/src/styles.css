@@ -217,7 +217,7 @@ th {
   border-radius: 8px;
   padding: 8px 12px;
 }
-.kills li code {
+.kills li > :first-child {
   flex: 1;
 }
 .chart {
