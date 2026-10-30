@@ -1,29 +1,67 @@
+/* Spend Brake dashboard. Same tokens, type and components as the website (website/site.css),
+   so spendbrake.dev and app.spendbrake.dev read as one product. No web fonts, no inline styles
+   (the CSP allows neither); a meter's width is the only style React sets. */
+
 :root {
   --bg: #f7f7f5;
   --surface: #ffffff;
+  --surface-2: #efefeb;
   --text: #1b1b19;
   --muted: #6b6b66;
   --border: #e2e2dc;
   --accent: #1d4ed8;
-  --danger: #b42318;
+  --accent-ink: #ffffff;
+  --brake: #c92a1f;
+  --brake-soft: #fbe9e7;
+  --danger: var(--brake);
   --warn: #b45309;
   --ok: #15803d;
+  --code-bg: #1d1d1b;
+  --code-text: #ececea;
+  --code-muted: #8f8f88;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 12px 32px -16px rgb(0 0 0 / 0.18);
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme='light']) {
     --bg: #141413;
     --surface: #1d1d1b;
+    --surface-2: #242421;
     --text: #ececea;
     --muted: #9b9b95;
     --border: #33332f;
     --accent: #7aa2ff;
-    --danger: #f97066;
+    --accent-ink: #0f1a33;
+    --brake: #ff7a6e;
+    --brake-soft: #3a1d1a;
     --warn: #f5a524;
     --ok: #4ade80;
+    --code-bg: #0e0e0d;
+    --code-text: #ececea;
+    --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 12px 32px -16px rgb(0 0 0 / 0.6);
     color-scheme: dark;
   }
 }
+:root[data-theme='dark'] {
+  --bg: #141413;
+  --surface: #1d1d1b;
+  --surface-2: #242421;
+  --text: #ececea;
+  --muted: #9b9b95;
+  --border: #33332f;
+  --accent: #7aa2ff;
+  --accent-ink: #0f1a33;
+  --brake: #ff7a6e;
+  --brake-soft: #3a1d1a;
+  --warn: #f5a524;
+  --ok: #4ade80;
+  --code-bg: #0e0e0d;
+  --code-text: #ececea;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 12px 32px -16px rgb(0 0 0 / 0.6);
+  color-scheme: dark;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -31,134 +69,462 @@
 [hidden] {
   display: none !important;
 }
+html {
+  -webkit-text-size-adjust: 100%;
+}
 body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
   font:
-    15px/1.5 system-ui,
+    15px/1.55 system-ui,
     -apple-system,
+    'Segoe UI',
     sans-serif;
+  text-rendering: optimizeLegibility;
 }
-header {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  align-items: center;
-  padding: 10px 16px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+code,
+pre,
+kbd {
+  font-family: var(--mono);
+  font-size: 0.9em;
+}
+h1,
+h2,
+h3,
+h4 {
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+  text-wrap: balance;
+}
+p {
+  margin: 0 0 1em;
+}
+
+/* Header: the website's sticky, translucent bar. */
+header.top {
   position: sticky;
   top: 0;
-}
-header nav {
+  z-index: 10;
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-  flex: 1;
+  align-items: center;
+  gap: 8px 16px;
+  padding: 0 16px;
+  min-height: 58px;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
 }
-header nav button {
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.brand .mark {
+  width: 26px;
+  height: 26px;
+  flex: none;
+}
+.mark .ring {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 3;
+}
+.mark .pad {
+  fill: var(--brake);
+}
+header.top nav {
+  display: flex;
+  gap: 2px;
+  /* Narrow screens: one row of pages that scrolls sideways, under the brand. */
+  order: 3;
+  flex: 1 0 100%;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  margin: 0 -16px;
+  padding: 0 16px 8px;
+  scrollbar-width: none;
+}
+header.top nav::-webkit-scrollbar {
+  display: none;
+}
+header.top nav button {
+  flex: none;
   background: none;
   border: 0;
+  border-radius: 6px;
   color: var(--muted);
   padding: 6px 10px;
-  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
 }
-header nav button[aria-current='page'] {
+header.top nav button:hover {
   color: var(--text);
-  background: var(--bg);
+  background: var(--surface-2);
+}
+header.top nav button[aria-current='page'] {
+  color: var(--text);
+  background: var(--surface-2);
   font-weight: 600;
 }
+header.top .signout {
+  margin-left: auto;
+  padding: 6px 10px;
+  color: var(--muted);
+  font-weight: 500;
+}
+header.top .signout:hover {
+  color: var(--text);
+  background: var(--surface-2);
+  text-decoration: none;
+}
+@media (min-width: 720px) {
+  header.top {
+    padding: 0 24px;
+  }
+  header.top nav {
+    margin: 0 -24px;
+    padding: 0 24px 8px;
+  }
+}
+@media (min-width: 1180px) {
+  header.top {
+    flex-wrap: nowrap;
+    height: 58px;
+  }
+  header.top nav {
+    order: 0;
+    flex: 1 1 auto;
+    margin: 0;
+    padding: 0;
+  }
+  header.top .signout {
+    margin-left: 0;
+  }
+}
+
+/* Page */
 main {
   max-width: 1100px;
   margin: 0 auto;
-  padding: 16px;
+  padding: 16px 16px 72px;
+}
+@media (min-width: 720px) {
+  main {
+    padding: 24px 24px 88px;
+  }
+}
+main > section > h2:first-child,
+main > section > .row:first-child h2 {
+  font-size: clamp(24px, 3vw, 30px);
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  margin-top: 12px;
 }
 h2 {
-  font-size: 18px;
-  margin: 24px 0 4px;
+  font-size: 20px;
+  font-weight: 650;
+  margin: 36px 0 6px;
 }
 h3 {
-  font-size: 15px;
-  margin: 20px 0 8px;
+  font-size: 16px;
+  font-weight: 650;
+  margin: 28px 0 8px;
 }
-code {
-  font:
-    13px ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    monospace;
+h4 {
+  font-size: 15px;
+  font-weight: 650;
+}
+section > p.muted {
+  max-width: 72ch;
 }
 .muted {
   color: var(--muted);
 }
 .error {
-  color: var(--danger);
+  color: var(--brake);
 }
 .notice {
   color: var(--warn);
 }
-.stat {
-  font-size: 26px;
-  font-weight: 600;
-  margin: 8px 0;
-}
-.stat .muted {
-  font-size: 14px;
-  font-weight: 400;
+.ok {
+  color: var(--ok);
 }
 .row {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
-  gap: 8px;
+  gap: 8px 16px;
 }
+.row > label {
+  color: var(--muted);
+  font-size: 14px;
+}
+.row.full {
+  width: 100%;
+  align-items: flex-end;
+  justify-content: flex-start;
+}
+.stat {
+  margin: 8px 0 12px;
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+.stat .muted {
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+/* Buttons: the website's .btn, a size down for dense pages. */
 button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   font: inherit;
-  padding: 6px 12px;
-  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  padding: 7px 14px;
+  border-radius: 8px;
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--text);
+  white-space: nowrap;
   cursor: pointer;
+}
+button:hover:not(:disabled) {
+  border-color: var(--muted);
 }
 button:disabled {
   opacity: 0.5;
   cursor: default;
 }
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+button.primary:hover:not(:disabled) {
+  border-color: var(--accent);
+  filter: brightness(1.08);
+}
 button.danger {
-  border-color: var(--danger);
-  color: var(--danger);
+  border-color: color-mix(in srgb, var(--brake) 55%, var(--border));
+  color: var(--brake);
+}
+button.danger:hover:not(:disabled) {
+  border-color: var(--brake);
+  background: var(--brake-soft);
 }
 button.link {
-  border: 0;
+  border-color: transparent;
   background: none;
   color: var(--accent);
+  padding-left: 0;
+  padding-right: 0;
+  font-weight: 500;
 }
+button.link:hover:not(:disabled) {
+  border-color: transparent;
+  text-decoration: underline;
+}
+
+/* Fields */
 input,
-select {
+select,
+textarea {
   font: inherit;
-  padding: 6px 8px;
-  border-radius: 6px;
+  font-size: 15px;
+  padding: 7px 10px;
+  border-radius: 8px;
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--text);
+  min-width: 0;
+  max-width: 100%;
 }
-.table-wrap {
-  overflow-x: auto;
+input:hover,
+select:hover {
+  border-color: color-mix(in srgb, var(--muted) 60%, var(--border));
+}
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+input[type='radio'],
+input[type='checkbox'] {
+  accent-color: var(--accent);
+  padding: 0;
+}
+input[type='radio']:focus,
+input[type='checkbox']:focus {
+  box-shadow: none;
+}
+input[type='radio']:focus-visible,
+input[type='checkbox']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+::placeholder {
+  color: color-mix(in srgb, var(--muted) 75%, transparent);
+}
+fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+fieldset legend {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+  padding: 0;
+  margin-bottom: 6px;
+}
+
+/* Cards: forms, callouts, list items, steps */
+.form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: flex-end;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 12px;
+  padding: 18px 20px;
+  margin-top: 20px;
+}
+.form h3 {
+  width: 100%;
+  margin: 0;
+}
+.form label {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+}
+.form p {
+  margin: 0;
+}
+.form .grow {
+  flex: 1;
+  min-width: 220px;
+}
+.form .full {
+  width: 100%;
+  margin: 0;
+}
+@media (max-width: 519px) {
+  .form {
+    padding: 16px;
+  }
+  .form > label,
+  .form .grow {
+    width: 100%;
+    min-width: 0;
+  }
+}
+.checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+.checks label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 400;
+}
+.callout {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 10px;
+  padding: 14px 18px;
+  margin: 16px 0;
+}
+.callout > :last-child {
+  margin-bottom: 0;
+}
+.callout ul {
+  margin: 6px 0;
+  padding-left: 20px;
+}
+.callout li {
+  margin: 4px 0;
+}
+.callout h4 {
+  margin: 14px 0 0;
+}
+.kills {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 0;
+  display: grid;
+  gap: 8px;
+}
+.kills li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 14px;
+}
+.kills li > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Tables */
+.table-wrap {
+  overflow-x: auto;
+  margin-top: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
 }
 table {
   border-collapse: collapse;
   width: 100%;
+  font-size: 14px;
 }
 th,
 td {
   text-align: left;
-  padding: 8px 10px;
+  padding: 10px 14px;
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
 }
@@ -170,140 +536,120 @@ th {
   font-weight: 500;
   font-size: 13px;
 }
+tbody tr:hover td {
+  background: color-mix(in srgb, var(--surface-2) 55%, var(--surface));
+}
+td button {
+  padding: 4px 10px;
+  font-size: 13px;
+}
 .num {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+/* Empty states: a quiet dashed box instead of a stray line of grey text. */
+.empty {
+  margin: 12px 0 0;
+  padding: 22px 16px;
+  text-align: center;
+  font-size: 14px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+}
+
+/* Badges and meters */
 .badge {
+  display: inline-block;
   font-size: 12px;
-  padding: 2px 8px;
+  font-weight: 600;
+  line-height: 1.5;
+  padding: 1px 9px;
   border-radius: 999px;
-  border: 1px solid var(--ok);
   color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ok) 30%, transparent);
+  font-variant-numeric: tabular-nums;
 }
 .badge.danger {
-  border-color: var(--danger);
-  color: var(--danger);
+  color: var(--brake);
+  background: var(--brake-soft);
+  border-color: color-mix(in srgb, var(--brake) 35%, transparent);
 }
 .meter {
   display: inline-block;
-  width: 90px;
+  width: 96px;
   height: 8px;
-  background: var(--border);
-  border-radius: 4px;
+  background: var(--surface-2);
+  border-radius: 999px;
   overflow: hidden;
   vertical-align: middle;
 }
 .meter .fill {
   display: block;
   height: 100%;
+  border-radius: inherit;
   background: var(--accent);
 }
 .meter .fill.warn {
   background: var(--warn);
 }
-.kills {
-  list-style: none;
-  padding: 0;
-  display: grid;
-  gap: 8px;
-}
-.kills li {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 8px 12px;
-}
-.kills li > :first-child {
-  flex: 1;
-}
+
+/* Chart */
 .chart {
   margin: 8px 0 16px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px;
+  border-radius: 12px;
+  padding: 16px 16px 10px;
 }
 .chart svg {
+  display: block;
   width: 100%;
   height: 160px;
 }
 .chart rect {
   fill: var(--accent);
 }
+.chart rect:hover {
+  fill: var(--brake);
+}
 .chart figcaption {
   display: flex;
   justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
   color: var(--muted);
+  font-family: var(--mono);
   font-size: 12px;
 }
-.form {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  align-items: flex-end;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px;
-  margin-top: 16px;
-}
-.form h3 {
-  width: 100%;
-  margin: 0;
-}
-.form label {
-  display: grid;
-  gap: 4px;
-  font-size: 13px;
-  color: var(--muted);
-}
+
+/* Segmented control */
 .seg {
-  display: flex;
-  gap: 4px;
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.seg button {
+  border-color: transparent;
+  background: none;
+  color: var(--muted);
+  padding: 5px 12px;
+  border-radius: 7px;
+}
+.seg button:hover:not(:disabled) {
+  border-color: transparent;
+  color: var(--text);
 }
 .seg button[aria-selected='true'] {
-  background: var(--text);
-  color: var(--bg);
-}
-.signin {
-  max-width: 380px;
-  padding-top: 12vh;
-}
-.signin form {
-  display: grid;
-  gap: 12px;
-}
-.signin label {
-  display: grid;
-  gap: 4px;
-}
-button.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--bg);
-  font-weight: 600;
-}
-a {
-  color: var(--accent);
-}
-.callout {
   background: var(--surface);
-  border: 1px solid var(--accent);
-  border-radius: 8px;
-  padding: 12px 16px;
-  margin: 16px 0;
+  color: var(--text);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
 }
-.callout ul {
-  margin: 4px 0;
-  padding-left: 20px;
-}
-.callout h4 {
-  margin: 12px 0 0;
-}
+
+/* Secrets and code */
 .secret {
   display: flex;
   flex-wrap: wrap;
@@ -311,42 +657,168 @@ a {
   gap: 8px;
 }
 .secret code {
-  background: var(--bg);
+  background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px 8px;
+  border-radius: 8px;
+  padding: 6px 10px;
   overflow-wrap: anywhere;
 }
-.form .grow {
-  flex: 1;
-  min-width: 220px;
+.callout code,
+.step code,
+.kills code,
+td code {
+  overflow-wrap: anywhere;
 }
-.form .full {
-  width: 100%;
+.codeblock {
+  position: relative;
+  background: var(--code-bg);
+  color: var(--code-text);
+  border: 1px solid color-mix(in srgb, var(--code-text) 10%, transparent);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  margin: 10px 0;
+}
+.codeblock pre {
   margin: 0;
-}
-fieldset {
-  border: 0;
-  padding: 0;
-  margin: 0;
-}
-fieldset legend {
+  padding: 16px;
+  padding-right: 84px;
+  overflow-x: auto;
   font-size: 13px;
-  color: var(--muted);
-  padding: 0;
-  margin-bottom: 4px;
+  line-height: 1.6;
 }
-.checks {
-  display: flex;
-  flex-wrap: wrap;
+.codeblock button {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  padding: 3px 10px;
+  font-size: 12px;
+  background: color-mix(in srgb, var(--code-text) 8%, transparent);
+  border-color: color-mix(in srgb, var(--code-text) 18%, transparent);
+  color: var(--code-text);
+}
+.codeblock button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--code-text) 40%, transparent);
+}
+
+/* Get started */
+.steps {
+  list-style: none;
+  padding: 0;
+  margin: 20px 0 0;
+  display: grid;
   gap: 12px;
 }
-.checks label {
+.step {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 4px 20px 16px;
+}
+.step > p:last-child {
+  margin-bottom: 0;
+}
+.step .form {
+  margin-top: 8px;
+  padding: 0;
+  border: 0;
+}
+.step h3 {
   display: flex;
   align-items: center;
+  margin: 14px 0 8px;
+}
+.step-n {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  margin-right: 10px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  color: var(--brake);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.step.done .step-n {
+  border-color: color-mix(in srgb, var(--ok) 40%, transparent);
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+  color: var(--ok);
+}
+.step.done h3 {
+  color: var(--muted);
+}
+
+/* Sign in, sign up and welcome: one card on the website's hero wash. */
+.signin {
+  position: relative;
+  max-width: 440px;
+  padding-top: max(40px, 10vh);
+}
+.signin::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(
+      60% 50% at 80% 0%,
+      color-mix(in srgb, var(--accent) 12%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      40% 40% at 10% 100%,
+      color-mix(in srgb, var(--brake) 8%, transparent),
+      transparent 70%
+    );
+  pointer-events: none;
+}
+.signin h1.brand {
+  justify-content: center;
+  font-size: 20px;
+  margin-bottom: 20px;
+}
+.signin h1.brand .mark {
+  width: 30px;
+  height: 30px;
+}
+.signin .panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: 24px;
+}
+.signin .panel > :last-child {
+  margin-bottom: 0;
+}
+.signin h2 {
+  font-size: 22px;
+  margin: 0 0 16px;
+}
+.signin form {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+.signin form > p {
+  margin: 0;
+}
+.signin label {
+  display: grid;
   gap: 6px;
-  color: var(--text);
+  font-size: 14px;
+  font-weight: 500;
+}
+.signin button.primary {
+  width: 100%;
+  padding: 10px 16px;
   font-size: 15px;
+}
+.signin .panel > p,
+.signin .panel > a,
+.signin .panel > button.link {
+  font-size: 14px;
 }
 .plans {
   display: grid;
@@ -355,73 +827,25 @@ fieldset legend {
 .plans .plan {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
+  gap: 10px;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 8px 10px;
+  border-radius: 10px;
+  padding: 10px 12px;
   background: var(--surface);
+  font-weight: 400;
   cursor: pointer;
+}
+.plans .plan:hover {
+  border-color: color-mix(in srgb, var(--muted) 60%, var(--border));
 }
 .plans .plan.selected {
   border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface));
 }
 .plans .plan input {
   margin-top: 4px;
 }
-.steps {
-  list-style: none;
-  padding: 0;
-  display: grid;
-  gap: 12px;
-}
-.step {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 4px 16px 12px;
-}
-.step .form {
-  margin-top: 8px;
-}
-.step-n {
-  display: inline-grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  margin-right: 8px;
-  border-radius: 50%;
-  border: 1px solid var(--border);
+.plans .plan .muted {
   font-size: 13px;
-}
-.step.done .step-n {
-  border-color: var(--ok);
-  color: var(--ok);
-}
-.signin h2 {
-  font-size: 20px;
-}
-.codeblock {
-  position: relative;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  margin: 8px 0;
-}
-.codeblock pre {
-  margin: 0;
-  padding: 12px;
-  overflow-x: auto;
-}
-.codeblock button {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-}
-.ok {
-  color: var(--ok);
-}
-.row.full {
-  width: 100%;
-  align-items: flex-end;
-  justify-content: flex-start;
 }

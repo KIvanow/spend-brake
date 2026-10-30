@@ -1,6 +1,19 @@
 import type { ReactNode } from 'react';
 import { usd } from './api.js';
 
+/** The brand mark and name, as on spendbrake.dev: a brake pad across a ring. */
+export function Brand() {
+  return (
+    <>
+      <svg className="mark" viewBox="0 0 32 32" aria-hidden="true">
+        <circle className="ring" cx="16" cy="16" r="12.5" />
+        <rect className="pad" x="8" y="14" width="16" height="4" rx="1" />
+      </svg>
+      Spend Brake
+    </>
+  );
+}
+
 export function Table<T>({
   rows,
   columns,
@@ -10,7 +23,7 @@ export function Table<T>({
   columns: { label: string; render: (row: T) => ReactNode; numeric?: boolean }[];
   empty?: string;
 }) {
-  if (rows.length === 0) return <p className="muted">{empty}</p>;
+  if (rows.length === 0) return <p className="muted empty">{empty}</p>;
   return (
     <div className="table-wrap">
       <table>
@@ -41,7 +54,7 @@ export function Table<T>({
 
 /** Spend per day as bars; values in micros. */
 export function BarChart({ data }: { data: { label: string; value: number }[] }) {
-  if (data.length === 0) return <p className="muted">No spend in this period.</p>;
+  if (data.length === 0) return <p className="muted empty">No spend in this period.</p>;
   const max = Math.max(...data.map((d) => d.value), 1);
   const w = 100 / data.length;
   return (

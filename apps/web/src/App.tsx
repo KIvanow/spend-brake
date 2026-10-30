@@ -23,6 +23,7 @@ import { Spend } from './pages/Spend.js';
 import { Team } from './pages/Team.js';
 import { Telemetry } from './pages/Telemetry.js';
 import { Webhooks } from './pages/Webhooks.js';
+import { Brand } from './ui.js';
 import './styles.css';
 
 const PAGES = {
@@ -50,7 +51,7 @@ function Nav({ page, setPage }: { page: PageName; setPage: (p: PageName) => void
   const options = useAuthOptions();
   const hidden = new Set<PageName>(options.data?.signup ? ['Approvals'] : []);
   return (
-    <nav>
+    <nav aria-label="Pages">
       {(Object.keys(PAGES) as PageName[])
         .filter((p) => !hidden.has(p) || p === page)
         .map((p) => (
@@ -171,8 +172,12 @@ export function App({
   if (pending) {
     return (
       <main className="signin">
-        <h1>Spend Brake</h1>
-        <p className="muted">Signing you in…</p>
+        <h1 className="brand">
+          <Brand />
+        </h1>
+        <div className="panel">
+          <p className="muted">Signing you in…</p>
+        </div>
       </main>
     );
   }
@@ -194,12 +199,14 @@ export function App({
   const Page = PAGES[page];
   return (
     <QueryClientProvider key={session} client={client}>
-      <header>
-        <strong>Spend Brake</strong>
+      <header className="top">
+        <strong className="brand">
+          <Brand />
+        </strong>
         <Nav page={page} setPage={setPage} />
         <button
           type="button"
-          className="link"
+          className="link signout"
           onClick={() => {
             // End the session on the server too, so a copied token stops working; signing
             // out here never waits for it.

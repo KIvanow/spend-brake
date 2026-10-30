@@ -1,5 +1,6 @@
 import { type FormEvent, type ReactNode, useEffect, useState } from 'react';
 import { ApiError, type AuthOptions, api, setToken } from '../api.js';
+import { Brand } from '../ui.js';
 
 export interface Plan {
   id: string;
@@ -22,8 +23,10 @@ const go = (route: string) => {
 function Shell({ children }: { children: ReactNode }) {
   return (
     <main className="signin">
-      <h1>Spend Brake</h1>
-      {children}
+      <h1 className="brand">
+        <Brand />
+      </h1>
+      <div className="panel">{children}</div>
     </main>
   );
 }
