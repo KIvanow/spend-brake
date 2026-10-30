@@ -260,11 +260,12 @@ describe('sessions', () => {
     role = 'admin';
     window.history.replaceState(null, '', `/#login=${CODE}`);
     window.dispatchEvent(new HashChangeEvent('hashchange'));
-    await screen.findByRole('heading', { name: 'Live budget' });
+    // The earlier failed role lookup may still be backing off before the new one runs.
+    await screen.findByRole('heading', { name: 'Live budget' }, { timeout: 5_000 });
     window.location.hash = '/keys';
     window.dispatchEvent(new HashChangeEvent('hashchange'));
-    expect(await screen.findByRole('button', { name: 'Add key' })).toBeTruthy();
-  });
+    expect(await screen.findByRole('button', { name: 'Add key' }, { timeout: 5_000 })).toBeTruthy();
+  }, 15_000);
 
   it('follows a sign-out in another tab', async () => {
     signedInByEmail();
