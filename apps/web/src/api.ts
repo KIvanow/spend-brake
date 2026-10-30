@@ -32,6 +32,23 @@ export function setToken(token: string | null, opts: { remember?: boolean } = {}
   }
 }
 
+/**
+ * Another tab signed in or out: an email sign-in's token is shared through localStorage, so a
+ * `storage` event for it changes who this tab is. Returns the token this tab now sends (null when
+ * signed out), or undefined when the change does not affect this tab: one with its own pasted
+ * or single sign-on token in sessionStorage keeps it.
+ */
+export function tokenChangedElsewhere(e: StorageEvent): { token: string | null } | undefined {
+  if (e.key !== null && e.key !== TOKEN_KEY) return undefined;
+  if (e.key !== null && e.oldValue === e.newValue) return undefined;
+  try {
+    if (store('session')?.getItem(TOKEN_KEY)) return undefined;
+  } catch {
+    // storage blocked: fall through and read what there is
+  }
+  return { token: getToken() };
+}
+
 /** Drop a one-time value from the address bar and history, keeping the page's route. */
 function clearHash(location: Location, route = '#/'): void {
   window.history.replaceState(null, '', `${location.pathname}${location.search}${route}`);
@@ -95,8 +112,9 @@ export async function api<T>(
     issues?: { message?: string }[];
   };
   // Expired or revoked (sessions end when a role changes): back to the sign-in page. A request
-  // that was in flight when the person signed out (or in again) changes nothing.
-  if (res.status === 401 && token && getToken() === token) {
+  // that was in flight when the person signed out (or in again) changes nothing. A 401 on a
+  // request sent with no token means another tab signed out and took the shared token with it.
+  if (res.status === 401 && getToken() === token) {
     setToken(null);
     window.dispatchEvent(new Event(SIGNED_OUT));
   }

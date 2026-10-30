@@ -1,6 +1,14 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
-import { type AuthOptions, SIGNED_OUT, api, getToken, setToken, takeLoginCode } from './api.js';
+import {
+  type AuthOptions,
+  SIGNED_OUT,
+  api,
+  getToken,
+  setToken,
+  takeLoginCode,
+  tokenChangedElsewhere,
+} from './api.js';
 import { Approvals } from './pages/Approvals.js';
 import { useAuthOptions } from './pages/Keys.js';
 import { SignIn, Signup, Welcome, redeemLoginCode } from './pages/Auth.js';
@@ -84,6 +92,9 @@ export function App({
   const [options, setOptions] = useState<AuthOptions | null>(null);
   const [page, setPageState] = useState<PageName>(pageFromHash);
   const [publicRoute, setPublicRoute] = useState(route);
+  // Bumped when another tab signs in as someone else: every page mounts afresh, so nothing the
+  // previous person's queries loaded (their role, their org's tables) stays on screen.
+  const [session, setSession] = useState(0);
 
   useEffect(() => {
     const onHash = () => {
@@ -105,11 +116,24 @@ export function App({
         'Your session ended: it expired, you were signed out, or your role changed. Sign in again.',
       );
     };
+    // Signed out, or in as another person or org, in another tab: follow it here.
+    const onStorage = (e: StorageEvent) => {
+      const change = tokenChangedElsewhere(e);
+      if (!change) return;
+      client.clear();
+      setSigningIn(null);
+      setPending(false);
+      setSignedIn(change.token !== null);
+      setLinkError(change.token === null ? 'You signed out in another tab. Sign in again.' : null);
+      setSession((n) => n + 1);
+    };
     window.addEventListener('hashchange', onHash);
     window.addEventListener(SIGNED_OUT, onSignedOut);
+    window.addEventListener('storage', onStorage);
     return () => {
       window.removeEventListener('hashchange', onHash);
       window.removeEventListener(SIGNED_OUT, onSignedOut);
+      window.removeEventListener('storage', onStorage);
     };
   }, [client]);
 
@@ -169,7 +193,7 @@ export function App({
   }
   const Page = PAGES[page];
   return (
-    <QueryClientProvider client={client}>
+    <QueryClientProvider key={session} client={client}>
       <header>
         <strong>Spend Brake</strong>
         <Nav page={page} setPage={setPage} />

@@ -6,7 +6,8 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.base.js
 COPY apps apps
 COPY packages packages
 RUN pnpm install --frozen-lockfile
-RUN pnpm --filter @spend-brake/web build
+# The dashboard imports browser-safe parts of @spend-brake/shared: build that first.
+RUN pnpm turbo run build --filter=@spend-brake/web...
 
 FROM nginx:1.27-alpine
 COPY infra/nginx.conf /etc/nginx/conf.d/default.conf

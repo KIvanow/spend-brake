@@ -238,6 +238,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@spend-brake/shared':
+        specifier: workspace:^
+        version: link:../../packages/shared
       '@tanstack/react-query':
         specifier: ^5.101.4
         version: 5.101.4(react@19.2.8)

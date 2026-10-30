@@ -219,6 +219,10 @@ describe('alerts', () => {
       'threshold',
       'upstream_key_error',
     ]);
+    expect((await jobs()).find((j) => j.type === 'loop')).toMatchObject({
+      keyId: 'k1',
+      reason: 'loop_detected',
+    });
     expect((await jobs()).find((j) => j.type === 'threshold')).toMatchObject({
       orgId: org,
       scope: 'key:k1',

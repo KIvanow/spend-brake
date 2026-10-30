@@ -1,5 +1,5 @@
 import type { ActionClaims } from '@spend-brake/shared';
-import { usd } from './message.js';
+import { targetName, usd } from './message.js';
 
 const esc = (s: string) =>
   s.replace(
@@ -29,17 +29,22 @@ button.danger{background:#b3261e}input{font:inherit;padding:8px;width:8em}.muted
 </style></head><body><main>${body}</main></body></html>`;
 }
 
-function describe(c: ActionClaims): { title: string; detail: string; danger: boolean } {
+function describe(
+  c: ActionClaims,
+  keyName: string | null,
+): { title: string; detail: string; danger: boolean } {
+  // A reset link carries the bare key id; every other target is a scope or kill label.
+  const target = targetName(c.act === 'reset' ? `key:${c.target}` : c.target, keyName);
   switch (c.act) {
     case 'kill':
       return {
-        title: `Stop all spending for ${c.target}?`,
+        title: `Stop all spending for ${target}?`,
         detail: 'Requests are refused immediately until someone lifts the kill in the dashboard.',
         danger: true,
       };
     case 'raise':
       return {
-        title: `Raise the ${c.kind === 'm' ? 'monthly' : 'daily'} cap of ${c.target}?`,
+        title: `Raise the ${c.kind === 'm' ? 'monthly' : 'daily'} cap of ${target}?`,
         detail:
           c.amount === 'custom'
             ? `Choose how much to add (up to ${usd(c.max ?? 0)}).`
@@ -48,13 +53,13 @@ function describe(c: ActionClaims): { title: string; detail: string; danger: boo
       };
     case 'mute':
       return {
-        title: `Mute alerts for ${c.target} for 24 hours?`,
+        title: `Mute alerts for ${target} for 24 hours?`,
         detail: 'Caps keep enforcing; only the messages stop.',
         danger: false,
       };
     case 'reset':
       return {
-        title: `Reset the loop circuit of key ${c.target}?`,
+        title: `Reset the loop circuit of ${keyName ? target : `key ${c.target}`}?`,
         detail: 'The key can make requests again right away. If the loop continues it trips again.',
         danger: false,
       };
@@ -62,8 +67,11 @@ function describe(c: ActionClaims): { title: string; detail: string; danger: boo
 }
 
 /** Confirm page. GET only renders it; nothing changes until the form is posted. */
-export function confirmPage(c: ActionClaims, opts: { loginRequired: boolean }): string {
-  const d = describe(c);
+export function confirmPage(
+  c: ActionClaims,
+  opts: { loginRequired: boolean; keyName?: string | null },
+): string {
+  const d = describe(c, opts.keyName ?? null);
   if (c.act === 'raise' && opts.loginRequired) {
     return layout(
       d.title,

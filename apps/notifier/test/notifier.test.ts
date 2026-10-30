@@ -558,6 +558,33 @@ describe('action links', () => {
     expect(await valkey.exists(`bk:{o:${o.id}}:circuit:key:k1`)).toBe(0);
   });
 
+  it("names the key a link acts on, and no other org's key", async () => {
+    const o = await org();
+    const cred = await call(o.owner, 'POST', '/v1/providers/credentials', {
+      provider: 'mapbox',
+      name: 'Mapbox',
+      secret: 'pk.test-secret-1a2b',
+    });
+    const key = await call(o.owner, 'POST', '/v1/keys', {
+      name: 'web app',
+      credentials: { mapbox: cred.json<{ id: string }>().id },
+    });
+    const keyId = key.json<{ id: string }>().id;
+    const reset = await pages.inject(`/a/${link(o.id, { act: 'reset', target: keyId })}`);
+    expect(reset.body).toContain('Reset the loop circuit of key &quot;web app&quot;?');
+    expect(reset.body).not.toContain(keyId);
+    const kill = await pages.inject(`/a/${link(o.id, { act: 'kill', target: `key:${keyId}` })}`);
+    expect(kill.body).toContain('Stop all spending for key &quot;web app&quot;?');
+    const raise = await pages.inject(
+      `/a/${link(o.id, { act: 'raise', target: `key:${keyId}`, kind: 'm', amount: '25000000' })}`,
+    );
+    expect(raise.body).toContain('Raise the monthly cap of key &quot;web app&quot;?');
+    // A link for another org never reads this org's key names.
+    const other = await org();
+    const foreign = await pages.inject(`/a/${link(other.id, { act: 'reset', target: keyId })}`);
+    expect(foreign.body).toContain(`Reset the loop circuit of key ${keyId}?`);
+  });
+
   it('escapes link data in the page', async () => {
     const o = await org();
     const page = await pages.inject(

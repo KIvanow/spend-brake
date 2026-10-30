@@ -83,13 +83,107 @@ function AlertEmail() {
   );
 }
 
-/** Alert webhooks and their delivery log. Webhooks are added with the API or CLI. */
+const PRESETS = [
+  { id: 'slack', name: 'Slack', hint: 'https://hooks.slack.com/services/…' },
+  { id: 'discord', name: 'Discord', hint: 'https://discord.com/api/webhooks/…' },
+  { id: 'teams', name: 'Microsoft Teams', hint: 'https://….webhook.office.com/…' },
+  { id: 'raw', name: 'Any URL (signed JSON)', hint: 'https://example.com/spend-brake' },
+] as const;
+
+/** Add a webhook (admins and owners). Its signing secret is shown once. */
+function AddWebhook() {
+  const qc = useQueryClient();
+  const [preset, setPreset] = useState<(typeof PRESETS)[number]['id']>('slack');
+  const [name, setName] = useState('');
+  const [url, setUrl] = useState('');
+  const info = PRESETS.find((p) => p.id === preset)!;
+  const add = useMutation({
+    mutationFn: () =>
+      api<Webhook & { secret: string }>('/v1/webhooks', {
+        method: 'POST',
+        body: { name: name.trim() || info.name, url: url.trim(), preset },
+      }),
+    onSuccess: () => {
+      setName('');
+      setUrl('');
+      void qc.invalidateQueries({ queryKey: ['webhooks'] });
+    },
+  });
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    add.mutate();
+  };
+  return (
+    <>
+      <form className="form" onSubmit={submit} aria-label="Add a webhook">
+        <h3>Add a webhook</h3>
+        <label>
+          Send to
+          <select value={preset} onChange={(e) => setPreset(e.target.value as typeof preset)}>
+            {PRESETS.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Name
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={info.name}
+            maxLength={200}
+          />
+        </label>
+        <label className="grow">
+          Webhook URL
+          <input
+            type="url"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder={info.hint}
+            autoComplete="off"
+            required
+          />
+        </label>
+        <button type="submit" className="primary" disabled={add.isPending}>
+          Add webhook
+        </button>
+        <p className="muted full">It gets every alert. The URL is stored encrypted.</p>
+      </form>
+      {add.isError && <p className="error">{add.error.message}</p>}
+      {add.data && (
+        <div className="callout">
+          <p>
+            <strong>Added {add.data.name}.</strong> Each post is signed with this secret, so your
+            endpoint can check it came from Spend Brake. Copy it now: it is not shown again.
+          </p>
+          <p className="secret">
+            <code>{add.data.secret}</code>
+          </p>
+        </div>
+      )}
+    </>
+  );
+}
+
+/** Alert webhooks and their delivery log. */
 export function Webhooks() {
+  const qc = useQueryClient();
+  const { can } = useRole();
+  const [open, setOpen] = useState<string | null>(null);
+  const remove = useMutation({
+    mutationFn: (id: string) => api(`/v1/webhooks/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    onSuccess: (_data, id) => {
+      setOpen((o) => (o === id ? null : o));
+      void qc.invalidateQueries({ queryKey: ['webhooks'] });
+    },
+  });
   const hooks = useQuery({
     queryKey: ['webhooks'],
     queryFn: () => api<{ items: Webhook[] }>('/v1/webhooks'),
   });
-  const [open, setOpen] = useState<string | null>(null);
   const log = useQuery({
     queryKey: ['deliveries', open],
     queryFn: () =>
@@ -117,17 +211,43 @@ export function Webhooks() {
           {
             label: '',
             render: (w) => (
-              <button
-                type="button"
-                aria-pressed={open === w.id}
-                onClick={() => setOpen(open === w.id ? null : w.id)}
-              >
-                Delivery log
-              </button>
+              <>
+                <button
+                  type="button"
+                  aria-pressed={open === w.id}
+                  onClick={() => setOpen(open === w.id ? null : w.id)}
+                >
+                  Delivery log
+                </button>
+                {can('admin') && (
+                  <>
+                    {' '}
+                    <button
+                      type="button"
+                      className="danger"
+                      aria-label={`Delete webhook ${w.name}`}
+                      disabled={remove.isPending}
+                      onClick={() => {
+                        if (window.confirm(`Delete the webhook "${w.name}"? Its alerts stop.`)) {
+                          remove.mutate(w.id);
+                        }
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </>
+                )}
+              </>
             ),
           },
         ]}
       />
+      {remove.isError && <p className="error">{remove.error.message}</p>}
+      {can('admin') ? (
+        <AddWebhook />
+      ) : (
+        <p className="muted">Admins and owners can add and delete webhooks.</p>
+      )}
       {open && (
         <>
           <h3>Deliveries</h3>

@@ -563,6 +563,11 @@ export class BudgetEngine {
    * Close a key's loop circuit early (Resume, the alert's "Reset circuit" action). Its
    * identical-request counters and the session's rate counter go too: left in place, the next
    * repeat of the request would trip the circuit again at once.
+   *
+   * The SMS pumping counters (`pumpNumber`, `pumpPrefix`) stay. They count sends per hour to a
+   * number or number range, which an outside attacker drives, not a bug in the app; clearing them
+   * would hand the attacker a fresh hour's allowance on every reset. As when the cooldown ends by
+   * itself, sends to other numbers go through and the flagged ones trip it again.
    */
   async resetCircuit(orgId: string, keyId: string): Promise<void> {
     const k = orgKeys(orgId);

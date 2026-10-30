@@ -34,14 +34,35 @@ export interface LinkOptions {
   now: () => Date;
 }
 
+/**
+ * Micros as dollars, to the cent; amounts under a cent to the dashboard's 4 decimals (trailing
+ * zeros dropped), so a $0.005 call does not read as $0.01.
+ */
 export const usd = (micros: unknown): string => {
   const m =
     typeof micros === 'bigint' || typeof micros === 'number' || typeof micros === 'string'
       ? BigInt(micros)
       : 0n;
+  if (m > 0n && m < 10_000n) {
+    // Hundredths of a cent; anything smaller still shows as the smallest step, not as $0.
+    const steps = (m + 50n) / 100n || 1n;
+    return `$0.${String(steps).padStart(4, '0').replace(/0+$/, '')}`;
+  }
   const cents = (m + 5_000n) / 10_000n;
   return `$${cents / 100n}.${String(cents % 100n).padStart(2, '0')}`;
 };
+
+/**
+ * A kill target, raise or mute scope as people know it: a key by its name where the notifier
+ * found one, a provider by its name; anything else as the label itself.
+ */
+export function targetName(target: string, keyName?: unknown): string {
+  if (target.startsWith('key:')) {
+    return typeof keyName === 'string' && keyName ? `key "${keyName}"` : target;
+  }
+  if (target.startsWith('prov:')) return providerName(target.slice(5));
+  return target;
+}
 
 const windowName = (w: unknown) => (String(w).startsWith('d:') ? 'today' : 'this month');
 
@@ -116,7 +137,15 @@ export function buildMessage(alertId: string, job: AlertJob, o: LinkOptions): Me
         title: `${what}: ${where} (${windowName(job.window)})`,
         text: `Spending for ${where} ${windowName(job.window)} crossed ${job.mark === 'soft' ? 'its soft limit' : `${job.mark}% of its hard cap`}.`,
         actions: [
-          ...(kill ? [{ id: 'kill', label: `Kill ${kill}`, url: link('kill', kill) }] : []),
+          ...(kill
+            ? [
+                {
+                  id: 'kill',
+                  label: `Kill ${targetName(kill, kill === scope ? job.scopeName : job.keyName)}`,
+                  url: link('kill', kill),
+                },
+              ]
+            : []),
           ...raise(scope, job.window),
           { id: 'mute', label: 'Mute 24 h', url: link('mute', scope) },
         ],
@@ -130,6 +159,19 @@ export function buildMessage(alertId: string, job: AlertJob, o: LinkOptions): Me
         actions: [...raise(scope, job.window), ...view('/#/caps')],
       };
     case 'loop':
+      // The SMS pumping guard opens the same circuit. Its hourly counts per number and number
+      // range are the fraud signal, so a reset keeps them (see BudgetEngine.resetCircuit).
+      if (job.reason === 'pumping') {
+        return {
+          ...base,
+          title: `Possible SMS pumping on ${keyRef}`,
+          text: `Too many messages went to one phone number or number range from ${keyRef}, a common sign of SMS pumping fraud; it is paused for the cool-down. Resetting the circuit lets it send to other numbers again, but more messages to the same number or range trip it again until their hourly count runs out.`,
+          actions: [
+            { id: 'kill', label: 'Kill key', url: link('kill', `key:${String(job.keyId)}`) },
+            { id: 'reset', label: 'Reset circuit', url: link('reset', String(job.keyId)) },
+          ],
+        };
+      }
       return {
         ...base,
         title: `Loop detected on ${keyRef}`,

@@ -1,3 +1,4 @@
+import { providerName } from '@spend-brake/shared/providers';
 import { useQuery } from '@tanstack/react-query';
 import { type ReactNode, useState } from 'react';
 import { api, usd } from '../api.js';
@@ -85,7 +86,7 @@ export function Setup() {
         <Step n={1} title="Add your provider key" done={creds.length > 0}>
           {creds.length > 0 ? (
             <p className="muted">
-              Connected: {[...new Set(creds.map((c) => c.provider))].join(', ')}.{' '}
+              Connected: {[...new Set(creds.map((c) => providerName(c.provider)))].join(', ')}.{' '}
               <a href="#/keys" onClick={() => go('keys')}>
                 Add another
               </a>

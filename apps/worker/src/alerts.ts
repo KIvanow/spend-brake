@@ -80,7 +80,8 @@ export function alertsFor(orgId: string, streamId: string, e: Record<string, str
       type: 'loop',
       orgId,
       dedupeId: `loop:${orgId}:${e.keyId}:${streamId}`,
-      data: { keyId: e.keyId, session: e.session, hash: e.hash },
+      // reason: 'pumping' when the SMS pumping guard opened the circuit, not repeated requests.
+      data: { keyId: e.keyId, session: e.session, hash: e.hash, reason: e.reason },
     });
   }
   // Settlement adjustments above the worst case mean the same thing (Twilio priced higher).

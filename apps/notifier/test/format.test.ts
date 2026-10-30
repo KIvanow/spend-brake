@@ -66,6 +66,26 @@ describe('alert messages', () => {
     });
   });
 
+  it('says when the SMS pumping guard, not a loop, paused a key', () => {
+    const m = buildMessage(
+      'a',
+      { type: 'loop', orgId: 'o', keyId: 'k9', keyName: 'signup', reason: 'pumping' },
+      links,
+    );
+    expect(m.title).toBe('Possible SMS pumping on key "signup"');
+    expect(m.text).toContain('same number or range trip it again');
+    expect(m.actions.map((a) => a.label)).toEqual(['Kill key', 'Reset circuit']);
+  });
+
+  it('blocked: shows a sub-cent request accurately', () => {
+    const m = buildMessage(
+      'a',
+      { type: 'blocked', orgId: 'o', scope: 'org', window: 'd:20261029', worstMicros: '5000' },
+      links,
+    );
+    expect(m.text).toContain('A request needing up to $0.005 was refused');
+  });
+
   it('loop: kill key and reset circuit', () => {
     const m = buildMessage('a', { type: 'loop', orgId: 'o', keyId: 'k9', session: 's1' }, links);
     expect(m.actions.map((a) => a.label)).toEqual(['Kill key', 'Reset circuit']);
@@ -86,6 +106,19 @@ describe('alert messages', () => {
       links,
     );
     expect(threshold.title).toBe('Spend at 50% of cap: key "web app" (this month)');
+    expect(threshold.actions[0]).toMatchObject({ id: 'kill', label: 'Kill key "web app"' });
+    const agent = buildMessage(
+      'a',
+      { type: 'threshold', orgId: 'o', scope: 'agent:x', mark: '80', keyId: 'k9', keyName: 'bot' },
+      links,
+    );
+    expect(agent.actions[0]).toMatchObject({ id: 'kill', label: 'Kill key "bot"' });
+    const sku = buildMessage(
+      'a',
+      { type: 'threshold', orgId: 'o', scope: 'sku:google-maps:geocode', mark: '80' },
+      links,
+    );
+    expect(sku.actions[0]).toMatchObject({ id: 'kill', label: 'Kill Google Maps Platform' });
     const rejected = buildMessage(
       'a',
       {
@@ -184,7 +217,13 @@ describe('alert messages', () => {
 
   it('formats micros as dollars', () => {
     expect(usd(25_000_000)).toBe('$25.00');
-    expect(usd('2830')).toBe('$0.00');
+    expect(usd(0)).toBe('$0.00');
+    // Under a cent: the dashboard's 4 decimals, not rounded up to $0.01.
+    expect(usd('5000')).toBe('$0.005');
+    expect(usd('2830')).toBe('$0.0028');
+    expect(usd('7')).toBe('$0.0001');
+    expect(usd('9999')).toBe('$0.01');
+    expect(usd('10000')).toBe('$0.01');
     expect(usd('32000')).toBe('$0.03');
     expect(usd('1234567')).toBe('$1.23');
   });

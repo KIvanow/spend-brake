@@ -9,6 +9,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./providers": {
+      "types": "./dist/providers.d.ts",
+      "default": "./dist/providers.js"
+    },
     "./telemetry": {
       "types": "./dist/telemetry.d.ts",
       "default": "./dist/telemetry.js"

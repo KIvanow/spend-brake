@@ -266,6 +266,88 @@ describe('sessions', () => {
     expect(await screen.findByRole('button', { name: 'Add key' })).toBeTruthy();
   });
 
+  it('follows a sign-out in another tab', async () => {
+    signedInByEmail();
+    await screen.findByRole('heading', { name: 'Live budget' });
+    // The other tab removes the shared token; the browser tells this one.
+    window.localStorage.removeItem('brake.adminToken');
+    window.dispatchEvent(
+      new StorageEvent('storage', {
+        key: 'brake.adminToken',
+        oldValue: 'sbt_email',
+        newValue: null,
+      }),
+    );
+    expect(await screen.findByText(/You signed out in another tab/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
+  });
+
+  it('treats a 401 on a request sent without a token as signed out', async () => {
+    signedInByEmail();
+    await screen.findByRole('heading', { name: 'Live budget' });
+    // Signed out elsewhere, and the event was missed: the next request goes without a token.
+    window.localStorage.removeItem('brake.adminToken');
+    routes['GET /v1/users'] = (c) =>
+      c.auth ? [200, { items: [] }] : [401, { message: 'Missing or invalid API token.' }];
+    window.location.hash = '/team';
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+    expect(await screen.findByText(/Your session ended/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
+  });
+
+  it('follows a sign-in as someone else in another tab: new role, no old data', async () => {
+    routes['GET /v1/auth/session'] = (c) =>
+      c.auth === 'Bearer sbt_viewer'
+        ? [200, { orgId: 'other', role: 'viewer', actor: 'user:u2', signIn: 'email' }]
+        : [200, { orgId: 'acme', role: 'owner', actor: 'user:u1', signIn: 'email' }];
+    routes['GET /v1/providers/credentials'] = (c) =>
+      c.auth === 'Bearer sbt_viewer'
+        ? [200, { items: [] }]
+        : [
+            200,
+            {
+              items: [
+                {
+                  id: 'cred_1',
+                  provider: 'mapbox',
+                  name: 'Mapbox',
+                  hint: 'abcd',
+                  createdAt: '2026-10-30T10:00:00Z',
+                },
+              ],
+            },
+          ];
+    window.location.hash = '/keys';
+    signedInByEmail();
+    expect(await screen.findByRole('button', { name: 'Add key' })).toBeTruthy();
+    expect((await screen.findAllByText(/…abcd/)).length).toBeGreaterThan(0);
+
+    window.localStorage.setItem('brake.adminToken', 'sbt_viewer');
+    window.dispatchEvent(
+      new StorageEvent('storage', {
+        key: 'brake.adminToken',
+        oldValue: 'sbt_email',
+        newValue: 'sbt_viewer',
+      }),
+    );
+    expect(await screen.findByText(/Admins and owners can add/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Add key' })).toBeNull();
+    expect(screen.queryAllByText(/…abcd/)).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeTruthy();
+  });
+
+  it('keeps its own pasted token when another tab signs out', async () => {
+    routes['GET /v1/auth/session'] = () => [200, { orgId: 'acme', role: 'owner' }];
+    window.sessionStorage.setItem('brake.adminToken', 'sbt_email');
+    render(<App client={client()} />);
+    await screen.findByRole('heading', { name: 'Live budget' });
+    window.dispatchEvent(
+      new StorageEvent('storage', { key: 'brake.adminToken', oldValue: 'sbt_x', newValue: null }),
+    );
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeTruthy();
+  });
+
   it('says why when the session ended', async () => {
     signedInByEmail();
     await screen.findByRole('heading', { name: 'Live budget' });
@@ -299,6 +381,78 @@ describe('alerts', () => {
     expect(calls.find((c) => c.method === 'PUT' && c.url === '/v1/org')!.body).toEqual({
       alertEmail: 'ops@acme.test',
     });
+  });
+});
+
+describe('webhooks', () => {
+  it('lets an admin add a Slack webhook, shows its secret once, and deletes it', async () => {
+    const hooks: Record<string, unknown>[] = [];
+    routes['GET /v1/auth/session'] = () => [200, { orgId: 'acme', role: 'admin' }];
+    routes['GET /v1/org'] = () => [200, { id: 'acme', settings: {} }];
+    routes['GET /v1/webhooks'] = () => [200, { items: hooks }];
+    routes['POST /v1/webhooks'] = (c) => {
+      const b = c.body as { name: string; url: string; preset: string };
+      const row = {
+        id: 'wh_1',
+        name: b.name,
+        preset: b.preset,
+        urlHint: 'https://hooks.slack.com',
+        events: [],
+        createdAt: '2026-10-30T10:00:00Z',
+      };
+      hooks.push(row);
+      return [201, { ...row, secret: 'whsec_once' }];
+    };
+    routes['DELETE /v1/webhooks/wh_1'] = () => {
+      const row = hooks.pop();
+      return [200, row];
+    };
+    window.location.hash = '/webhooks';
+    signedInByEmail();
+    const user = userEvent.setup();
+    const form = await screen.findByRole('form', { name: 'Add a webhook' });
+    await user.type(
+      within(form).getByLabelText('Webhook URL'),
+      'https://hooks.slack.com/services/T0/B0/x',
+    );
+    await user.click(within(form).getByRole('button', { name: 'Add webhook' }));
+    expect(await screen.findByText('whsec_once')).toBeTruthy();
+    expect(calls.find((c) => c.method === 'POST' && c.url === '/v1/webhooks')!.body).toEqual({
+      name: 'Slack',
+      url: 'https://hooks.slack.com/services/T0/B0/x',
+      preset: 'slack',
+    });
+    expect(await screen.findByText('https://hooks.slack.com')).toBeTruthy();
+
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    await user.click(screen.getByRole('button', { name: 'Delete webhook Slack' }));
+    expect(await screen.findByText(/No webhooks/)).toBeTruthy();
+  });
+
+  it('shows viewers the webhooks without the add form or delete buttons', async () => {
+    routes['GET /v1/auth/session'] = () => [200, { orgId: 'acme', role: 'viewer' }];
+    routes['GET /v1/org'] = () => [200, { id: 'acme', settings: {} }];
+    routes['GET /v1/webhooks'] = () => [
+      200,
+      {
+        items: [
+          {
+            id: 'wh_1',
+            name: 'ops',
+            preset: 'discord',
+            urlHint: 'https://discord.com',
+            events: [],
+            createdAt: '',
+          },
+        ],
+      },
+    ];
+    window.location.hash = '/webhooks';
+    signedInByEmail();
+    expect(await screen.findByText(/Admins and owners can add and delete webhooks/)).toBeTruthy();
+    expect(await screen.findByText('https://discord.com')).toBeTruthy();
+    expect(screen.queryByRole('form', { name: 'Add a webhook' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Delete webhook/ })).toBeNull();
   });
 });
 
@@ -646,7 +800,7 @@ describe('getting started', () => {
     );
 
     // The step is done, and the advice names the proxy's address and stays on screen.
-    expect(await screen.findByText(/Connected: google-maps/)).toBeTruthy();
+    expect(await screen.findByText(/Connected: Google Maps Platform\./)).toBeTruthy();
     expect(screen.getByText('203.0.113.7')).toBeTruthy();
     expect(screen.getByRole('link', { name: /Credentials/ }).getAttribute('href')).toBe(
       'https://console.cloud.google.com/apis/credentials',

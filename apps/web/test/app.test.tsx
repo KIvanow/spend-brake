@@ -397,11 +397,17 @@ describe('dashboard', () => {
       200,
       { configured: false, message: 'Spend is measured by the proxy only.', lastError: null },
     ];
+    routes['GET /v1/keys'] = () => [
+      200,
+      { items: [{ id: 'k1', name: 'web app', status: 'active' }] },
+    ];
     const user = await signIn();
     await user.click(screen.getByRole('button', { name: 'Spend' }));
     expect(await screen.findByText('$0.04')).toBeTruthy();
     expect(screen.getByRole('img')).toBeTruthy();
     expect(await screen.findByText('$0.0420')).toBeTruthy();
+    // Keys by name, not id.
+    expect((await screen.findByText('web app')).getAttribute('title')).toBe('k1');
     expect(await screen.findByText('Spend is measured by the proxy only.')).toBeTruthy();
   });
 

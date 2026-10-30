@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api, usd } from '../api.js';
 import { BarChart, Table } from '../ui.js';
+import { useKeys } from './Keys.js';
 
 type Row = Record<string, string | number | null> & { costMicros: number; requests: number };
 
@@ -20,6 +21,8 @@ export function Spend() {
     queryFn: () =>
       api<{ items: Row[] }>(`/v1/spend?groupBy=${by}&from=${encodeURIComponent(since(days))}`),
   });
+  const keys = useKeys();
+  const keyName = new Map((keys.data?.items ?? []).map((k) => [k.id, k.name]));
   const total = (daily.data?.items ?? []).reduce((a, r) => a + r.costMicros, 0);
   const rec = useQuery({
     queryKey: ['reconciliation'],
@@ -114,7 +117,15 @@ export function Spend() {
       <Table
         rows={[...(grouped.data?.items ?? [])].sort((a, b) => b.costMicros - a.costMicros)}
         columns={[
-          { label: by, render: (r) => <code>{String(r[by] ?? '—')}</code> },
+          {
+            label: by,
+            render: (r) => {
+              const v = String(r[by] ?? '—');
+              // Keys by name, as on Events and Overview (the id stays in the tooltip).
+              const name = by === 'key' ? keyName.get(v) : undefined;
+              return name ? <span title={v}>{name}</span> : <code>{v}</code>;
+            },
+          },
           { label: 'Requests', render: (r) => r.requests.toLocaleString('en-US'), numeric: true },
           { label: 'Cost', render: (r) => usd(r.costMicros, 4), numeric: true },
         ]}

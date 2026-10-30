@@ -1,5 +1,5 @@
-import { type Db, eq, orgs } from '@spend-brake/db';
-import { redactingLoggerOptions, verifyAction } from '@spend-brake/shared';
+import { type Db, and, eq, orgs, virtualKeys } from '@spend-brake/db';
+import { type ActionClaims, redactingLoggerOptions, verifyAction } from '@spend-brake/shared';
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
 import { request } from 'undici';
 import { PAGE_HEADERS, confirmPage, resultPage } from './pages.js';
@@ -32,6 +32,18 @@ const DONE: Record<string, string> = {
   mute: 'Alerts for this scope are muted for 24 hours.',
   reset: 'The circuit was reset.',
 };
+
+/** The name of the key a link acts on, so its page names it rather than its id. */
+async function keyName(db: Db, c: ActionClaims): Promise<string | null> {
+  const id = c.act === 'reset' ? c.target : c.target.startsWith('key:') ? c.target.slice(4) : null;
+  if (!id) return null;
+  const [key] = await db
+    .select({ name: virtualKeys.name })
+    .from(virtualKeys)
+    .where(and(eq(virtualKeys.orgId, c.org), eq(virtualKeys.id, id)))
+    .limit(1);
+  return key?.name ?? null;
+}
 
 /** Confirm pages for alert action links. Confirmed actions run through the admin API. */
 export function buildServer(deps: ServerDeps): FastifyInstance {
@@ -68,7 +80,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         (org?.settings as { requireLoginForRaise?: boolean } | undefined)?.requireLoginForRaise,
       );
     }
-    return reply.send(confirmPage(check.claims, { loginRequired }));
+    return reply.send(
+      confirmPage(check.claims, { loginRequired, keyName: await keyName(deps.db, check.claims) }),
+    );
   });
 
   app.post<{ Params: { token: string }; Body: { amountUsd?: string } | undefined }>(
