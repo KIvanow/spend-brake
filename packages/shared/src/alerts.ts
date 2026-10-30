@@ -14,6 +14,7 @@ export const ALERT_TYPES = [
   'catalog_drift',
   'reconcile_drift',
   'catalog_price_change',
+  'license_issued',
 ] as const;
 
 export type AlertType = (typeof ALERT_TYPES)[number];

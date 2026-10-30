@@ -177,6 +177,13 @@ export function buildMessage(alertId: string, job: AlertJob, o: LinkOptions): Me
         actions: view('/#/spend'),
       };
     }
+    case 'license_issued':
+      return {
+        ...base,
+        title: `Your Spend Brake ${String(job.edition)} license`,
+        text: `The license for org ${String(job.orgId)} is attached (valid until ${String(job.expiresAt).slice(0, 10)}). Install it with: brake license install ${String(job.orgId)}.license. It is also in the dashboard under Billing.`,
+        actions: view('/#/billing'),
+      };
     case 'catalog_drift':
       return {
         ...base,

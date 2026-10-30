@@ -7,11 +7,24 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "dev": "tsx watch --env-file-if-exists=../../infra/.env src/main.ts",
-    "start": "node dist/main.js",
+    "start": "node --import @spend-brake/shared/telemetry-register dist/main.js",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "seed": "tsx src/seed.ts"
   },
   "dependencies": {
-    "fastify": "^5.12.5"
+    "@fastify/rate-limit": "^11.2.1",
+    "@spend-brake/api": "workspace:^",
+    "@spend-brake/budget": "workspace:^",
+    "@spend-brake/db": "workspace:^",
+    "@spend-brake/shared": "workspace:^",
+    "bullmq": "^6.5.1",
+    "fastify": "^5.12.5",
+    "ioredis": "^6.0.0",
+    "stripe": "^22.5.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "testcontainers": "^12.2.1"
   }
 }

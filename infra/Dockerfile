@@ -1,5 +1,5 @@
 # One image per service: docker build -f infra/Dockerfile --build-arg APP=proxy .
-# APP is one of proxy, api, worker, notifier, or ee (with START=start:api or start:worker for
+# APP is one of proxy, api, worker, notifier, billing, or ee (with START=start:api or start:worker for
 # the API and worker with the commercial features; see infra/docker-compose.ee.yml).
 FROM node:22-slim AS build
 ARG APP

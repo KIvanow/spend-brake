@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { type Ctx, audit, id, micros } from '../common.js';
 import { newId } from '../ids.js';
 import { ApiError, type Router, notFound } from '../route.js';
+import { requireCapacity, requireFeature } from '../entitlements.js';
 
 const loop = z.object({
   identical: z.number().int().positive(),
@@ -189,6 +190,8 @@ export function keyRoutes(r: Router, ctx: Ctx): void {
     body: createBody,
     response: keyView.extend({ token: z.string() }),
     handler: async ({ auth, body }) => {
+      await requireCapacity(ctx, auth.orgId, 'key');
+      if (body.loop) await requireFeature(ctx, auth.orgId, 'customLoopRules');
       await checkCredentials(auth.orgId, body.credentials);
       const keyId = newId('key');
       const token = generateVirtualKey();
@@ -250,6 +253,7 @@ export function keyRoutes(r: Router, ctx: Ctx): void {
     handler: async ({ auth, params, body }) => {
       const row = await load(auth.orgId, params.id);
       if (row.status !== 'active') throw new ApiError(409, 'conflict', 'Key is revoked.');
+      if (body.loop) await requireFeature(ctx, auth.orgId, 'customLoopRules');
       if (body.credentials) await checkCredentials(auth.orgId, body.credentials);
       const rec = record(row.id, auth.orgId, body, row.config as KeyRecord);
       await ctx.registry.putKeyByHash(row.tokenHash, rec);

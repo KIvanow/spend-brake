@@ -67,6 +67,18 @@ export async function processAlert(
     );
     return 'none';
   }
+  // A license goes to the billing contact only, as an attachment; never to webhooks.
+  if (job.type === 'license_issued') {
+    const message = buildMessage(alertId, job, deps.links);
+    if (!deps.mail || typeof job.email !== 'string') {
+      deps.log.warn({ alertId, orgId: job.orgId }, 'license not emailed: no SMTP or address');
+      return 'none';
+    }
+    await sendMail(deps, job.email, message, [
+      { filename: `${String(job.orgId)}.license`, content: String(job.license) },
+    ]);
+    return 'email';
+  }
   const scope = alertScope(job);
   if (scope && (await deps.valkey.exists(`bk:{o:${job.orgId}}:mute:${scope}`))) return 'muted';
 
@@ -100,13 +112,19 @@ export async function processAlert(
   return 'none';
 }
 
-async function sendMail(deps: ProcessorDeps, to: string, m: Message): Promise<void> {
+async function sendMail(
+  deps: ProcessorDeps,
+  to: string,
+  m: Message,
+  attachments: { filename: string; content: string }[] = [],
+): Promise<void> {
   const links = m.actions.map((a) => `${a.label}: ${a.url}`).join('\n');
   await deps.mail!.transport.sendMail({
     from: deps.mail!.from,
     to,
     subject: `[Spend Brake] ${m.title}`,
     text: `${m.text}\n\n${links}\n\nAction links work once and expire after ${Math.round(deps.links.ttlSec / 60)} minutes.`,
+    ...(attachments.length ? { attachments } : {}),
   });
 }
 

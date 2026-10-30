@@ -1,0 +1,569 @@
+import { generateKeyPairSync, randomBytes } from 'node:crypto';
+import { buildApi } from '@spend-brake/api';
+import { BudgetEngine, connectValkey, type ValkeyClient } from '@spend-brake/budget';
+import {
+  type Db,
+  createDb,
+  eq,
+  issuedLicenses,
+  migrate,
+  orgEntitlements,
+  stripeEvents,
+  virtualKeys,
+} from '@spend-brake/db';
+import {
+  LICENSE_FORMAT,
+  LocalKeyWrapper,
+  licensePayload,
+  verifyDocument,
+} from '@spend-brake/shared';
+import type { FastifyInstance } from 'fastify';
+import Stripe from 'stripe';
+import { GenericContainer, type StartedTestContainer, Wait } from 'testcontainers';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { PLAN_METADATA, type Plan, lookupKey } from '../src/plans.js';
+import { buildServer } from '../src/server.js';
+import { seedStripe } from '../src/seed.js';
+import { stripeClient } from '../src/stripe.js';
+import type { LicenseMail } from '../src/webhooks.js';
+
+const SECRET = 'whsec_test_secret';
+const NOW = new Date('2026-10-30T12:00:00Z');
+const signer = generateKeyPairSync('ed25519', {
+  publicKeyEncoding: { type: 'spki', format: 'pem' },
+  privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+});
+const webhooks = new Stripe('sk_test_signing_only').webhooks;
+
+// --- a fake Stripe API (no network) ------------------------------------------------------------
+const customers = new Map<string, Stripe.Customer>();
+const checkouts: Stripe.Checkout.SessionCreateParams[] = [];
+const products: Record<string, { id: string; metadata: Record<string, string> }> = {
+  prod_business: { id: 'prod_business', metadata: { [PLAN_METADATA]: 'business' } },
+  prod_enterprise: {
+    id: 'prod_enterprise',
+    metadata: { [PLAN_METADATA]: 'enterprise', org_units: '40' },
+  },
+  prod_team: { id: 'prod_team', metadata: { [PLAN_METADATA]: 'team' } },
+};
+let customerSeq = 0;
+const fakeStripe = {
+  customers: {
+    create: (p: Stripe.CustomerCreateParams) => {
+      const c = {
+        id: `cus_${++customerSeq}`,
+        email: p.email,
+        metadata: p.metadata,
+      } as Stripe.Customer;
+      customers.set(c.id, c);
+      return Promise.resolve(c);
+    },
+    retrieve: (id: string) => Promise.resolve(customers.get(id)!),
+  },
+  checkout: {
+    sessions: {
+      create: (p: Stripe.Checkout.SessionCreateParams) => {
+        checkouts.push(p);
+        return Promise.resolve({
+          id: `cs_${checkouts.length}`,
+          url: `https://checkout.stripe.test/${checkouts.length}`,
+        });
+      },
+    },
+  },
+  billingPortal: {
+    sessions: {
+      create: (p: { customer: string; return_url: string }) =>
+        Promise.resolve({ url: `https://billing.stripe.test/${p.customer}` }),
+    },
+  },
+  prices: {
+    list: (p: { lookup_keys: string[] }) =>
+      Promise.resolve({ data: p.lookup_keys.map((k) => ({ id: `price_${k}`, lookup_key: k })) }),
+  },
+  products: { retrieve: (id: string) => Promise.resolve(products[id]!) },
+  webhooks,
+} as unknown as Parameters<typeof buildServer>[0]['stripe'];
+
+// --- environment -------------------------------------------------------------------------------
+let pg: StartedTestContainer;
+let vk: StartedTestContainer;
+let db: Db;
+let pool: { end(): Promise<void> };
+let valkey: ValkeyClient;
+let billing: FastifyInstance;
+let api: FastifyInstance;
+const mails: LicenseMail[] = [];
+
+beforeAll(async () => {
+  [pg, vk] = await Promise.all([
+    new GenericContainer('postgres:16')
+      .withEnvironment({ POSTGRES_PASSWORD: 'p', POSTGRES_USER: 'brake', POSTGRES_DB: 'brake' })
+      .withExposedPorts(5432)
+      .withWaitStrategy(Wait.forLogMessage(/database system is ready to accept connections/, 2))
+      .start(),
+    new GenericContainer('valkey/valkey:8')
+      .withExposedPorts(6379)
+      .withWaitStrategy(Wait.forLogMessage('Ready to accept connections'))
+      .start(),
+  ]);
+  ({ db, pool } = createDb(`postgres://brake:p@${pg.getHost()}:${pg.getMappedPort(5432)}/brake`));
+  await migrate(db);
+  valkey = connectValkey(`redis://${vk.getHost()}:${vk.getMappedPort(6379)}`);
+  billing = await buildServer({
+    db,
+    valkey,
+    stripe: fakeStripe,
+    webhookSecret: SECRET,
+    dashboardUrl: 'https://app.example.com',
+    licenseKey: signer.privateKey,
+    sendLicense: (m) => {
+      mails.push(m);
+      return Promise.resolve();
+    },
+    signup: true,
+    now: () => NOW,
+  });
+  api = await buildApi({
+    db,
+    valkey,
+    wrapper: new LocalKeyWrapper(randomBytes(32).toString('base64')),
+    authCacheMs: 0,
+    rateLimitPerMinute: 10_000,
+    now: () => NOW,
+  });
+});
+
+afterAll(async () => {
+  await billing.close();
+  await api.close();
+  await valkey.quit();
+  await pool.end();
+  await Promise.all([pg.stop(), vk.stop()]);
+});
+
+// --- helpers -------------------------------------------------------------------------------------
+let seq = 0;
+const bearer = (t: string) => ({ authorization: `Bearer ${t}` });
+
+async function signup(plan: Plan | 'free' = 'free') {
+  const orgId = `org_${++seq}_${randomBytes(2).toString('hex')}`;
+  const res = await billing.inject({
+    method: 'POST',
+    url: '/v1/billing/signup',
+    payload: { orgId, name: orgId, email: `${orgId}@example.com`, plan },
+  });
+  expect(res.statusCode, res.body).toBe(201);
+  return { orgId, ...res.json<{ ownerToken: string; checkoutUrl?: string }>() };
+}
+
+function post(event: { id: string; type: string; data: { object: unknown } }, secret = SECRET) {
+  const payload = JSON.stringify({ object: 'event', api_version: '2026-07-29.dahlia', ...event });
+  return billing.inject({
+    method: 'POST',
+    url: '/v1/billing/webhook',
+    headers: {
+      'content-type': 'application/json',
+      'stripe-signature': webhooks.generateTestHeaderString({ payload, secret }),
+    },
+    payload,
+  });
+}
+
+let eventSeq = 0;
+const event = (type: string, object: unknown) => ({
+  id: `evt_${++eventSeq}`,
+  type,
+  data: { object },
+});
+
+const subscription = (
+  orgId: string,
+  customer: string,
+  plan: Plan,
+  status: Stripe.Subscription.Status,
+  id = `sub_${orgId}`,
+) => ({
+  id,
+  object: 'subscription',
+  customer,
+  status,
+  metadata: { orgId },
+  items: {
+    data: [
+      {
+        price: { id: `price_${plan}`, lookup_key: lookupKey(plan as 'indie'), metadata: {} },
+        current_period_end: Math.floor(NOW.getTime() / 1000) + 30 * 86_400,
+      },
+    ],
+  },
+});
+
+const invoice = (id: string, customer: string, product: string, periodEnd: Date) => ({
+  id,
+  object: 'invoice',
+  customer,
+  customer_email: 'billing@example.com',
+  lines: {
+    data: [
+      {
+        id: `il_${id}`,
+        period: {
+          start: Math.floor(NOW.getTime() / 1000),
+          end: Math.floor(periodEnd.getTime() / 1000),
+        },
+        pricing: { price_details: { product, price: `price_${product}` } },
+      },
+    ],
+  },
+});
+
+const plan = async (orgId: string) =>
+  (await db.select().from(orgEntitlements).where(eq(orgEntitlements.orgId, orgId)))[0]!;
+
+async function credential(token: string, provider: string) {
+  return api.inject({
+    method: 'POST',
+    url: '/v1/providers/credentials',
+    headers: bearer(token),
+    payload: {
+      provider,
+      name: provider,
+      secret: `secret-${provider}-${randomBytes(4).toString('hex')}`,
+    },
+  });
+}
+
+async function newKey(token: string, credId: string, extra: object = {}) {
+  return api.inject({
+    method: 'POST',
+    url: '/v1/keys',
+    headers: bearer(token),
+    payload: { name: `k${++seq}`, credentials: { mapbox: credId }, ...extra },
+  });
+}
+
+// --- tests ---------------------------------------------------------------------------------------
+describe('Stripe webhooks', () => {
+  it('refuse a bad signature and change nothing', async () => {
+    const { orgId } = await signup();
+    const e = event(
+      'customer.subscription.created',
+      subscription(orgId, 'cus_x', 'agents', 'active'),
+    );
+    const res = await post(e, 'whsec_someone_else');
+    expect(res.statusCode).toBe(400);
+    expect(await db.select().from(stripeEvents).where(eq(stripeEvents.id, e.id))).toEqual([]);
+    expect((await plan(orgId)).plan).toBe('free');
+  });
+
+  it('apply a replayed event once', async () => {
+    const { orgId } = await signup();
+    const e = event(
+      'customer.subscription.created',
+      subscription(orgId, 'cus_r', 'team', 'active'),
+    );
+    expect((await post(e)).json()).toMatchObject({ outcome: 'applied' });
+    expect((await post(e)).json()).toMatchObject({ outcome: 'duplicate' });
+    expect((await plan(orgId)).plan).toBe('team');
+  });
+});
+
+describe('sign-up and checkout', () => {
+  it('creates a Free org with its protected spend, and opens Checkout for a paid plan', async () => {
+    const { orgId, ownerToken } = await signup();
+    expect(await plan(orgId)).toMatchObject({
+      plan: 'free',
+      maxKeys: 1,
+      billingEmail: `${orgId}@example.com`,
+    });
+    const cap = await new BudgetEngine(valkey).getCap(orgId, { kind: 'org' }, 'm');
+    expect(cap?.hard).toBe(50_000_000n);
+    const above = await api.inject({
+      method: 'PUT',
+      url: '/v1/caps/org',
+      headers: bearer(ownerToken),
+      payload: { month: { hard: 100_000_000 } },
+    });
+    expect(above.json()).toMatchObject({ error: 'plan_limit' });
+
+    const res = await billing.inject({
+      method: 'POST',
+      url: '/v1/billing/checkout',
+      headers: bearer(ownerToken),
+      payload: { plan: 'indie' },
+    });
+    expect(res.json()).toMatchObject({
+      url: expect.stringMatching(/^https:\/\/checkout\.stripe\.test\//) as string,
+    });
+    expect(checkouts.at(-1)).toMatchObject({
+      mode: 'subscription',
+      client_reference_id: orgId,
+      line_items: [{ price: `price_${lookupKey('indie')}`, quantity: 1 }],
+      subscription_data: { metadata: { orgId } },
+    });
+    const customer = (await plan(orgId)).stripeCustomerId!;
+    expect(customers.get(customer)?.metadata).toEqual({ orgId });
+
+    const paid = await signup('team');
+    expect(paid.checkoutUrl).toMatch(/^https:\/\/checkout\.stripe\.test\//);
+  });
+
+  it('only lets owners buy, and sends existing subscribers to the portal', async () => {
+    const { orgId, ownerToken } = await signup();
+    await post(
+      event('customer.subscription.created', subscription(orgId, 'cus_p', 'indie', 'active')),
+    );
+    const again = await billing.inject({
+      method: 'POST',
+      url: '/v1/billing/checkout',
+      headers: bearer(ownerToken),
+      payload: { plan: 'team' },
+    });
+    expect(again.json()).toMatchObject({ error: 'has_subscription' });
+    const portal = await billing.inject({
+      method: 'POST',
+      url: '/v1/billing/portal',
+      headers: bearer(ownerToken),
+    });
+    expect(portal.json()).toEqual({ url: 'https://billing.stripe.test/cus_p' });
+  });
+});
+
+describe('plan transitions', () => {
+  it('moves through every plan, blocking only new resources on downgrade or failed payment', async () => {
+    const { orgId, ownerToken } = await signup();
+    const t = ownerToken;
+    const cred = (await credential(t, 'mapbox')).json<{ id: string }>().id;
+    expect((await newKey(t, cred)).statusCode).toBe(201);
+    // Free: one key, one provider.
+    expect((await newKey(t, cred)).json()).toMatchObject({ error: 'plan_limit' });
+    expect((await credential(t, 'here')).json()).toMatchObject({ error: 'plan_limit' });
+
+    // Checkout completes, then the subscription arrives: Indie.
+    await post(
+      event('checkout.session.completed', {
+        id: 'cs_t',
+        object: 'checkout.session',
+        client_reference_id: orgId,
+        customer: 'cus_t',
+        subscription: `sub_${orgId}`,
+        customer_details: { email: 'x@example.com' },
+      }),
+    );
+    await post(
+      event('customer.subscription.created', subscription(orgId, 'cus_t', 'indie', 'active')),
+    );
+    expect(await plan(orgId)).toMatchObject({
+      plan: 'indie',
+      maxKeys: null,
+      maxProviders: 2,
+      stripeCustomerId: 'cus_t',
+      stripeSubscriptionId: `sub_${orgId}`,
+    });
+    expect((await newKey(t, cred)).statusCode).toBe(201);
+    expect((await credential(t, 'here')).statusCode).toBe(201);
+    expect((await credential(t, 'tavily')).json()).toMatchObject({ error: 'plan_limit' });
+    const analytics = () => api.inject({ url: '/v1/spend?groupBy=session', headers: bearer(t) });
+    expect((await analytics()).json()).toMatchObject({ error: 'plan_feature' });
+
+    // Team: five providers.
+    await post(
+      event('customer.subscription.updated', subscription(orgId, 'cus_t', 'team', 'active')),
+    );
+    expect((await plan(orgId)).maxProviders).toBe(5);
+    expect((await credential(t, 'tavily')).statusCode).toBe(201);
+
+    // Agents: unlimited, session analytics and custom loop rules.
+    await post(
+      event('customer.subscription.updated', subscription(orgId, 'cus_t', 'agents', 'active')),
+    );
+    expect(await plan(orgId)).toMatchObject({
+      plan: 'agents',
+      maxProviders: null,
+      sessionAnalytics: true,
+    });
+    expect((await analytics()).statusCode).toBe(200);
+    const loop = { loop: { identical: 5, windowSec: 60, perMinute: 100, cooldownSec: 60 } };
+    expect((await newKey(t, cred, loop)).statusCode).toBe(201);
+
+    // Back down to Indie: nothing is taken away, new extras are refused.
+    await post(
+      event('customer.subscription.updated', subscription(orgId, 'cus_t', 'indie', 'active')),
+    );
+    const active = await db.select().from(virtualKeys).where(eq(virtualKeys.orgId, orgId));
+    expect(active.filter((k) => k.status === 'active')).toHaveLength(3);
+    expect((await newKey(t, cred, loop)).json()).toMatchObject({ error: 'plan_feature' });
+    expect((await credential(t, 'exa')).json()).toMatchObject({ error: 'plan_limit' });
+
+    // A failed payment blocks creating anything until it is paid.
+    await post(
+      event('invoice.payment_failed', {
+        id: 'in_f',
+        object: 'invoice',
+        customer: 'cus_t',
+        lines: { data: [] },
+      }),
+    );
+    expect((await plan(orgId)).status).toBe('past_due');
+    expect((await newKey(t, cred)).json()).toMatchObject({ error: 'payment_required' });
+    await post(
+      event('invoice.paid', {
+        id: 'in_ok',
+        object: 'invoice',
+        customer: 'cus_t',
+        lines: { data: [] },
+      }),
+    );
+    expect((await plan(orgId)).status).toBe('active');
+    expect((await newKey(t, cred)).statusCode).toBe(201);
+
+    // Dunning over: the subscription ends and the org drops to Free limits; its keys stay.
+    await post(
+      event('customer.subscription.updated', subscription(orgId, 'cus_t', 'indie', 'past_due')),
+    );
+    expect((await plan(orgId)).status).toBe('past_due');
+    await post(
+      event('customer.subscription.deleted', subscription(orgId, 'cus_t', 'indie', 'canceled')),
+    );
+    expect(await plan(orgId)).toMatchObject({
+      plan: 'free',
+      status: 'active',
+      stripeSubscriptionId: null,
+    });
+    expect((await newKey(t, cred)).json()).toMatchObject({ error: 'plan_limit' });
+    const after = await db.select().from(virtualKeys).where(eq(virtualKeys.orgId, orgId));
+    expect(after.filter((k) => k.status === 'active')).toHaveLength(4);
+  });
+
+  it('leaves a self-hosted org (no plan) unlimited', async () => {
+    const { bootstrapOrg } = await import('@spend-brake/api');
+    const { Registry } = await import('@spend-brake/budget');
+    const orgId = `self_${randomBytes(3).toString('hex')}`;
+    const owner = await bootstrapOrg(
+      { db, registry: new Registry(valkey) },
+      { id: orgId, name: orgId },
+    );
+    for (const p of ['mapbox', 'here', 'tavily', 'exa', 'brave', 'serpapi']) {
+      expect((await credential(owner, p)).statusCode).toBe(201);
+    }
+  });
+});
+
+describe('licenses', () => {
+  const verify = (raw: string) =>
+    licensePayload.parse(verifyDocument(raw, LICENSE_FORMAT, signer.publicKey));
+
+  it('issues a signed license when a Business invoice is paid, and renews it on the next', async () => {
+    const { orgId, ownerToken } = await signup('business');
+    const first = new Date('2026-11-30T12:00:00Z');
+    await post(
+      event('customer.subscription.created', subscription(orgId, 'cus_b', 'business', 'active')),
+    );
+    const e1 = event('invoice.paid', invoice('in_b1', 'cus_b', 'prod_business', first));
+    await post(e1);
+    await post(e1); // replayed: still one license
+    let rows = await db.select().from(issuedLicenses).where(eq(issuedLicenses.orgId, orgId));
+    expect(rows).toHaveLength(1);
+    expect(verify(rows[0]!.raw)).toMatchObject({
+      org: orgId,
+      edition: 'business',
+      orgUnits: 3,
+      expiresAt: first.toISOString(),
+    });
+    expect(mails.at(-1)).toMatchObject({
+      orgId,
+      edition: 'business',
+      email: `${orgId}@example.com`,
+    });
+
+    const second = new Date('2026-12-30T12:00:00Z');
+    await post(event('invoice.paid', invoice('in_b2', 'cus_b', 'prod_business', second)));
+    rows = await db.select().from(issuedLicenses).where(eq(issuedLicenses.orgId, orgId));
+    expect(rows).toHaveLength(2);
+    const download = await billing.inject({
+      url: '/v1/billing/license',
+      headers: bearer(ownerToken),
+    });
+    expect(download.headers['content-disposition']).toBe(`attachment; filename="${orgId}.license"`);
+    expect(verify(download.body).expiresAt).toBe(second.toISOString());
+    // Hosted plans get no license.
+    const hosted = await signup();
+    await post(event('invoice.paid', invoice('in_t', 'cus_hosted', 'prod_team', second)));
+    expect(
+      await db.select().from(issuedLicenses).where(eq(issuedLicenses.orgId, hosted.orgId)),
+    ).toEqual([]);
+  });
+
+  it('issues Enterprise licenses from hand-made invoices, with the org units on the product', async () => {
+    const { orgId } = await signup();
+    customers.set('cus_ent', { id: 'cus_ent', metadata: { orgId } } as unknown as Stripe.Customer);
+    await post(
+      event(
+        'invoice.paid',
+        invoice('in_e1', 'cus_ent', 'prod_enterprise', new Date('2027-10-30T00:00:00Z')),
+      ),
+    );
+    const [row] = await db.select().from(issuedLicenses).where(eq(issuedLicenses.orgId, orgId));
+    expect(verify(row!.raw)).toMatchObject({ edition: 'enterprise', orgUnits: 40 });
+  });
+});
+
+describe('setup', () => {
+  it('seeds products, prices and the portal once', async () => {
+    const store = {
+      products: [] as Stripe.Product[],
+      prices: [] as Stripe.Price[],
+      portals: [] as { id: string; metadata: Record<string, string> }[],
+    };
+    const fake = {
+      products: {
+        list: () => ({
+          [Symbol.asyncIterator]: () => store.products[Symbol.iterator](),
+        }),
+        create: (p: Stripe.ProductCreateParams) => {
+          const product = { id: `prod_${store.products.length}`, ...p } as Stripe.Product;
+          store.products.push(product);
+          return Promise.resolve(product);
+        },
+      },
+      prices: {
+        list: (p: { lookup_keys: string[] }) =>
+          Promise.resolve({
+            data: store.prices.filter((x) => p.lookup_keys.includes(x.lookup_key!)),
+          }),
+        create: (p: Stripe.PriceCreateParams) => {
+          const price = { id: `price_${store.prices.length}`, ...p } as unknown as Stripe.Price;
+          store.prices.push(price);
+          return Promise.resolve(price);
+        },
+      },
+      billingPortal: {
+        configurations: {
+          list: () => Promise.resolve({ data: store.portals }),
+          create: (p: { metadata: Record<string, string> }) => {
+            const c = { id: `bpc_${store.portals.length}`, metadata: p.metadata };
+            store.portals.push(c);
+            return Promise.resolve(c);
+          },
+        },
+      },
+    } as unknown as Stripe;
+    const first = await seedStripe(fake);
+    expect(first.created).toHaveLength(10); // 5 products, 4 prices, the portal
+    expect(store.prices.map((p) => [p.lookup_key, p.unit_amount])).toEqual([
+      ['spend_brake_indie_monthly', 900],
+      ['spend_brake_team_monthly', 4900],
+      ['spend_brake_agents_monthly', 14900],
+      ['spend_brake_business_monthly', 29900],
+    ]);
+    const second = await seedStripe(fake);
+    expect(second.created).toEqual([]);
+    expect(second.prices).toEqual(first.prices);
+  });
+
+  it('refuses live Stripe keys', () => {
+    expect(() => stripeClient('sk_live_abc')).toThrow(/test-mode/);
+    expect(() => stripeClient('sk_test_abc')).not.toThrow();
+  });
+});

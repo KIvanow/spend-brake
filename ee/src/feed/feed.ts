@@ -12,7 +12,7 @@ import { type Db, eq, sql } from '@spend-brake/db';
 import { parse } from 'yaml';
 import { z } from 'zod';
 import { CATALOG_FEED_PUBLIC_KEY } from '../license/keys.js';
-import { SignatureError, signDocument, verifyDocument } from '../license/signed.js';
+import { SignatureError, signDocument, verifyDocument } from '@spend-brake/shared';
 import { eeCatalogFeed } from '../schema.js';
 
 export const FEED_FORMAT = 'spend-brake-catalog/1';

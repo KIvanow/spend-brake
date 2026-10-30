@@ -215,3 +215,63 @@ export const reconciliationResults = pgTable(
   },
   (t) => [primaryKey({ columns: [t.orgId, t.day, t.family] })],
 );
+
+/**
+ * Hosted plans (Stripe). An org with no row has no plan limits: every self-hosted install.
+ * Limits are enforced by the admin API only (never the proxy); null means unlimited.
+ */
+export const orgEntitlements = pgTable(
+  'org_entitlements',
+  {
+    orgId: text('org_id')
+      .primaryKey()
+      .references(() => orgs.id),
+    plan: text('plan', {
+      enum: ['free', 'indie', 'team', 'agents', 'business', 'enterprise'],
+    }).notNull(),
+    /** `past_due`: a payment failed; creating keys, providers and sessions waits for it. */
+    status: text('status', { enum: ['active', 'past_due'] })
+      .notNull()
+      .default('active'),
+    maxKeys: bigint('max_keys', { mode: 'number' }),
+    maxProviders: bigint('max_providers', { mode: 'number' }),
+    agentSessionsPerMonth: bigint('agent_sessions_per_month', { mode: 'number' }),
+    requestsPerMonth: bigint('requests_per_month', { mode: 'number' }),
+    /** Highest monthly hard cap on the org (the Free plan's protected spend). */
+    maxOrgMonthCapMicros: bigint('max_org_month_cap_micros', { mode: 'bigint' }),
+    retentionDays: bigint('retention_days', { mode: 'number' }).notNull(),
+    sessionAnalytics: boolean('session_analytics').notNull().default(false),
+    customLoopRules: boolean('custom_loop_rules').notNull().default(false),
+    billingEmail: text('billing_email'),
+    stripeCustomerId: text('stripe_customer_id'),
+    stripeSubscriptionId: text('stripe_subscription_id'),
+    currentPeriodEnd: timestamp('current_period_end', { withTimezone: true }),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('org_entitlements_customer').on(t.stripeCustomerId)],
+);
+
+/** Stripe webhook events already applied (Stripe retries; each is applied once). */
+export const stripeEvents = pgTable('stripe_events', {
+  id: text('id').primaryKey(),
+  type: text('type').notNull(),
+  processedAt: timestamp('processed_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Signed license files issued on paid Business / Enterprise invoices. */
+export const issuedLicenses = pgTable(
+  'issued_licenses',
+  {
+    id: text('id').primaryKey(),
+    orgId: text('org_id')
+      .notNull()
+      .references(() => orgs.id),
+    edition: text('edition', { enum: ['business', 'enterprise'] }).notNull(),
+    /** The paid invoice this license covers: one license per invoice. */
+    invoiceId: text('invoice_id').notNull().unique(),
+    raw: text('raw').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    issuedAt: timestamp('issued_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('issued_licenses_org').on(t.orgId, t.issuedAt)],
+);

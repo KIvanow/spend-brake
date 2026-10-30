@@ -21,6 +21,12 @@ First release.
 - Self-hosting: Docker Compose stack, HTTPS overlay with automatic certificates (Caddy),
   proxy replicas, Valkey Cluster (`redis-cluster://` URLs), backup and restore scripts.
 
+### Hosted billing
+
+- Stripe (test mode): Free, Indie, Team, Agents plans with limits enforced by the admin API;
+  Business license by subscription and Enterprise by invoice, each paid invoice issuing or
+  renewing a signed license; Checkout, Customer Portal, idempotent webhooks.
+
 ### Business / Enterprise (`ee/`, LICENSE-EE)
 
 - Offline-verified licenses with a 14-day grace period; single sign-on (OIDC, SAML); operator,

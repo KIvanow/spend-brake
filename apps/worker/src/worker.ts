@@ -5,7 +5,16 @@ import {
   loadPlacesFields,
   loadTavilyCatalog,
 } from '@spend-brake/catalog';
-import { type Db, ensureUsagePartitions, orgs } from '@spend-brake/db';
+import {
+  type Db,
+  and,
+  ensureUsagePartitions,
+  eq,
+  lt,
+  orgEntitlements,
+  orgs,
+  usageEvents,
+} from '@spend-brake/db';
 import type { KeyWrapper } from '@spend-brake/shared';
 import type { ValkeyClient as Redis } from '@spend-brake/budget';
 import { type Alert, AlertQueue } from './alerts.js';
@@ -160,6 +169,25 @@ export class Worker {
     return committed;
   }
 
+  /**
+   * Hosted plans keep usage events for a limited time (org_entitlements.retention_days); orgs
+   * without a plan (self-hosted) keep everything.
+   */
+  async retentionOnce(): Promise<number> {
+    let deleted = 0;
+    const plans = await this.deps.db
+      .select({ orgId: orgEntitlements.orgId, days: orgEntitlements.retentionDays })
+      .from(orgEntitlements);
+    for (const p of plans) {
+      const before = new Date(this.now().getTime() - p.days * 86_400_000);
+      const r = await this.deps.db
+        .delete(usageEvents)
+        .where(and(eq(usageEvents.orgId, p.orgId), lt(usageEvents.ts, before)));
+      deleted += r.rowCount ?? 0;
+    }
+    return deleted;
+  }
+
   async partitionsOnce(): Promise<void> {
     await ensureUsagePartitions(this.deps.db, this.now());
   }
@@ -243,6 +271,7 @@ export class Worker {
     this.every(60_000, 'ledger-claim', () => this.ledger.claimStale(this.orgIds));
     this.every(i.sweepMs ?? 10_000, 'sweep', () => this.sweepOnce());
     this.every(6 * 3600_000, 'partitions', () => this.partitionsOnce());
+    this.every(6 * 3600_000, 'retention', () => this.retentionOnce());
     this.every(i.driftMs ?? 24 * 3600_000, 'drift', () => this.driftOnce());
     this.every(i.settleMs ?? 60_000, 'twilio-settle', () => this.settleTwilioOnce());
     for (const job of this.deps.jobs ?? []) {

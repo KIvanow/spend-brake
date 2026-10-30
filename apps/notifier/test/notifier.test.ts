@@ -36,7 +36,12 @@ let queues: NotifierQueues;
 let alerts: Queue<AlertJob>;
 let engine: BudgetEngine;
 let registry: Registry;
-const mails: { to: string; subject: string; text: string }[] = [];
+const mails: {
+  to: string;
+  subject: string;
+  text: string;
+  attachments?: { filename: string; content: string }[];
+}[] = [];
 
 interface Received {
   headers: Record<string, string | string[] | undefined>;
@@ -105,8 +110,13 @@ beforeAll(async () => {
 
   const transport = createTransport({ jsonTransport: true });
   const send = transport.sendMail.bind(transport);
-  transport.sendMail = (m: { to: string; subject: string; text: string }) => {
-    mails.push({ to: m.to, subject: m.subject, text: m.text });
+  transport.sendMail = (m: {
+    to: string;
+    subject: string;
+    text: string;
+    attachments?: { filename: string; content: string }[];
+  }) => {
+    mails.push({ to: m.to, subject: m.subject, text: m.text, attachments: m.attachments ?? [] });
     return send(m);
   };
 
@@ -285,6 +295,31 @@ describe('fallbacks and mutes', () => {
     const m = mails.find((x) => x.to === 'owner@example.com')!;
     expect(m.subject).toContain('Request blocked');
     expect(m.text).toContain('Raise +$25: https://brake.example.com/a/');
+  });
+
+  it('emails a license to the billing contact as an attachment, never to webhooks', async () => {
+    const o = await org();
+    const r = await receiver();
+    await webhook(o.owner, r.url);
+    await alert({
+      type: 'license_issued',
+      orgId: o.id,
+      email: 'billing@example.com',
+      edition: 'business',
+      expiresAt: '2026-11-30T12:00:00.000Z',
+      license: '{"format":"spend-brake-license/1","payload":"e30","signature":"AA"}\n',
+    });
+    await until(() => mails.some((m) => m.to === 'billing@example.com'));
+    const m = mails.find((x) => x.to === 'billing@example.com')!;
+    expect(m.subject).toBe('[Spend Brake] Your Spend Brake business license');
+    expect(m.attachments).toMatchObject([
+      {
+        filename: `${o.id}.license`,
+        content: '{"format":"spend-brake-license/1","payload":"e30","signature":"AA"}\n',
+      },
+    ]);
+    await new Promise((res) => setTimeout(res, 200));
+    expect(r.got).toHaveLength(0);
   });
 
   it('sends operator alerts to the operator email', async () => {

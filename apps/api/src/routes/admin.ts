@@ -6,6 +6,7 @@ import { ROLES } from '../auth.js';
 import { type Ctx, audit, id, micros } from '../common.js';
 import { newApiToken, newId, sha256 } from '../ids.js';
 import { type Router, notFound } from '../route.js';
+import { requireFeature } from '../entitlements.js';
 
 const tokenView = z
   .object({
@@ -152,6 +153,7 @@ export function adminRoutes(r: Router, ctx: Ctx): void {
     }),
     response: orgView,
     handler: async ({ auth, body }) => {
+      if (body.loop) await requireFeature(ctx, auth.orgId, 'customLoopRules');
       const org = await loadOrg(ctx, auth.orgId);
       const settings = {
         ...(org.settings as Record<string, unknown>),

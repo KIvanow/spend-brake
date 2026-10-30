@@ -41,6 +41,7 @@ jobs:
           - { name: api, file: infra/Dockerfile, app: api, start: start }
           - { name: worker, file: infra/Dockerfile, app: worker, start: start }
           - { name: notifier, file: infra/Dockerfile, app: notifier, start: start }
+          - { name: billing, file: infra/Dockerfile, app: billing, start: start }
           - { name: ee-api, file: infra/Dockerfile, app: ee, start: 'start:api' }
           - { name: ee-worker, file: infra/Dockerfile, app: ee, start: 'start:worker' }
           - { name: web, file: infra/web.Dockerfile, app: web, start: start }

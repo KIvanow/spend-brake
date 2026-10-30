@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { type FormEvent, useEffect, useState } from 'react';
 import { ApiError, api, getToken, setToken } from './api.js';
 import { Approvals } from './pages/Approvals.js';
+import { Billing } from './pages/Billing.js';
 import { Caps } from './pages/Caps.js';
 import { Events } from './pages/Events.js';
 import { Keys } from './pages/Keys.js';
@@ -11,7 +12,17 @@ import { Spend } from './pages/Spend.js';
 import { Webhooks } from './pages/Webhooks.js';
 import './styles.css';
 
-const PAGES = { Overview, Spend, Events, Caps, Approvals, Keys, Webhooks, Migration } as const;
+const PAGES = {
+  Overview,
+  Spend,
+  Events,
+  Caps,
+  Approvals,
+  Keys,
+  Webhooks,
+  Migration,
+  Billing,
+} as const;
 type PageName = keyof typeof PAGES;
 
 // Pages live in the URL hash (#/caps), so links from alerts and bookmarks open the right page.

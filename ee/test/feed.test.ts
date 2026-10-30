@@ -16,7 +16,7 @@ import {
   syncCatalogFeed,
   verifyBundle,
 } from '../src/feed/feed.js';
-import { SignatureError } from '../src/license/signed.js';
+import { SignatureError } from '@spend-brake/shared';
 import { eeCatalogFeed } from '../src/schema.js';
 import { type Env, startEnv } from './harness.js';
 

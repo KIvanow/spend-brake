@@ -13,6 +13,7 @@ import { type Ctx, audit, id, micros, n } from '../common.js';
 import { newId, random62 } from '../ids.js';
 import { ApiError, type Router, errorSchema, notFound } from '../route.js';
 import { orgTimeZone } from './budget.js';
+import { requireCapacity } from '../entitlements.js';
 
 const createBody = z.object({
   /** Required with an admin token; implied when the caller authenticates with the parent key. */
@@ -124,6 +125,7 @@ export function sessionRoutes(
       dayBudgetMicros: parsed.data.dayBudgetMicros ?? 20_000_000n,
     };
     const orgId = c.auth.orgId;
+    await requireCapacity(ctx, orgId, 'session');
 
     let parent: KeyRecord;
     if (c.kind === 'key') {

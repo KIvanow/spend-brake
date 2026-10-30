@@ -6,3 +6,4 @@ export * from './common.js';
 export * from './auth.js';
 export * from './ids.js';
 export { bootstrapOrg } from './bootstrap.js';
+export * from './entitlements.js';

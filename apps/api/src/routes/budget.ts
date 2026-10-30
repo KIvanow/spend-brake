@@ -15,6 +15,7 @@ import {
   writeCap,
 } from '../common.js';
 import { type Router, notFound } from '../route.js';
+import { requireOrgCapWithinPlan } from '../entitlements.js';
 
 const capValues = z.object({ hard: micros.nullable(), soft: micros.nullable().optional() });
 
@@ -61,6 +62,9 @@ export function budgetRoutes(r: Router, ctx: Ctx): void {
         if (!values) continue;
         const hard = values.hard;
         const soft = values.soft ?? null;
+        if (params.scope === 'org' && kind === 'm') {
+          await requireOrgCapWithinPlan(ctx, auth.orgId, hard);
+        }
         const current = await ctx.engine.getCap(auth.orgId, scope, kind);
         if (ctx.hooks.holdCapRaise && raisesCap(current?.hard, hard)) {
           const approvalId = await ctx.hooks.holdCapRaise({
@@ -128,6 +132,9 @@ export function budgetRoutes(r: Router, ctx: Ctx): void {
       const kinds: ('d' | 'm')[] = [];
       const pending = [];
       for (const kind of query.kind ? [query.kind] : (['d', 'm'] as const)) {
+        if (params.scope === 'org' && kind === 'm') {
+          await requireOrgCapWithinPlan(ctx, auth.orgId, null);
+        }
         const current = await ctx.engine.getCap(auth.orgId, toScope(params.scope), kind);
         if (ctx.hooks.holdCapRaise && raisesCap(current?.hard, null)) {
           const approvalId = await ctx.hooks.holdCapRaise({

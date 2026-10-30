@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { type Ctx, id, n } from '../common.js';
 import { ApiError, type Router } from '../route.js';
 import { orgTimeZone } from './budget.js';
+import { requireFeature } from '../entitlements.js';
 
 const GROUPS = {
   key: usageEvents.keyId,
@@ -47,6 +48,9 @@ export function ledgerRoutes(r: Router, ctx: Ctx): void {
       items: z.array(z.record(z.string(), z.union([z.string(), z.number(), z.null()]))),
     }),
     handler: async ({ auth, query }) => {
+      if (query.groupBy.some((g) => g === 'session' || g === 'agent')) {
+        await requireFeature(ctx, auth.orgId, 'sessionAnalytics');
+      }
       const tz = await orgTimeZone(ctx, auth.orgId);
       const cols: Record<string, SQL> = {};
       for (const g of query.groupBy) {

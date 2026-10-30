@@ -227,6 +227,49 @@ describe('dashboard', () => {
     expect(calls.some((c) => c.url === '/v1/approvals/apr_1/approve')).toBe(true);
   });
 
+  it('shows the hosted plan against its limits and starts Checkout', async () => {
+    routes['GET /v1/billing'] = () => [
+      200,
+      {
+        plan: 'free',
+        planName: 'Free',
+        status: 'past_due',
+        currentPeriodEnd: null,
+        hasSubscription: false,
+        limits: {
+          maxKeys: 1,
+          maxProviders: 1,
+          agentSessionsPerMonth: 20,
+          requestsPerMonth: 10_000,
+          maxOrgMonthCapMicros: 50_000_000,
+          retentionDays: 7,
+        },
+        usage: { keys: 1, providers: 1, agentSessionsThisMonth: 3, requestsThisMonth: 1234 },
+        plans: [{ id: 'indie', name: 'Indie' }],
+        licenses: [],
+      },
+    ];
+    routes['POST /v1/billing/checkout'] = () => [200, { url: 'about:blank' }];
+    const user = await signIn();
+    await user.click(screen.getByRole('button', { name: 'Billing' }));
+    expect(await screen.findByText('1,234 of 10,000')).toBeTruthy();
+    expect(screen.getByText('$50.00')).toBeTruthy();
+    expect(screen.getByText(/A payment failed/)).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Buy Indie' }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.url === '/v1/billing/checkout')).toMatchObject({
+        method: 'POST',
+        body: { plan: 'indie' },
+      }),
+    );
+  });
+
+  it('says billing is not part of a self-hosted install', async () => {
+    const user = await signIn();
+    await user.click(screen.getByRole('button', { name: 'Billing' }));
+    expect(await screen.findByText(/a self-hosted install has no plan/)).toBeTruthy();
+  });
+
   it('opens the page named in the URL hash and lists webhook deliveries', async () => {
     routes['GET /v1/webhooks'] = () => [
       200,

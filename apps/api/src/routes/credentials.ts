@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { type Ctx, audit, id } from '../common.js';
 import { newId } from '../ids.js';
 import { ApiError, type Router, notFound } from '../route.js';
+import { requireCapacity } from '../entitlements.js';
 
 const credential = z
   .object({
@@ -51,6 +52,7 @@ export function credentialRoutes(r: Router, ctx: Ctx): void {
       if (!ctx.wrapper) {
         throw new ApiError(503, 'no_master_key', 'Set BRAKE_MASTER_KEY or BRAKE_KMS_KEY_ID first.');
       }
+      await requireCapacity(ctx, auth.orgId, { provider: body.provider });
       const credId = newId('cred');
       const envelope = await encryptSecret(
         ctx.wrapper,

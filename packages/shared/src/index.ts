@@ -5,3 +5,5 @@ export * from './redact.js';
 export * from './envelope.js';
 export * from './signing.js';
 export * from './alerts.js';
+export * from './signed-document.js';
+export * from './license-format.js';

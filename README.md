@@ -192,4 +192,7 @@ reconciliation. Licenses are Ed25519-signed files checked offline (no phone-home
 install acme.license`. After a license expires its features keep working for 14 days, then turn
 read-only; the proxy and caps never stop. See [ee/README.md](ee/README.md).
 
+The hosted service's plans and license sales run through Stripe (`apps/billing`, test mode);
+see [apps/billing/README.md](apps/billing/README.md).
+
 Contributions use DCO sign-off (`git commit -s`); see [CONTRIBUTING.md](CONTRIBUTING.md).

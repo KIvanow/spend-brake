@@ -1,32 +1,19 @@
-import { z } from 'zod';
+import {
+  LICENSE_FEATURES,
+  LICENSE_FORMAT,
+  type LicensePayload,
+  SignatureError,
+  licensePayload,
+  verifyDocument,
+} from '@spend-brake/shared';
 import { LICENSE_PUBLIC_KEY } from './keys.js';
-import { SignatureError, signDocument, verifyDocument } from './signed.js';
 
-export const LICENSE_FORMAT = 'spend-brake-license/1';
-
-export const FEATURES = [
-  'sso',
-  'rbac',
-  'approvals',
-  'audit_export',
-  'multi_org',
-  'catalog_feed',
-  'reconciliation',
-] as const;
+// The format and signing live in @spend-brake/shared (the billing service issues licenses);
+// verification and what a license allows live here.
+export { LICENSE_FORMAT, licensePayload, signLicense } from '@spend-brake/shared';
+export const FEATURES = LICENSE_FEATURES;
 export type Feature = (typeof FEATURES)[number];
-
-export const licensePayload = z.strictObject({
-  id: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
-  /** The org this install's license belongs to; its owners manage the license and other orgs. */
-  org: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
-  edition: z.enum(['business', 'enterprise']),
-  features: z.array(z.enum(FEATURES)),
-  /** Orgs this install may hold. */
-  orgUnits: z.number().int().positive(),
-  issuedAt: z.iso.datetime(),
-  expiresAt: z.iso.datetime(),
-});
-export type License = z.infer<typeof licensePayload>;
+export type License = LicensePayload;
 
 /** After expiry the license keeps working this long; then its features turn read-only. */
 export const GRACE_MS = 14 * 24 * 3600_000;
@@ -38,10 +25,6 @@ export class LicenseError extends Error {
   ) {
     super(message);
   }
-}
-
-export function signLicense(license: License, privateKeyPem: string): string {
-  return signDocument(LICENSE_FORMAT, licensePayload.parse(license), privateKeyPem);
 }
 
 /** Verify a license file offline. Expiry is not checked here (see licenseState). */
