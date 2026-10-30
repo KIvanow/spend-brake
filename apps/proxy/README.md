@@ -41,12 +41,18 @@ The request path. Every proxied call goes through these steps:
 | `/mapbox`                                                                                        | `https://api.mapbox.com`                                                            |
 | `/here-geocode`, `/here-revgeocode`, `/here-discover`, `/here-autosuggest`, `/here-autocomplete` | `https://{geocode,revgeocode,discover,autosuggest,autocomplete}.search.hereapi.com` |
 | `/here-router`, `/here-matrix`                                                                   | `https://router.hereapi.com`, `https://matrix.router.hereapi.com`                   |
+| `/tavily`                                                                                        | `https://api.tavily.com`                                                            |
+| `/exa`                                                                                           | `https://api.exa.ai`                                                                |
+| `/brave`                                                                                         | `https://api.search.brave.com`                                                      |
+| `/serpapi`                                                                                       | `https://serpapi.com`                                                               |
 
 Paths with `.` or `..` segments (also percent-encoded) or backslashes are refused with `400`:
 the upstream URL would resolve them to another endpoint than the one priced.
 
 In drop-in mode the virtual key goes where the provider's own key would: `key` or
-`X-Goog-Api-Key` (Google), `access_token` (Mapbox), `apiKey` or `Authorization: Bearer` (HERE).
+`X-Goog-Api-Key` (Google), `access_token` (Mapbox), `apiKey` or `Authorization: Bearer` (HERE),
+`Authorization: Bearer` (Tavily), `X-Api-Key` (Exa), `X-Subscription-Token` (Brave) and `api_key`
+(SerpApi).
 
 Generic providers add their own prefix (`BRAKE_GENERIC_PROVIDERS`).
 
@@ -87,6 +93,7 @@ Metrics (`:9465/metrics`): `brake_requests_total{provider,sku,outcome}`,
 | `TRUST_PROXY`              | `false`                   | Use `X-Forwarded-For` for IP allow-lists    |
 | `BRAKE_DEV_SECRETS`        |                           | Dev only: `{"<credentialId>": "<secret>"}`  |
 | `BRAKE_UPSTREAM_OVERRIDES` |                           | Dev/test only: `{"<origin>": "<base url>"}` |
+| `BRAKE_SERPAPI_PLAN`       | `starter`                 | SerpApi plan whose per-search price applies |
 | `BRAKE_GENERIC_PROVIDERS`  |                           | JSON array of generic adapter configs       |
 
 Provider credentials come from `BRAKE_DEV_SECRETS` until Phase 4 adds encrypted storage. Keys and

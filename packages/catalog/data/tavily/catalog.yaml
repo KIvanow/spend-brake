@@ -1,0 +1,57 @@
+# Tavily API credits at the pay-as-you-go rate ($0.008 per credit), transcribed from the credits
+# page. Prices are USD per 1,000 units of each SKU; a unit is a request, URL or page as named.
+# Monthly plans buy credits cheaper; this price is their ceiling. The monthly free credits are a
+# free tier and are ignored unless the org trusts it.
+provider: tavily
+version: 2026-10-30
+source: https://docs.tavily.com/documentation/api-credits
+skuSource: https://docs.tavily.com/documentation/api-reference/endpoint/search
+sourceUpdated: 2026-10-30
+verifiedAt: 2026-10-30
+currency: USD
+billingTimeZone: UTC
+
+bands:
+  flat: [null]
+
+skus:
+  tavily.search.basic:
+    name: Search, basic / fast / ultra-fast depth (1 credit per request)
+    band: flat
+    freeMonthly: 0
+    per1000: ['8.00']
+  tavily.search.advanced:
+    name: Search, advanced depth or auto_parameters (2 credits per request)
+    band: flat
+    freeMonthly: 0
+    per1000: ['16.00']
+  tavily.extract.basic:
+    name: Extract or crawl extraction, basic (1 credit per 5 successful URLs; per URL)
+    band: flat
+    freeMonthly: 0
+    per1000: ['1.60']
+  tavily.extract.advanced:
+    name: Extract or crawl extraction, advanced (2 credits per 5 successful URLs; per URL)
+    band: flat
+    freeMonthly: 0
+    per1000: ['3.20']
+  tavily.map:
+    name: Map or crawl mapping (1 credit per 10 successful pages; per page)
+    band: flat
+    freeMonthly: 0
+    per1000: ['0.80']
+  tavily.map.instructions:
+    name: Map or crawl mapping with instructions (2 credits per 10 successful pages; per page)
+    band: flat
+    freeMonthly: 0
+    per1000: ['1.60']
+  tavily.research.mini:
+    name: Research, model=mini (4 to 110 credits per request; priced at 110)
+    band: flat
+    freeMonthly: 0
+    per1000: ['880.00']
+  tavily.research.pro:
+    name: Research, model=pro or auto (15 to 250 credits per request; priced at 250)
+    band: flat
+    freeMonthly: 0
+    per1000: ['2000.00']

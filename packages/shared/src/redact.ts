@@ -13,6 +13,7 @@ export const SECRET_HEADERS = new Set([
   'x-goog-api-key',
   'x-api-key',
   'api-key',
+  'x-subscription-token',
 ]);
 
 /** Query parameters that carry credentials (compared case-insensitively). */

@@ -313,3 +313,44 @@ describe('brake session', () => {
     expect(f.err.join('')).toContain('canMintSessions');
   });
 });
+
+describe('brake search', () => {
+  const runSearch = async (args: string[]) => {
+    const f = fake(ENV, () => ok);
+    const code = await run(['search', ...args], f.io);
+    return { code, call: f.calls[0]!, f };
+  };
+
+  it('builds the cheapest search per provider and prints the cost', async () => {
+    const tavily = await runSearch(['tavily', 'spend', 'caps', '--results', '3']);
+    expect(tavily.code).toBe(0);
+    expect(tavily.call).toMatchObject({ url: 'http://proxy/tavily/search', method: 'POST' });
+    expect(tavily.call.headers['x-brake-key']).toBe('sb_live_parent');
+    expect(JSON.parse(tavily.call.body!)).toEqual({
+      query: 'spend caps',
+      search_depth: 'basic',
+      max_results: 3,
+    });
+    expect(JSON.parse(tavily.f.out[0]!)).toMatchObject({ costMicros: 5000, cost: '$0.0050' });
+
+    const exa = await runSearch(['exa', 'llm', 'evals', '--type', 'lite']);
+    expect(JSON.parse(exa.call.body!)).toEqual({ query: 'llm evals', type: 'lite' });
+    expect(exa.call.url).toBe('http://proxy/exa/search');
+
+    const brave = await runSearch(['brave', 'a b', '--results', '5']);
+    expect(brave.call.url).toBe('http://proxy/brave/res/v1/web/search?q=a+b&count=5');
+    expect(brave.call.method).toBe('GET');
+
+    const serp = await runSearch(['serpapi', 'coffee', '--engine', 'bing']);
+    expect(serp.call.url).toBe('http://proxy/serpapi/search.json?engine=bing&q=coffee');
+  });
+
+  it('rejects an unknown provider or result count before calling anything', async () => {
+    const unknown = await runSearch(['google', 'x']);
+    expect(unknown.code).toBe(EXIT.usage);
+    expect(unknown.f.calls).toHaveLength(0);
+    const tooMany = await runSearch(['tavily', 'x', '--results', '50']);
+    expect(tooMany.code).toBe(EXIT.usage);
+    expect(tooMany.f.calls).toHaveLength(0);
+  });
+});

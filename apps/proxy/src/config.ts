@@ -1,3 +1,4 @@
+import { SERPAPI_PLANS } from '@spend-brake/catalog';
 import { z } from 'zod';
 
 const json = <T extends z.ZodType>(schema: T) =>
@@ -26,6 +27,8 @@ const envSchema = z.object({
   BRAKE_DEV_SECRETS: json(z.record(z.string(), z.string())).optional(),
   /** Test/dev only: send an upstream origin somewhere else, e.g. a mock server. */
   BRAKE_UPSTREAM_OVERRIDES: json(z.record(z.string(), z.url())).optional(),
+  /** SerpApi plan whose per-search price applies (see the serpapi catalog). */
+  BRAKE_SERPAPI_PLAN: z.enum(SERPAPI_PLANS).default('starter'),
   /** Generic adapter configs (see @spend-brake/catalog GenericConfig). */
   BRAKE_GENERIC_PROVIDERS: json(z.array(z.unknown())).optional(),
 });

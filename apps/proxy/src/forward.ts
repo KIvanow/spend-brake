@@ -21,6 +21,8 @@ const DROP_REQUEST = new Set([
   'authorization',
   'cookie',
   'x-goog-api-key',
+  'x-api-key',
+  'x-subscription-token',
 ]);
 
 export function outgoingHeaders(

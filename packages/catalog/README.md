@@ -11,6 +11,10 @@ prices live in data files that cite their source and verification date.
 | `data/google-maps/places-fields.yaml`           | https://developers.google.com/maps/documentation/places/web-service/data-fields                  |
 | `data/mapbox/catalog.yaml`                      | https://www.mapbox.com/pricing (verified 2026-10-30)                                             |
 | `data/here/catalog.yaml`                        | https://www.here.com/get-started/pricing, each service's "Pricing details" (verified 2026-10-30) |
+| `data/tavily/catalog.yaml`                      | https://docs.tavily.com/documentation/api-credits (verified 2026-10-30)                          |
+| `data/exa/catalog.yaml`                         | https://exa.ai/pricing (verified 2026-10-30)                                                     |
+| `data/brave/catalog.yaml`                       | https://api-dashboard.search.brave.com/app/plans (verified 2026-10-30)                           |
+| `data/serpapi/catalog.yaml`                     | https://serpapi.com/pricing (verified 2026-10-30)                                                |
 | `data/migration/alternatives.yaml`, `payg.yaml` | Plans and SKU mappings for the migration estimator                                               |
 
 Both were verified on 2026-10-29. Prices are copied as USD per 1,000 events, exactly as on the
@@ -141,6 +145,30 @@ body may only hold `avoid` or `exclude` (HERE merges body and query); anything e
 Other transport modes, EV routing, toll costs and Lookup/Browse are unpriced until their price
 lists are transcribed. Mapbox and HERE render their price tables client-side, so the worker's
 drift check cannot watch those pages; re-verify them by hand.
+
+## Agent search (Tavily, Exa, Brave, SerpApi)
+
+Prefixes `/tavily`, `/exa`, `/brave` and `/serpapi`. Each request reserves its worst case from
+the request; where the provider reports what it billed, the response settles it.
+
+| Provider | Priced                                                                                                                                                                                                                                                                                                        | Settles from                                                                     |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Tavily   | Credits at $0.008: search 1 (basic, fast, ultra-fast) or 2 (advanced, or `auto_parameters` without a 1-credit depth); extract per URL (1 or 2 credits per 5); map per page (1 or 2 with `instructions` per 10, up to `limit`, default 50); crawl = map + extract; research at its maximum (110 mini, 250 pro) | `usage.credits` on search; returned results on extract, map and crawl extraction |
+| Exa      | Search by `type` ($4 lite, $7 auto, $12 deep, $15 deep-reasoning per 1k) + $1/1k per result above 10 + $1/1k per page per content type (text, highlights, summary); `/contents` per page per type (text when none named); `/answer` $5/1k                                                                     | `costDollars.total` (streamed responses keep the worst case)                     |
+| Brave    | Web, news, videos, images and LLM context $5/1k; autosuggest and spellcheck $5/10k                                                                                                                                                                                                                            | Flat per request                                                                 |
+| SerpApi  | One search at the plan's price per search (`BRAKE_SERPAPI_PLAN`, Starter $25/1k by default); archive, account and locations free                                                                                                                                                                              | Flat per request                                                                 |
+
+Denied as unpriced: Exa `findSimilar`, research/agent and unknown search types; Brave Answers
+(token-priced), local POIs and summarizer; Tavily bodies carrying `api_key` (the key must go in
+the Authorization header). SerpApi charges cached searches nothing and its Ludicrous Speed modes
+2x/4x; the proxy cannot see either, so it charges every successful search at the plan price.
+The worker's drift check watches the Tavily and Exa price pages; Brave and SerpApi render
+theirs client-side, so re-verify those by hand.
+
+Tavily and Exa have native limits of their own: Tavily's per-key monthly limit (set when the key
+is created; over it Tavily answers 432/433) and Exa's per-key budget (`API_KEY_BUDGET_EXCEEDED`,
+402), set by a team admin. Keep them on as a backstop under Spend Brake's caps: what Spend Brake
+adds is one budget per agent session across every search provider, which no single provider can.
 
 ## Migration estimator
 

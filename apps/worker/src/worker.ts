@@ -1,5 +1,10 @@
 import { BudgetEngine, Registry } from '@spend-brake/budget';
-import { loadGoogleMapsCatalog, loadPlacesFields } from '@spend-brake/catalog';
+import {
+  loadExaCatalog,
+  loadGoogleMapsCatalog,
+  loadPlacesFields,
+  loadTavilyCatalog,
+} from '@spend-brake/catalog';
 import { type Db, ensureUsagePartitions, orgs, reconciliationConfigs } from '@spend-brake/db';
 import {
   type Envelope,
@@ -59,10 +64,15 @@ export interface WorkerDeps {
   now?: () => Date;
 }
 
-// Mapbox and HERE render their price tables client-side (no <table> in the page HTML), so
-// their pages cannot be checked this way; re-verify those catalogs by hand.
+// Mapbox, HERE, Brave and SerpApi render their price tables client-side (no <table> in the page
+// HTML), so their pages cannot be checked this way; re-verify those catalogs by hand.
 export function catalogSourceUrls(): string[] {
-  return [loadGoogleMapsCatalog().source, loadPlacesFields().source];
+  return [
+    loadGoogleMapsCatalog().source,
+    loadPlacesFields().source,
+    loadTavilyCatalog().source,
+    loadExaCatalog().source,
+  ];
 }
 
 export class Worker {

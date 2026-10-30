@@ -1,0 +1,57 @@
+# SerpApi sells monthly plans, not single searches. A search's price is the plan's monthly fee
+# divided by its searches, rounded up; the proxy prices every search at the plan the org names
+# (Starter, the dearest per search, by default). Only successful, uncached searches count against
+# a plan; the proxy cannot tell a cached search apart, so it charges every successful one.
+provider: serpapi
+version: 2026-10-30
+source: https://serpapi.com/pricing
+skuSource: https://serpapi.com/search-api
+sourceUpdated: 2026-10-30
+verifiedAt: 2026-10-30
+currency: USD
+billingTimeZone: UTC
+
+bands:
+  flat: [null]
+
+skus:
+  serpapi.search.starter:
+    name: Search on the Starter plan ($25 / 1,000 searches)
+    band: flat
+    freeMonthly: 0
+    per1000: ['25.00']
+  serpapi.search.developer:
+    name: Search on the Developer plan ($75 / 5,000 searches)
+    band: flat
+    freeMonthly: 0
+    per1000: ['15.00']
+  serpapi.search.production:
+    name: Search on the Production plan ($150 / 15,000 searches)
+    band: flat
+    freeMonthly: 0
+    per1000: ['10.00']
+  serpapi.search.big_data:
+    name: Search on the Big Data plan ($275 / 30,000 searches)
+    band: flat
+    freeMonthly: 0
+    per1000: ['9.166667']
+  serpapi.search.searcher:
+    name: Search on the Searcher plan ($725 / 100,000 searches)
+    band: flat
+    freeMonthly: 0
+    per1000: ['7.25']
+  serpapi.search.volume:
+    name: Search on the Volume plan ($1,475 / 250,000 searches)
+    band: flat
+    freeMonthly: 0
+    per1000: ['5.90']
+  serpapi.search.infrastructure:
+    name: Search on the Infrastructure plan ($2,750 / 500,000 searches)
+    band: flat
+    freeMonthly: 0
+    per1000: ['5.50']
+  serpapi.search.cloud_1m:
+    name: Search on the Cloud 1M plan ($3,750 / 1,000,000 searches)
+    band: flat
+    freeMonthly: 0
+    per1000: ['3.75']

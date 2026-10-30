@@ -84,7 +84,8 @@ const CONFIG_STALE_MS = 10 * 60_000;
 const DEFAULT_SKU = 'unpriced';
 // Where a provider's own key goes, so a virtual key can take its place: Google `key`, Mapbox
 // `access_token`, HERE `apiKey`.
-const DROP_IN_PARAMS = ['key', 'access_token', 'apiKey'];
+const DROP_IN_PARAMS = ['key', 'access_token', 'apiKey', 'api_key'];
+const DROP_IN_HEADERS = ['x-goog-api-key', 'x-api-key', 'x-subscription-token'];
 
 interface Route {
   adapter: ProviderAdapter;
@@ -269,11 +270,14 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
       const param = query.get(name);
       if (param && isVirtualKey(param)) return param;
     }
-    // HERE clients send OAuth tokens as a bearer token.
+    // HERE OAuth and Tavily clients send their key as a bearer token.
     const bearer = /^Bearer (\S+)$/i.exec(request.headers.authorization ?? '')?.[1];
     if (bearer && isVirtualKey(bearer)) return bearer;
-    const goog = request.headers['x-goog-api-key'];
-    if (typeof goog === 'string' && isVirtualKey(goog)) return goog;
+    // Provider SDKs that send their key in a header of their own (Google, Exa, Brave).
+    for (const name of DROP_IN_HEADERS) {
+      const value = request.headers[name];
+      if (typeof value === 'string' && isVirtualKey(value)) return value;
+    }
     return null;
   }
 

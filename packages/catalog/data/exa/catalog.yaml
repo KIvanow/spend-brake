@@ -1,0 +1,51 @@
+# Exa pay-as-you-go prices, transcribed from the pricing page. USD per 1,000 units. A search
+# includes up to 10 results; each result above 10 and each page of contents (per content type:
+# text, highlights, summary) is billed on top.
+provider: exa
+version: 2026-10-30
+source: https://exa.ai/pricing
+skuSource: https://exa.ai/docs/reference/search
+sourceUpdated: 2026-10-30
+verifiedAt: 2026-10-30
+currency: USD
+billingTimeZone: UTC
+
+bands:
+  flat: [null]
+
+skus:
+  exa.search.lite:
+    name: Search, type lite or instant (per request, up to 10 results)
+    band: flat
+    freeMonthly: 0
+    per1000: ['4.00']
+  exa.search.auto:
+    name: Search, type auto or fast (per request, up to 10 results)
+    band: flat
+    freeMonthly: 0
+    per1000: ['7.00']
+  exa.search.deep:
+    name: Search, type deep or deep-lite (per request, up to 10 results)
+    band: flat
+    freeMonthly: 0
+    per1000: ['12.00']
+  exa.search.deep_reasoning:
+    name: Search, type deep-reasoning (per request, up to 10 results)
+    band: flat
+    freeMonthly: 0
+    per1000: ['15.00']
+  exa.search.extra_result:
+    name: Search result above the first 10 (per result)
+    band: flat
+    freeMonthly: 0
+    per1000: ['1.00']
+  exa.contents.page:
+    name: Contents, per page and content type (text, highlights, summary)
+    band: flat
+    freeMonthly: 0
+    per1000: ['1.00']
+  exa.answer:
+    name: Answer (per request)
+    band: flat
+    freeMonthly: 0
+    per1000: ['5.00']

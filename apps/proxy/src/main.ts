@@ -4,6 +4,10 @@ import {
   HereAdapter,
   MapboxAdapter,
   type ProviderAdapter,
+  BraveAdapter,
+  ExaAdapter,
+  SerpApiAdapter,
+  TavilyAdapter,
   TwilioAdapter,
 } from '@spend-brake/catalog';
 import { Registry } from '@spend-brake/budget';
@@ -29,6 +33,10 @@ const adapters: ProviderAdapter[] = [
   new TwilioAdapter(),
   new MapboxAdapter(),
   new HereAdapter(),
+  new TavilyAdapter(),
+  new ExaAdapter(),
+  new BraveAdapter(),
+  new SerpApiAdapter({ plan: env.BRAKE_SERPAPI_PLAN }),
   ...(env.BRAKE_GENERIC_PROVIDERS ?? []).map(
     (cfg) => new GenericAdapter(cfg as ConstructorParameters<typeof GenericAdapter>[0]),
   ),

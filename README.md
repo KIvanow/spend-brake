@@ -4,8 +4,8 @@ Hard dollar caps, enforced in real time, for every paid API your apps, test suit
 call. Spend Brake is a self-hosted egress proxy: swap one base URL and one key, and every request
 is priced before it leaves, checked against your caps in one atomic step, and refused with a
 clear `402` once a cap would be crossed. Built in: Google Maps Platform (Places, Geocoding,
-Routes), Twilio Messaging and Verify, Mapbox and HERE; any other API can be priced per request
-with the generic adapter.
+Routes), Twilio Messaging and Verify, Mapbox, HERE, and the agent search APIs Tavily, Exa, Brave
+and SerpApi; any other API can be priced per request with the generic adapter.
 
 You keep your provider account and your own key. The real key never leaves Spend Brake; clients
 only ever hold revocable virtual keys.

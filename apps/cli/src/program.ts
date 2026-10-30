@@ -5,6 +5,7 @@ import { adminCommands } from './commands/admin.js';
 import { callCommand } from './commands/call.js';
 import { initCommand } from './commands/init.js';
 import { mapsCommand } from './commands/maps.js';
+import { searchCommand } from './commands/search.js';
 import { sessionCommand } from './commands/session.js';
 import { CliError, EXIT, type Io } from './io.js';
 
@@ -21,6 +22,7 @@ export function buildProgram(io: Io, done: (code: number) => void): Command {
     .configureOutput({ writeOut: io.stdout, writeErr: io.stderr });
   sessionCommand(program, io, done);
   mapsCommand(program, io, done);
+  searchCommand(program, io, done);
   callCommand(program, io, done);
   initCommand(program, io, done);
   adminCommands(program, io, done);

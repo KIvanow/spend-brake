@@ -12,3 +12,7 @@ export * from './twilio/adapter.js';
 export { countSegments } from './twilio/segments.js';
 export * from './mapbox/adapter.js';
 export * from './here/adapter.js';
+export * from './search/tavily.js';
+export * from './search/exa.js';
+export * from './search/brave.js';
+export * from './search/serpapi.js';

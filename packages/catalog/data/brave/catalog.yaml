@@ -1,0 +1,26 @@
+# Brave Search API prepaid prices, transcribed from the plans page. USD per 1,000 requests. Each
+# plan includes $5 of free credit a month; that is a dollar credit, not a unit allowance, so it is
+# not modelled (spend is priced as if it had been used up).
+provider: brave
+version: 2026-10-30
+source: https://api-dashboard.search.brave.com/app/plans
+skuSource: https://api-dashboard.search.brave.com/documentation/services/llm-context
+sourceUpdated: 2026-10-30
+verifiedAt: 2026-10-30
+currency: USD
+billingTimeZone: UTC
+
+bands:
+  flat: [null]
+
+skus:
+  brave.search:
+    name: Search plan (web, LLM context, news, videos, images; per request)
+    band: flat
+    freeMonthly: 0
+    per1000: ['5.00']
+  brave.suggest:
+    name: Autosuggest and Spellcheck ($5 per 10,000 requests)
+    band: flat
+    freeMonthly: 0
+    per1000: ['0.50']

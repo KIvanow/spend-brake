@@ -40,10 +40,15 @@ brake maps details ChIJ...                    # Place Details, Essentials fields
 brake maps geocode "1 Main St, Springfield"
 brake maps reverse 42.69 23.32
 brake maps route "Sofia" "42.14,24.75" --mode drive
+brake search tavily "valkey lua scripting"   # basic depth (1 credit)
+brake search exa "agent budgets" --type lite --results 5
+brake search brave "spend caps"
+brake search serpapi "coffee" --engine bing
 brake call google-places POST /v1/places:searchText -d '{"textQuery":"x"}' -H 'X-Goog-FieldMask: places.id'
 ```
 
-Each uses the cheapest field set by default; `--fields` opts into higher (pricier) tiers. Output
+`brake search` defaults to each provider's cheapest search. Inside `brake session`, every
+provider spends from the one session budget. Each `maps` command uses the cheapest field set by default; `--fields` opts into higher (pricier) tiers. Output
 is one JSON object per call (`ok`, `status`, `costMicros`, `cost`, `remainingMicros`,
 `requestId`, `data`); `--pretty` prints a summary line and indented data instead.
 
