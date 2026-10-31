@@ -1,5 +1,6 @@
 import {
   and,
+  customApis,
   eq,
   gte,
   isNull,
@@ -14,7 +15,7 @@ import { ApiError } from './route.js';
 
 // Hosted plan limits. They apply only to orgs with an org_entitlements row (written by the
 // billing service); a self-hosted install has none and is never limited. Limits only stop new
-// keys, providers and sessions: existing keys and caps keep working whatever the plan or
+// keys, providers, custom APIs and sessions: existing keys and caps keep working whatever the plan or
 // payment state, and the proxy never reads any of this.
 
 export type Entitlements = typeof orgEntitlements.$inferSelect;
@@ -60,7 +61,7 @@ async function requestsThisMonth(ctx: Ctx, orgId: string): Promise<number> {
 export async function requireCapacity(
   ctx: Ctx,
   orgId: string,
-  what: 'key' | 'session' | { provider: string },
+  what: 'key' | 'session' | 'customApi' | { provider: string },
 ): Promise<void> {
   const e = await entitlementsOf(ctx, orgId);
   if (!e) return;
@@ -100,6 +101,15 @@ export async function requireCapacity(
       );
     if (Number(row?.n ?? 0) >= e.agentSessionsPerMonth) {
       limit(e, ['agent session a month', 'agent sessions a month'], e.agentSessionsPerMonth);
+    }
+  }
+  if (what === 'customApi' && e.maxCustomApis !== null) {
+    const [row] = await ctx.db
+      .select({ n: sql<string>`count(*)::text` })
+      .from(customApis)
+      .where(eq(customApis.orgId, orgId));
+    if (Number(row?.n ?? 0) >= e.maxCustomApis) {
+      limit(e, ['custom API', 'custom APIs'], e.maxCustomApis);
     }
   }
   if (typeof what === 'object' && e.maxProviders !== null) {

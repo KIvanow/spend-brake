@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
 import { type AuthOptions, type Key, api, localDate } from '../api.js';
-import { PROVIDERS, providerById } from '../providers.js';
+import { PROVIDERS, useCustomApis, useProviderInfo } from '../providers.js';
 import { useRole } from '../role.js';
 import { CopyButton, Table } from '../ui.js';
 
@@ -44,10 +44,12 @@ export function AddProviderKey({
   onAdded?: (check: KeyCheck | null) => void;
 }) {
   const qc = useQueryClient();
+  const providerInfo = useProviderInfo();
+  const custom = useCustomApis().data?.items ?? [];
   const [provider, setProvider] = useState(PROVIDERS[0]!.id);
   const [secret, setSecret] = useState('');
   const [check, setCheck] = useState<KeyCheck | null>(null);
-  const info = providerById(provider)!;
+  const info = providerInfo(provider) ?? PROVIDERS[0]!;
   const [rebound, setRebound] = useState(0);
   const add = useMutation({
     mutationFn: () =>
@@ -80,6 +82,15 @@ export function AddProviderKey({
                 {p.name}
               </option>
             ))}
+            {custom.length > 0 && (
+              <optgroup label="Custom APIs">
+                {custom.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </optgroup>
+            )}
           </select>
         </label>
         <label className="grow">
@@ -197,6 +208,7 @@ export function CreateKey({
   onCreated?: (created: { token: string; providers: string[] }) => void;
 }) {
   const qc = useQueryClient();
+  const providerInfo = useProviderInfo();
   const [name, setName] = useState('');
   const [chosen, setChosen] = useState<string[]>(() => credentials.map((c) => c.id));
   const create = useMutation({
@@ -252,7 +264,7 @@ export function CreateKey({
                   )
                 }
               />
-              {providerById(c.provider)?.name ?? c.provider}
+              {providerInfo(c.provider)?.name ?? c.provider}
             </label>
           ))}
         </fieldset>
@@ -279,6 +291,7 @@ export function NewKey({
   providers: string[];
   proxyUrl: string | null;
 }) {
+  const providerInfo = useProviderInfo();
   const base = (proxyUrl ?? 'https://<your proxy>').replace(/\/$/, '');
   return (
     <div className="callout">
@@ -291,7 +304,7 @@ export function NewKey({
       </p>
       <p>In your app, change two things for each provider:</p>
       {providers.map((id) => {
-        const info = providerById(id);
+        const info = providerInfo(id);
         if (!info) return null;
         return (
           <div key={id}>
@@ -321,6 +334,7 @@ export function NewKey({
 function KeyCredentials({ k, credentials }: { k: Key; credentials: Credential[] }) {
   const qc = useQueryClient();
   const { can } = useRole();
+  const providerInfo = useProviderInfo();
   const bound = k.config.credentials ?? {};
   const rebind = useMutation({
     mutationFn: (next: Record<string, string>) =>
@@ -336,7 +350,7 @@ function KeyCredentials({ k, credentials }: { k: Key; credentials: Credential[] 
   return (
     <>
       {Object.entries(bound).map(([provider, credId]) => {
-        const info = providerById(provider);
+        const info = providerInfo(provider);
         const label = (c: Credential) => `${info?.name ?? c.provider} …${c.hint}`;
         const same = credentials.filter((c) => c.provider === provider);
         const current = same.find((c) => c.id === credId);
@@ -383,6 +397,8 @@ export function Keys() {
   const credentials = useCredentials();
   const options = useAuthOptions();
   const { can } = useRole();
+  const providerInfo = useProviderInfo();
+  const nameOf = (id: string) => providerInfo(id)?.name ?? id;
   const activeKeys = (keys.data?.items ?? []).filter((k) => k.status === 'active');
   const usedBy = (c: Credential) =>
     activeKeys.filter((k) => !k.config.sessionId && k.config.credentials?.[c.provider] === c.id);
@@ -410,7 +426,7 @@ export function Keys() {
         rows={credentials.data?.items ?? []}
         empty="No provider keys yet."
         columns={[
-          { label: 'Provider', render: (c) => providerById(c.provider)?.name ?? c.provider },
+          { label: 'Provider', render: (c) => nameOf(c.provider) },
           { label: 'Key', render: (c) => <code>…{c.hint}</code> },
           {
             label: 'Used by',
@@ -428,11 +444,11 @@ export function Keys() {
                     <button
                       type="button"
                       className="danger"
-                      aria-label={`Delete ${providerById(c.provider)?.name ?? c.provider} key …${c.hint}`}
+                      aria-label={`Delete ${nameOf(c.provider)} key …${c.hint}`}
                       disabled={removeCredential.isPending}
                       onClick={() => {
                         const users = usedBy(c);
-                        const provider = providerById(c.provider)?.name ?? c.provider;
+                        const provider = nameOf(c.provider);
                         const who = `${users.map((k) => k.name).join(', ')} use${users.length === 1 ? 's' : ''} this key.`;
                         const them = users.length === 1 ? 'that key' : 'those keys';
                         // The API moves its keys to the newest other key of the provider, or

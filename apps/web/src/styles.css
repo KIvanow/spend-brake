@@ -584,6 +584,15 @@ fieldset legend {
     min-width: 0;
   }
 }
+/* One route of a custom API: its fields on one wrapping line, under a top rule. */
+.form .route-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: flex-end;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
 .checks {
   display: flex;
   flex-wrap: wrap;

@@ -1,6 +1,6 @@
 ---
 title: Alerts and webhooks
-nav_order: 8
+nav_order: 9
 description: Signed webhooks with Slack, Discord and Teams presets, email alerts, and one-click Kill, Raise and Mute links.
 ---
 

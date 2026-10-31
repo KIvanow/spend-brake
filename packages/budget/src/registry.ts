@@ -115,6 +115,7 @@ export function hashVirtualKey(token: string): string {
 const keyLookup = (hash: string) => `bk:vk:${hash}`;
 const orgRecord = (orgId: string) => `bk:{o:${assertOrgId(orgId)}}:org`;
 const credentialRecord = (orgId: string, id: string) => `bk:{o:${assertOrgId(orgId)}}:cred:${id}`;
+const customApisRecord = (orgId: string) => `bk:{o:${assertOrgId(orgId)}}:capis`;
 
 /** An encrypted provider credential as the proxy reads it (the envelope is opaque here). */
 export interface CredentialRecord {
@@ -174,6 +175,25 @@ export class Registry {
 
   async deleteCredential(orgId: string, credentialId: string): Promise<void> {
     await this.client.del(credentialRecord(orgId, id.parse(credentialId)));
+  }
+
+  /**
+   * Every custom API of one org, replaced as a whole on each change (so a deleted one is gone in
+   * the same write). The definitions are opaque here: the proxy parses each one with the catalog's
+   * record schema, which drops fields it does not know, and skips one that does not parse.
+   */
+  async putCustomApis(
+    orgId: string,
+    apis: readonly { id: string; [field: string]: unknown }[],
+  ): Promise<void> {
+    await this.client.set(customApisRecord(orgId), JSON.stringify({ apis }));
+  }
+
+  async getCustomApis(orgId: string): Promise<unknown[]> {
+    const raw = await this.client.get(customApisRecord(orgId));
+    if (raw === null) return [];
+    const parsed = JSON.parse(raw) as { apis?: unknown };
+    return Array.isArray(parsed.apis) ? (parsed.apis as unknown[]) : [];
   }
 
   async revokeKey(token: string): Promise<void> {

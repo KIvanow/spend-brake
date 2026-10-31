@@ -1,6 +1,6 @@
 ---
 title: CLI
-nav_order: 12
+nav_order: 13
 description: brake, the Spend Brake command line - setup, agent sessions, capped calls and admin.
 ---
 
@@ -124,6 +124,9 @@ These use the admin token (`BRAKE_ADMIN_TOKEN` or the saved one).
 | `brake keys list`                                                              | Virtual keys                                                                                                        |
 | `brake keys create --name <n> --credential <provider=credId...>`               | Create a key; also `--env`, `--agent`, `--skus`, `--session-cap`, `--can-mint-sessions`, `--expires`, `--countries` |
 | `brake keys show <id>` / `brake keys revoke <id>`                              | Show or revoke a key                                                                                                |
+| `brake custom-apis list` / `brake custom-apis show <id>`                       | Your [custom APIs](../custom-apis/)                                                                                 |
+| `brake custom-apis add <file.json>`                                            | Add a custom API from a JSON definition                                                                             |
+| `brake custom-apis update <id> <file.json>` / `brake custom-apis delete <id>`  | Replace or delete one (delete is refused while keys use it)                                                         |
 | `brake caps list`                                                              | Caps                                                                                                                |
 | `brake caps set <scope> --day 5 --month 50`                                    | Set caps; also `--soft-day`, `--soft-month`                                                                         |
 | `brake caps rm <scope> [--kind d\|m]`                                          | Remove caps                                                                                                         |

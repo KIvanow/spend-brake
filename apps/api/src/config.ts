@@ -1,3 +1,4 @@
+import { isIP } from 'node:net';
 import { z } from 'zod';
 
 const envSchema = z.object({
@@ -37,11 +38,39 @@ const envSchema = z.object({
    * (development). Set it on the worker too, which sends the real spans.
    */
   ALLOW_PRIVATE_COLLECTORS: z.stringbool().default(false),
+  /**
+   * Custom API origins may be private addresses (an API on this machine or network). Set it on
+   * the proxy too, which makes the calls. Leave off on a server other people use.
+   */
+  ALLOW_PRIVATE_CUSTOM_APIS: z.stringbool().default(false),
+  /** The service's own hostnames (TLS overlay): custom APIs may not point at them. */
+  BRAKE_PROXY_DOMAIN: z.string().optional(),
+  BRAKE_APP_DOMAIN: z.string().optional(),
   /** Hosted sign-up is open (the billing service serves it). */
   BRAKE_HOSTED_SIGNUP: z.stringbool().default(false),
 });
 
 export type ApiEnv = z.output<typeof envSchema>;
+
+/**
+ * Hostnames custom APIs may not point at: the proxy's and the dashboard's (spendbrake.dev is
+ * refused regardless). Loopback names and IP addresses are left to ALLOW_PRIVATE_CUSTOM_APIS.
+ */
+export function ownHosts(env: ApiEnv): string[] {
+  const hosts = [env.BRAKE_PROXY_DOMAIN, env.BRAKE_APP_DOMAIN];
+  for (const url of [env.BRAKE_PUBLIC_PROXY_URL, env.BRAKE_DASHBOARD_URL]) {
+    if (url) hosts.push(new URL(url).hostname);
+  }
+  return [
+    ...new Set(
+      hosts
+        .map((h) => h?.trim().toLowerCase().replace(/\.$/, ''))
+        .filter(
+          (h): h is string => Boolean(h) && h !== 'localhost' && !isIP(h!.replace(/^\[|\]$/g, '')),
+        ),
+    ),
+  ];
+}
 
 export function loadEnv(env: NodeJS.ProcessEnv = process.env): ApiEnv {
   const parsed = envSchema.parse(env);

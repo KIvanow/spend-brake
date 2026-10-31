@@ -50,6 +50,13 @@
       "when": 1793386377392,
       "tag": "0006_telemetry",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793460415045,
+      "tag": "0007_custom_apis",
+      "breakpoints": true
     }
   ]
 }

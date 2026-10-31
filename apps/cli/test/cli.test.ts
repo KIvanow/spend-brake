@@ -387,3 +387,48 @@ describe('brake license', () => {
     expect(await run(['license', 'install', '/no/such/file'], f.io)).toBe(EXIT.usage);
   });
 });
+
+describe('brake custom-apis', () => {
+  it('adds one from a JSON file, lists, updates and deletes', async () => {
+    const { mkdtempSync, writeFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = mkdtempSync(join(tmpdir(), 'capi-'));
+    const definition = {
+      id: 'acme',
+      name: 'Acme',
+      origin: 'https://api.acme.example',
+      auth: { type: 'header', name: 'X-Api-Key' },
+      routes: [{ path: '/v1/**', sku: 'call', pricing: { model: 'perRequest', usd: '0.01' } }],
+    };
+    const file = join(dir, 'acme.json');
+    writeFileSync(file, JSON.stringify(definition));
+    const item = { ...definition, proxyPath: '/custom/acme' };
+    const f = fake({ ...ENV, BRAKE_ADMIN_TOKEN: `sbt_${'a'.repeat(32)}` }, (c) =>
+      c.method === 'GET' && c.url.endsWith('/v1/custom-apis')
+        ? { status: 200, body: { items: [item] } }
+        : c.method === 'DELETE'
+          ? {
+              status: 409,
+              body: { error: 'custom_api_in_use', message: 'Key "agent" calls Acme.' },
+            }
+          : { status: 201, body: item },
+    );
+    expect(await run(['custom-apis', 'add', file], f.io)).toBe(0);
+    expect(f.calls[0]).toMatchObject({ url: 'http://api/v1/custom-apis', method: 'POST' });
+    expect(JSON.parse(f.calls[0]!.body!)).toEqual(definition);
+
+    expect(await run(['custom-apis', 'list', '--pretty'], f.io)).toBe(0);
+    expect(f.out.at(-1)).toMatch(/^id +name +origin +routes +path/);
+    expect(f.out.at(-1)).toContain('acme  Acme  https://api.acme.example  1       /custom/acme');
+
+    expect(await run(['custom-apis', 'update', 'acme', file], f.io)).toBe(0);
+    expect(f.calls.at(-1)).toMatchObject({ url: 'http://api/v1/custom-apis/acme', method: 'PUT' });
+    expect(JSON.parse(f.calls.at(-1)!.body!)).not.toHaveProperty('id');
+    expect(await run(['custom-apis', 'update', 'other', file], f.io)).toBe(EXIT.usage);
+
+    expect(await run(['custom-apis', 'delete', 'acme'], f.io)).toBe(EXIT.error);
+    expect(f.err.join('')).toContain('Key "agent" calls Acme.');
+    expect(await run(['custom-apis', 'add', join(dir, 'missing.json')], f.io)).toBe(EXIT.usage);
+  });
+});

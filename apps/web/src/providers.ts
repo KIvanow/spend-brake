@@ -1,3 +1,6 @@
+import { useQuery } from '@tanstack/react-query';
+import { api } from './api.js';
+
 // What the dashboard tells people about each provider: what its key looks like, and the one
 // change in their app (base URL, and the Spend Brake key where the provider's key went).
 // The prefixes match the proxy's upstreams in @spend-brake/catalog.
@@ -88,3 +91,64 @@ export const PROVIDERS: ProviderInfo[] = [
 ];
 
 export const providerById = (id: string) => PROVIDERS.find((p) => p.id === id);
+
+export type CustomApiPricing =
+  | { model: 'perRequest'; usd: string }
+  | {
+      model: 'reported';
+      header?: string;
+      jsonPath?: string;
+      usdPerUnit: string;
+      maxPerRequest: string;
+    };
+
+export interface CustomApiRoute {
+  method: string;
+  path: string;
+  sku: string;
+  pricing: CustomApiPricing;
+}
+
+/** An API the org prices itself (Custom APIs page). */
+export interface CustomApi {
+  id: string;
+  name: string;
+  origin: string;
+  auth: { type: 'header'; name: string; valuePrefix: string } | { type: 'query'; name: string };
+  routes: CustomApiRoute[];
+  billed: '2xx' | 'all';
+  timeoutBilled: boolean;
+  proxyPath: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A custom API as a provider: called at `/custom/<id>` with the key in X-Brake-Key. */
+export const customApiInfo = (a: Pick<CustomApi, 'id' | 'name' | 'origin'>): ProviderInfo => ({
+  id: a.id,
+  name: a.name,
+  secret: 'API key',
+  routes: [{ from: a.origin, prefix: `/custom/${a.id}` }],
+  keyIn: 'the X-Brake-Key header',
+});
+
+export const useCustomApis = () =>
+  useQuery({
+    queryKey: ['custom-apis'],
+    queryFn: () => api<{ items: CustomApi[] }>('/v1/custom-apis'),
+  });
+
+/**
+ * Look a provider up by id: built-in ones first, then the org's custom APIs (a list that fails
+ * to load counts as empty).
+ */
+export function useProviderInfo(): (id: string) => ProviderInfo | undefined {
+  const custom = useCustomApis();
+  const items = custom.data?.items ?? [];
+  return (id) => {
+    const builtIn = providerById(id);
+    if (builtIn) return builtIn;
+    const c = items.find((a) => a.id === id);
+    return c ? customApiInfo(c) : undefined;
+  };
+}

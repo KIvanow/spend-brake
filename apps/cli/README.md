@@ -55,6 +55,14 @@ provider spends from the one session budget. Each `maps` command uses the cheape
 is one JSON object per call (`ok`, `status`, `costMicros`, `cost`, `remainingMicros`,
 `requestId`, `data`); `--pretty` prints a summary line and indented data instead.
 
+## Custom APIs
+
+```sh
+brake custom-apis add acme.json      # id, name, origin, auth, routes (see docs/custom-apis.md)
+brake custom-apis list --pretty
+brake custom-apis delete acme        # refused while Spend Brake keys use it
+```
+
 ## License (Business / Enterprise)
 
 ```sh

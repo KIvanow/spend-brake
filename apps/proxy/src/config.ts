@@ -33,6 +33,17 @@ const envSchema = z.object({
   BRAKE_SERPAPI_SPEED: z.enum(['normal', 'ludicrous', 'ludicrous_max']).default('normal'),
   /** Generic adapter configs (see @spend-brake/catalog GenericConfig). */
   BRAKE_GENERIC_PROVIDERS: json(z.array(z.unknown())).optional(),
+  /**
+   * Let orgs' custom APIs reach private addresses (an API on this machine or network). Set it on
+   * the API too, which checks origins when they are saved. Leave off on a server other people use.
+   */
+  ALLOW_PRIVATE_CUSTOM_APIS: z.stringbool().default(false),
+  /** Largest custom API response passed on; a longer one is cut and recorded as an error. */
+  BRAKE_CUSTOM_API_MAX_RESPONSE_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(10 * 1024 * 1024),
 });
 
 export type ProxyEnv = z.output<typeof envSchema>;

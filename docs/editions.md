@@ -1,6 +1,6 @@
 ---
 title: Editions and license
-nav_order: 13
+nav_order: 14
 description: The Apache-2.0 core, the Business and Enterprise features, and the hosted plans.
 ---
 

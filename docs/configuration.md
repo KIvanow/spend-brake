@@ -54,13 +54,14 @@ See [Self-hosting: HTTPS](../self-hosting/#2-https).
 
 ## Email, telemetry and price drift
 
-| Variable                      | Default                          | What                                                                                                                                                           |
-| ----------------------------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SMTP_URL`                    |                                  | Outgoing mail, e.g. `smtps://user:password@smtp.example.com:465`. Email alerts and sign-in links.                                                              |
-| `BRAKE_EMAIL_FROM`            | `Spend Brake <alerts@localhost>` | The sender, on a domain your mail provider has verified.                                                                                                       |
-| `OPERATOR_EMAIL`              |                                  | Where operator alerts (catalog price drift) go.                                                                                                                |
-| `ALLOW_PRIVATE_COLLECTORS`    | `false`                          | Let orgs send OpenTelemetry spans to private addresses and a local `http://` collector. Set on the API and the worker. Leave off on a server other people use. |
-| `GITHUB_TOKEN`, `GITHUB_REPO` |                                  | Optional: the worker opens a GitHub issue when a provider's price page changes.                                                                                |
+| Variable                      | Default                          | What                                                                                                                                                                                            |
+| ----------------------------- | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SMTP_URL`                    |                                  | Outgoing mail, e.g. `smtps://user:password@smtp.example.com:465`. Email alerts and sign-in links.                                                                                               |
+| `BRAKE_EMAIL_FROM`            | `Spend Brake <alerts@localhost>` | The sender, on a domain your mail provider has verified.                                                                                                                                        |
+| `OPERATOR_EMAIL`              |                                  | Where operator alerts (catalog price drift) go.                                                                                                                                                 |
+| `ALLOW_PRIVATE_COLLECTORS`    | `false`                          | Let orgs send OpenTelemetry spans to private addresses and a local `http://` collector. Set on the API and the worker. Leave off on a server other people use.                                  |
+| `ALLOW_PRIVATE_CUSTOM_APIS`   | `false`                          | Let orgs' [custom APIs](../custom-apis/) point at private and loopback addresses (an API on the same machine or network). Set on the API and the proxy. Leave off on a server other people use. |
+| `GITHUB_TOKEN`, `GITHUB_REPO` |                                  | Optional: the worker opens a GitHub issue when a provider's price page changes.                                                                                                                 |
 
 ## Published images (`docker-compose.release.yml`)
 
@@ -89,25 +90,26 @@ See [ee/README.md](https://github.com/KIvanow/spend-brake/blob/main/ee/README.md
 These are not in `infra/.env`; set them on a service with a compose override file if you need
 them.
 
-| Variable                      | Service               | Default        | What                                                                                                                    |
-| ----------------------------- | --------------------- | -------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `VALKEY_URL`                  | all                   | set by compose | `redis-cluster://:password@host1:6379,host2:6379,…` for a Valkey Cluster (`rediss-cluster://` for TLS)                  |
-| `DATABASE_URL`                | API, worker, notifier | set by compose | Postgres connection string                                                                                              |
-| `LOG_LEVEL`                   | all                   | `info`         |                                                                                                                         |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | all                   |                | Export the services' own OpenTelemetry traces (standard `OTEL_*` variables apply; secrets are stripped from every span) |
-| `BRAKE_OTEL_CLIENT_URLS`      | all                   |                | `origin` reduces outgoing request URLs in traces to scheme and host                                                     |
-| `RATE_LIMIT_PER_MINUTE`       | API                   | `600`          | Requests per token per minute (4x that per IP before authentication)                                                    |
-| `GOOGLE_KEY_CHECK`            | API                   | `true`         | Check a new Google key's restrictions with a free call to Google                                                        |
-| `TRUST_PROXY`                 | proxy, API            | `false`        | Use `X-Forwarded-For` for client IPs (the HTTPS overlay sets it)                                                        |
-| `UPSTREAM_TIMEOUT_MS`         | proxy                 | `30000`        | How long the proxy waits for a provider                                                                                 |
-| `BRAKE_SERPAPI_PLAN`          | proxy                 | `starter`      | The SerpApi plan whose per-search price applies                                                                         |
-| `BRAKE_SERPAPI_SPEED`         | proxy                 | `normal`       | SerpApi speed mode: `ludicrous` bills 2x, `ludicrous_max` 4x                                                            |
-| `BRAKE_GENERIC_PROVIDERS`     | proxy                 |                | JSON array of generic adapter configs: price any other API per request                                                  |
-| `BRAKE_CATALOG_DIR`           | proxy                 |                | Updated catalog data (`current/`), checked every 30 s                                                                   |
-| `METRICS_PORT`                | proxy, worker         | `9465`, `9464` | Prometheus metrics port                                                                                                 |
-| `BRAKE_ACTION_TTL_SEC`        | notifier              | `900`          | How long alert action links work                                                                                        |
-| `BRAKE_MAX_CUSTOM_RAISE_USD`  | notifier              | `500`          | The largest custom raise an alert link offers                                                                           |
-| `ALLOW_PRIVATE_WEBHOOKS`      | notifier              | `false`        | Allow webhook hosts that resolve to private addresses                                                                   |
+| Variable                              | Service               | Default        | What                                                                                                                    |
+| ------------------------------------- | --------------------- | -------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `VALKEY_URL`                          | all                   | set by compose | `redis-cluster://:password@host1:6379,host2:6379,…` for a Valkey Cluster (`rediss-cluster://` for TLS)                  |
+| `DATABASE_URL`                        | API, worker, notifier | set by compose | Postgres connection string                                                                                              |
+| `LOG_LEVEL`                           | all                   | `info`         |                                                                                                                         |
+| `OTEL_EXPORTER_OTLP_ENDPOINT`         | all                   |                | Export the services' own OpenTelemetry traces (standard `OTEL_*` variables apply; secrets are stripped from every span) |
+| `BRAKE_OTEL_CLIENT_URLS`              | all                   |                | `origin` reduces outgoing request URLs in traces to scheme and host                                                     |
+| `RATE_LIMIT_PER_MINUTE`               | API                   | `600`          | Requests per token per minute (4x that per IP before authentication)                                                    |
+| `GOOGLE_KEY_CHECK`                    | API                   | `true`         | Check a new Google key's restrictions with a free call to Google                                                        |
+| `TRUST_PROXY`                         | proxy, API            | `false`        | Use `X-Forwarded-For` for client IPs (the HTTPS overlay sets it)                                                        |
+| `UPSTREAM_TIMEOUT_MS`                 | proxy                 | `30000`        | How long the proxy waits for a provider                                                                                 |
+| `BRAKE_SERPAPI_PLAN`                  | proxy                 | `starter`      | The SerpApi plan whose per-search price applies                                                                         |
+| `BRAKE_SERPAPI_SPEED`                 | proxy                 | `normal`       | SerpApi speed mode: `ludicrous` bills 2x, `ludicrous_max` 4x                                                            |
+| `BRAKE_GENERIC_PROVIDERS`             | proxy                 |                | JSON array of generic adapter configs: price any other API for every org (see below)                                    |
+| `BRAKE_CUSTOM_API_MAX_RESPONSE_BYTES` | proxy                 | `10485760`     | Largest custom API response passed on; a longer one is cut and recorded as an error                                     |
+| `BRAKE_CATALOG_DIR`                   | proxy                 |                | Updated catalog data (`current/`), checked every 30 s                                                                   |
+| `METRICS_PORT`                        | proxy, worker         | `9465`, `9464` | Prometheus metrics port                                                                                                 |
+| `BRAKE_ACTION_TTL_SEC`                | notifier              | `900`          | How long alert action links work                                                                                        |
+| `BRAKE_MAX_CUSTOM_RAISE_USD`          | notifier              | `500`          | The largest custom raise an alert link offers                                                                           |
+| `ALLOW_PRIVATE_WEBHOOKS`              | notifier              | `false`        | Allow webhook hosts that resolve to private addresses                                                                   |
 
 The service READMEs list the rest:
 [proxy](https://github.com/KIvanow/spend-brake/tree/main/apps/proxy#configuration-env),
@@ -117,8 +119,13 @@ The service READMEs list the rest:
 
 ## Generic providers
 
-Any API without a built-in adapter can be priced per request. Give the proxy an origin, how the
-key is sent (a header or a query parameter) and the routes with a flat price:
+Orgs can add APIs without a built-in adapter themselves, from the dashboard, the API or the CLI:
+see [Custom APIs](../custom-apis/). Those belong to one org and are served at
+`<proxy>/custom/<id>/...`.
+
+`BRAKE_GENERIC_PROVIDERS` on the proxy does the same for every org on the install, with a path
+prefix of your choice. It is the operator's list: it can use `http://` origins and private
+addresses, which custom APIs cannot. Each entry is a custom API definition plus a `prefix`:
 
 ```json
 [
@@ -128,14 +135,36 @@ key is sent (a header or a query parameter) and the routes with a flat price:
     "origin": "https://api.acme.example",
     "auth": { "type": "header", "name": "Authorization", "valuePrefix": "Bearer " },
     "routes": [
-      { "method": "POST", "path": "/v1/search", "sku": "search", "pricePerRequest": "0.005" }
+      {
+        "method": "POST",
+        "path": "/v1/search",
+        "sku": "search",
+        "pricing": { "model": "perRequest", "usd": "0.005" }
+      },
+      {
+        "path": "/v1/agents/**",
+        "sku": "agent_run",
+        "pricing": {
+          "model": "reported",
+          "header": "X-Credits-Used",
+          "usdPerUnit": "0.001",
+          "maxPerRequest": "0.50"
+        }
+      }
     ]
   }
 ]
 ```
 
-Set it as `BRAKE_GENERIC_PROVIDERS` on the proxy. Store the API's key as a provider credential
-for `acme` (`POST /v1/providers/credentials` with `"provider": "acme"`), create a virtual key
-that uses it (`brake keys create --name app --credential acme=<credential id>`), and call
+Routes are priced the same two ways as custom APIs: `perRequest` (a flat price) or `reported`
+(the cost the API reports in a response header or JSON field, with a maximum reserved up front);
+[Custom APIs: pricing](../custom-apis/#pricing) explains both. The older spelling
+`"pricePerRequest": "0.005"` still works and means `perRequest`.
+
+Store the API's key as a provider credential for `acme` (`POST /v1/providers/credentials` with
+`"provider": "acme"`), create a virtual key that uses it
+(`brake keys create --name app --credential acme=<credential id>`), and call
 `<proxy>/acme/v1/search` with the virtual key in `X-Brake-Key`. Route paths are globs: `*`
 matches one segment, `**` any number. Only 2xx responses are billed unless `"billed": "all"`.
+The prefix `/custom` is reserved for custom APIs. Give operator providers ids no org will use for
+a custom API: a key binds one credential per provider id.

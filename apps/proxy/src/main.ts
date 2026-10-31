@@ -13,7 +13,7 @@ import {
   withCatalogDir,
 } from '@spend-brake/catalog';
 import { Registry, connectValkey } from '@spend-brake/budget';
-import { keyWrapperFromEnv } from '@spend-brake/shared';
+import { guardedAgent, keyWrapperFromEnv } from '@spend-brake/shared';
 import { loadEnv } from './config.js';
 import { ProxyMetrics } from './metrics.js';
 import { CachingSecretStore, EnvelopeSecretStore, StaticSecretStore } from './secrets.js';
@@ -73,6 +73,8 @@ const app = buildServer({
   adapters,
   secrets: new CachingSecretStore(secrets),
   upstreamTimeoutMs: env.UPSTREAM_TIMEOUT_MS,
+  customEgress: guardedAgent(env.ALLOW_PRIVATE_CUSTOM_APIS, 'custom API'),
+  customMaxResponseBytes: env.BRAKE_CUSTOM_API_MAX_RESPONSE_BYTES,
   trustProxy: env.TRUST_PROXY,
   logger: loggerOptions(env.LOG_LEVEL),
   ...(env.BRAKE_UPSTREAM_OVERRIDES ? { upstreamOverrides: env.BRAKE_UPSTREAM_OVERRIDES } : {}),

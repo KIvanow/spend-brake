@@ -54,7 +54,7 @@ describe('resync from Postgres', () => {
       apiContext({ db: env.db, valkey: env.valkey, wrapper: env.wrapper }),
       org.id,
     );
-    expect(result).toEqual({ orgs: 1, keys: 2, caps: 1, credentials: 1 });
+    expect(result).toEqual({ orgs: 1, keys: 2, caps: 1, credentials: 1, customApis: 0 });
     expect(await env.registry.getKeyByToken(live.token)).toMatchObject({
       status: 'active',
       name: 'live',

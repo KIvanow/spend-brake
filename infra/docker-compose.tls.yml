@@ -37,6 +37,9 @@ services:
       BRAKE_PUBLIC_API_URL: https://${BRAKE_APP_DOMAIN}
       BRAKE_DASHBOARD_URL: https://${BRAKE_APP_DOMAIN}
       BRAKE_PUBLIC_PROXY_URL: https://${BRAKE_PROXY_DOMAIN}
+      # Custom APIs may not point at the service's own hostnames.
+      BRAKE_PROXY_DOMAIN: ${BRAKE_PROXY_DOMAIN}
+      BRAKE_APP_DOMAIN: ${BRAKE_APP_DOMAIN}
 
   notifier:
     ports: !reset []

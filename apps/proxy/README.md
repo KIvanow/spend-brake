@@ -54,7 +54,13 @@ In drop-in mode the virtual key goes where the provider's own key would: `key` o
 `Authorization: Bearer` (Tavily), `X-Api-Key` (Exa), `X-Subscription-Token` (Brave) and `api_key`
 (SerpApi).
 
-Generic providers add their own prefix (`BRAKE_GENERIC_PROVIDERS`).
+Generic providers add their own prefix (`BRAKE_GENERIC_PROVIDERS`). Orgs' custom APIs are served
+at `/custom/<id>/...`: the id is looked up in the key's org once the key is authenticated, so two
+orgs can each have an `acme`. Their definitions come from Valkey (written by the admin API) and
+reload like keys. Custom API traffic goes out through a guarded agent that refuses private and
+loopback addresses (`ALLOW_PRIVATE_CUSTOM_APIS=true` allows them), and responses longer than
+`BRAKE_CUSTOM_API_MAX_RESPONSE_BYTES` are cut. The virtual key goes in `X-Brake-Key` (or anywhere
+drop-in mode looks for it).
 
 ## Responses
 
@@ -62,19 +68,19 @@ Every response carries `X-Brake-Request-Id` and `X-Brake-Cost-Micros`. Requests 
 reserved also carry `X-Brake-Remaining-Micros` (smallest headroom left across the request's capped
 scopes); it is omitted when nothing is capped. Fail-open requests add `X-Brake-Fail-Open: 1`.
 
-| Status | `error`                | When                                                             |
-| ------ | ---------------------- | ---------------------------------------------------------------- |
-| 401    | `invalid_key`          | Missing, unknown, revoked, expired key, or IP not allowed        |
-| 402    | `budget_exceeded`      | `scope`, `window`, `cap`, `spent` (committed + held), `resetsAt` |
-| 402    | `unpriced_route`       | No price and the org's policy is `deny`                          |
-| 403    | `killed`               | `target` is in the kill set                                      |
-| 403    | `sku_not_allowed`      | SKU or provider not allowed for the key                          |
-| 429    | `loop_detected`        | Circuit open; `retryAfter` and `Retry-After`                     |
-| 503    | `budget_unavailable`   | Valkey unreachable and the key is fail-closed                    |
-| 400    | `invalid_request`      | Malformed `X-Brake-Session` or body too large                    |
-| 404    | `unknown_route`        | No provider for the path prefix                                  |
-| 502    | `upstream_unavailable` | Provider unreachable (refunded)                                  |
-| 504    | `upstream_timeout`     | Provider timed out (committed at worst case)                     |
+| Status | `error`                | When                                                              |
+| ------ | ---------------------- | ----------------------------------------------------------------- |
+| 401    | `invalid_key`          | Missing, unknown, revoked, expired key, or IP not allowed         |
+| 402    | `budget_exceeded`      | `scope`, `window`, `cap`, `spent` (committed + held), `resetsAt`  |
+| 402    | `unpriced_route`       | No price and the org's policy is `deny`                           |
+| 403    | `killed`               | `target` is in the kill set                                       |
+| 403    | `sku_not_allowed`      | SKU or provider not allowed for the key                           |
+| 429    | `loop_detected`        | Circuit open; `retryAfter` and `Retry-After`                      |
+| 503    | `budget_unavailable`   | Valkey unreachable and the key is fail-closed                     |
+| 400    | `invalid_request`      | Malformed `X-Brake-Session` or body too large                     |
+| 404    | `unknown_route`        | No provider for the path prefix, or no such custom API in the org |
+| 502    | `upstream_unavailable` | Provider unreachable (refunded)                                   |
+| 504    | `upstream_timeout`     | Provider timed out (committed at worst case)                      |
 
 Every error body has a one-line `message` an agent can act on. A 402 `budget_exceeded` also
 carries `X-Brake-Remaining-Micros` (headroom left in the denying scope).
@@ -85,18 +91,20 @@ Metrics (`:9465/metrics`): `brake_requests_total{provider,sku,outcome}`,
 
 ## Configuration (env)
 
-| Variable                   | Default                   |                                                        |
-| -------------------------- | ------------------------- | ------------------------------------------------------ |
-| `PORT`, `HOST`             | `8080`, `0.0.0.0`         |                                                        |
-| `VALKEY_URL`               | `redis://localhost:16379` |                                                        |
-| `UPSTREAM_TIMEOUT_MS`      | `30000`                   |                                                        |
-| `TRUST_PROXY`              | `false`                   | Use `X-Forwarded-For` for IP allow-lists               |
-| `BRAKE_DEV_SECRETS`        |                           | Dev only: `{"<credentialId>": "<secret>"}`             |
-| `BRAKE_UPSTREAM_OVERRIDES` |                           | Dev/test only: `{"<origin>": "<base url>"}`            |
-| `BRAKE_CATALOG_DIR`        |                           | Updated catalog data (`current/`); checked every 30 s  |
-| `BRAKE_SERPAPI_PLAN`       | `starter`                 | SerpApi plan whose per-search price applies            |
-| `BRAKE_SERPAPI_SPEED`      | `normal`                  | SerpApi speed mode: `ludicrous` 2x, `ludicrous_max` 4x |
-| `BRAKE_GENERIC_PROVIDERS`  |                           | JSON array of generic adapter configs                  |
+| Variable                              | Default                   |                                                        |
+| ------------------------------------- | ------------------------- | ------------------------------------------------------ |
+| `PORT`, `HOST`                        | `8080`, `0.0.0.0`         |                                                        |
+| `VALKEY_URL`                          | `redis://localhost:16379` |                                                        |
+| `UPSTREAM_TIMEOUT_MS`                 | `30000`                   |                                                        |
+| `TRUST_PROXY`                         | `false`                   | Use `X-Forwarded-For` for IP allow-lists               |
+| `BRAKE_DEV_SECRETS`                   |                           | Dev only: `{"<credentialId>": "<secret>"}`             |
+| `BRAKE_UPSTREAM_OVERRIDES`            |                           | Dev/test only: `{"<origin>": "<base url>"}`            |
+| `BRAKE_CATALOG_DIR`                   |                           | Updated catalog data (`current/`); checked every 30 s  |
+| `BRAKE_SERPAPI_PLAN`                  | `starter`                 | SerpApi plan whose per-search price applies            |
+| `BRAKE_SERPAPI_SPEED`                 | `normal`                  | SerpApi speed mode: `ludicrous` 2x, `ludicrous_max` 4x |
+| `BRAKE_GENERIC_PROVIDERS`             |                           | JSON array of generic adapter configs                  |
+| `ALLOW_PRIVATE_CUSTOM_APIS`           | `false`                   | Let custom APIs reach private and loopback addresses   |
+| `BRAKE_CUSTOM_API_MAX_RESPONSE_BYTES` | `10485760`                | Largest custom API response passed on                  |
 
 Provider credentials come from `BRAKE_DEV_SECRETS` until Phase 4 adds encrypted storage. Keys and
 orgs are created with `pnpm --filter @spend-brake/proxy seed` until the admin API exists.

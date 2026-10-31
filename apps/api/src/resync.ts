@@ -3,21 +3,23 @@ import { caps, eq, orgs, providerCredentials, virtualKeys } from '@spend-brake/d
 import type { Ctx } from './common.js';
 import { toScope } from './common.js';
 import { syncOrg } from './routes/admin.js';
+import { syncCustomApis } from './routes/custom-apis.js';
 
 export interface ResyncResult {
   orgs: number;
   keys: number;
   caps: number;
   credentials: number;
+  customApis: number;
 }
 
 /**
  * Rewrite every record the proxy reads from Valkey using Postgres as the source of truth: org
- * settings, virtual keys (revoked ones as revoked), caps and live credential envelopes. Run at
- * API start, so a lost or partially written Valkey heals; it is idempotent.
+ * settings, virtual keys (revoked ones as revoked), caps, live credential envelopes and custom
+ * APIs. Run at API start, so a lost or partially written Valkey heals; it is idempotent.
  */
 export async function resyncValkey(ctx: Ctx, orgId?: string): Promise<ResyncResult> {
-  const result: ResyncResult = { orgs: 0, keys: 0, caps: 0, credentials: 0 };
+  const result: ResyncResult = { orgs: 0, keys: 0, caps: 0, credentials: 0, customApis: 0 };
   const orgRows = await ctx.db
     .select()
     .from(orgs)
@@ -62,6 +64,8 @@ export async function resyncValkey(ctx: Ctx, orgId?: string): Promise<ResyncResu
         result.credentials++;
       }
     }
+
+    result.customApis += await syncCustomApis(ctx, org.id);
   }
   return result;
 }

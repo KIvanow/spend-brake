@@ -19,6 +19,7 @@ import {
   and,
   auditLog,
   caps,
+  customApis,
   desc,
   eq,
   gt,
@@ -270,6 +271,12 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
           .where(
             and(eq(providerCredentials.orgId, a.orgId), isNull(providerCredentials.revokedAt)),
           ),
+      ),
+      customApis: await count(
+        deps.db
+          .select({ n: sql<string>`count(*)::text` })
+          .from(customApis)
+          .where(eq(customApis.orgId, a.orgId)),
       ),
       agentSessionsThisMonth: await count(
         deps.db

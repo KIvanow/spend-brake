@@ -122,3 +122,17 @@ describe('orgs', () => {
     expect(read?.providers.twilio).toEqual({ trustFreeTier: false, unpricedPolicy: 'deny' });
   });
 });
+
+describe('custom APIs', () => {
+  it('are stored per org, replaced as a whole', async () => {
+    const a = newOrg();
+    const b = newOrg();
+    expect(await registry.getCustomApis(a)).toEqual([]);
+    await registry.putCustomApis(a, [{ id: 'acme' }, { id: 'other' }]);
+    await registry.putCustomApis(b, [{ id: 'acme' }]);
+    expect(await registry.getCustomApis(a)).toEqual([{ id: 'acme' }, { id: 'other' }]);
+    await registry.putCustomApis(a, [{ id: 'other' }]);
+    expect(await registry.getCustomApis(a)).toEqual([{ id: 'other' }]);
+    expect(await registry.getCustomApis(b)).toEqual([{ id: 'acme' }]);
+  });
+});

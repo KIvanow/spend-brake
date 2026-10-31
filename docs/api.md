@@ -1,6 +1,6 @@
 ---
 title: API reference
-nav_order: 11
+nav_order: 12
 description: The admin API for keys, caps, the kill switch, provider keys, spend, events, alerts, sessions and telemetry.
 ---
 
@@ -30,11 +30,11 @@ ids answer `404`. An owner creates tokens with `POST /v1/tokens` (pick the role)
 **Telemetry** page also creates a read-only one for Prometheus. On a self-hosted install,
 `brake init` prints the owner token and saves an admin token for the CLI.
 
-| Role     | Can                                                                                     |
-| -------- | --------------------------------------------------------------------------------------- |
-| `viewer` | Read keys, caps, provider keys (no secrets), spend, events, status, org                 |
-| `admin`  | + create, update and revoke keys and provider keys, set caps, kill and unkill, webhooks |
-| `owner`  | + admin tokens, people and org settings (time zone, provider policy, loop rule)         |
+| Role     | Can                                                                                                  |
+| -------- | ---------------------------------------------------------------------------------------------------- |
+| `viewer` | Read keys, caps, provider keys (no secrets), custom APIs, spend, events, status, org                 |
+| `admin`  | + create, update and revoke keys, provider keys and custom APIs, set caps, kill and unkill, webhooks |
+| `owner`  | + admin tokens, people and org settings (time zone, provider policy, loop rule)                      |
 
 A few calls take a virtual key instead, in `X-Brake-Key`: `GET /v1/me` and minting or ending a
 session with a key that has `canMintSessions`.
@@ -62,6 +62,19 @@ The role after each call is the least it needs.
 | `POST /v1/providers/credentials`        | Add an encrypted provider key (admin)                                    |
 | `GET /v1/providers/credentials`         | List provider keys, no secrets (viewer)                                  |
 | `DELETE /v1/providers/credentials/{id}` | Delete one; keys that use it move to another key of the provider (admin) |
+
+### Custom APIs
+
+APIs you price yourself; see [Custom APIs](../custom-apis/). A custom API's id is also its
+provider id for provider keys and virtual keys.
+
+| Call                          | What                                                                               |
+| ----------------------------- | ---------------------------------------------------------------------------------- |
+| `POST /v1/custom-apis`        | Add one (admin); over the plan's limit, `402 plan_limit`                           |
+| `GET /v1/custom-apis`         | List them (viewer)                                                                 |
+| `GET /v1/custom-apis/{id}`    | Get one (viewer)                                                                   |
+| `PUT /v1/custom-apis/{id}`    | Replace its definition; the id stays (admin)                                       |
+| `DELETE /v1/custom-apis/{id}` | Delete it and its provider keys; `409 custom_api_in_use` while keys use it (admin) |
 
 ### Virtual keys
 

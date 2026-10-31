@@ -51,6 +51,9 @@ export function isPrivateAddress(ip: string): boolean {
   return true; // not an address at all: refuse
 }
 
+/** Error code of a connection the guarded agent refused (nothing was sent). */
+export const PRIVATE_ADDRESS = 'ERR_BRAKE_PRIVATE_ADDRESS';
+
 export interface GuardedClient {
   agent: Agent;
   allowPrivate: boolean;
@@ -74,7 +77,10 @@ function lookupGuardedAgent(allowPrivate: boolean, what: string): Agent {
           const bad = list.find((a) => isPrivateAddress(a.address));
           if (bad && !allowPrivate) {
             return cb(
-              new Error(`${what} host resolves to a private address (${bad.address})`),
+              Object.assign(
+                new Error(`${what} host resolves to a private address (${bad.address})`),
+                { code: PRIVATE_ADDRESS },
+              ),
               '',
               0,
             );

@@ -1,6 +1,6 @@
 ---
 title: FAQ
-nav_order: 14
+nav_order: 15
 description: Short answers about overshoot, outages, latency, what is stored, and what happens at a cap.
 ---
 

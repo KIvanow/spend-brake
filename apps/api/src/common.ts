@@ -5,6 +5,7 @@ import type { KeyWrapper } from '@spend-brake/shared';
 import { z } from 'zod';
 import type { Auth, Role } from './auth.js';
 import type { KeyCheck } from './google-check.js';
+import type { CustomApiPolicy } from './routes/custom-apis.js';
 import { ApiError } from './route.js';
 
 /** A route as the authorization hook sees it. */
@@ -51,6 +52,8 @@ export interface Ctx {
   now: () => Date;
   /** Checks a newly added Google key's restrictions; absent disables the check. */
   checkGoogleKey?: (key: string) => Promise<KeyCheck>;
+  /** Where custom API origins may point; absent refuses private addresses. */
+  customApiPolicy?: CustomApiPolicy;
 }
 
 export const id = z.string().regex(/^[A-Za-z0-9_.-]{1,128}$/);

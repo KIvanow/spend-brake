@@ -86,6 +86,34 @@ export const providerCredentials = pgTable(
   (t) => [index('provider_credentials_org').on(t.orgId)],
 );
 
+/**
+ * APIs an org prices itself (no built-in adapter), mirrored to Valkey for the proxy. The id is
+ * the provider id keys and credentials use; it is unique within the org only.
+ */
+export const customApis = pgTable(
+  'custom_apis',
+  {
+    orgId: text('org_id')
+      .notNull()
+      .references(() => orgs.id),
+    id: text('id').notNull(),
+    name: text('name').notNull(),
+    /** https origin, e.g. `https://api.example.com`. */
+    origin: text('origin').notNull(),
+    /** Where the credential goes: `{ type: 'header', name, valuePrefix }` or `{ type: 'query', name }`. */
+    auth: jsonb('auth').notNull(),
+    /** `[{ method, path, sku, pricing }]` (see @spend-brake/catalog customApiSchema). */
+    routes: jsonb('routes').notNull(),
+    billed: text('billed', { enum: ['2xx', 'all'] })
+      .notNull()
+      .default('2xx'),
+    timeoutBilled: boolean('timeout_billed').notNull().default(true),
+    createdAt: created(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.orgId, t.id] })],
+);
+
 export const virtualKeys = pgTable(
   'virtual_keys',
   {
@@ -262,6 +290,7 @@ export const orgEntitlements = pgTable(
       .default('active'),
     maxKeys: bigint('max_keys', { mode: 'number' }),
     maxProviders: bigint('max_providers', { mode: 'number' }),
+    maxCustomApis: bigint('max_custom_apis', { mode: 'number' }),
     agentSessionsPerMonth: bigint('agent_sessions_per_month', { mode: 'number' }),
     requestsPerMonth: bigint('requests_per_month', { mode: 'number' }),
     /** Highest monthly hard cap on the org (the Free plan's protected spend). */

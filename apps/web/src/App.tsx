@@ -14,6 +14,7 @@ import { useAuthOptions } from './pages/Keys.js';
 import { SignIn, Signup, Welcome, redeemLoginCode } from './pages/Auth.js';
 import { Billing } from './pages/Billing.js';
 import { Caps } from './pages/Caps.js';
+import { CustomApis } from './pages/CustomApis.js';
 import { Events } from './pages/Events.js';
 import { Keys } from './pages/Keys.js';
 import { Migration } from './pages/Migration.js';
@@ -34,6 +35,7 @@ const PAGES = {
   Caps,
   Approvals,
   Keys,
+  CustomApis,
   Team,
   Webhooks,
   Telemetry,
@@ -41,7 +43,10 @@ const PAGES = {
   Billing,
 } as const;
 type PageName = keyof typeof PAGES;
-const LABELS: Partial<Record<PageName, string>> = { Setup: 'Get started' };
+const LABELS: Partial<Record<PageName, string>> = {
+  Setup: 'Get started',
+  CustomApis: 'Custom APIs',
+};
 const pageLabel = (p: PageName) => LABELS[p] ?? p;
 
 /**

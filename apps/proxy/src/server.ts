@@ -17,15 +17,25 @@ import {
   scopeLabel,
   windowsFor,
 } from '@spend-brake/budget';
-import type {
-  IncomingReq,
-  LineItem,
-  PriceCtx,
-  PricedClassified,
-  ProviderAdapter,
-  Upstream,
+import { Transform, type TransformCallback, pipeline } from 'node:stream';
+import {
+  CUSTOM_PREFIX,
+  GenericAdapter,
+  type IncomingReq,
+  type LineItem,
+  type PriceCtx,
+  type PricedClassified,
+  type ProviderAdapter,
+  type Upstream,
 } from '@spend-brake/catalog';
-import { redactUrl, redactingLoggerOptions } from '@spend-brake/shared';
+import {
+  type GuardedClient,
+  PRIVATE_ADDRESS,
+  guardedAgent,
+  privateLiteralHost,
+  redactUrl,
+  redactingLoggerOptions,
+} from '@spend-brake/shared';
 import Fastify, {
   type FastifyInstance,
   type FastifyRequest,
@@ -60,6 +70,13 @@ export interface ProxyDeps {
   configTtlMs?: number;
   /** Largest response body buffered for pricing. */
   maxBufferedBytes?: number;
+  /**
+   * Outbound client for orgs' custom APIs (their origins are user input): refuses private
+   * addresses unless built with allowPrivate. Built-in providers use `dispatcher`.
+   */
+  customEgress?: GuardedClient;
+  /** Largest custom API response passed on (default 10 MB); a longer one is cut. */
+  customMaxResponseBytes?: number;
   now?: () => Date;
   metrics?: ProxyMetrics;
   /** How often fail-open spend is retried into Valkey. */
@@ -129,6 +146,11 @@ interface Route {
   upstream: Upstream;
 }
 
+/** Custom API ids, as the admin API accepts them. */
+const CUSTOM_ID = /^[A-Za-z0-9_.-]{1,128}$/;
+/** An org's custom APIs by id, or why one could not be loaded. */
+type CustomApis = Map<string, GenericAdapter | string>;
+
 interface Auth {
   key: KeyRecord;
   org: OrgRecord;
@@ -189,6 +211,11 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
   const pending = new Set<Promise<unknown>>();
   const timeout = deps.upstreamTimeoutMs ?? 30_000;
   const maxBuffered = deps.maxBufferedBytes ?? 32 * 1024 * 1024;
+  const customEgress = deps.customEgress ?? guardedAgent(false, 'custom API');
+  const customMax = deps.customMaxResponseBytes ?? 10 * 1024 * 1024;
+  // Org custom API definitions, reloaded like keys: the admin API rewrites them in Valkey and
+  // this cache picks the change up within the config TTL.
+  const customCache = new TtlCache<CustomApis>(configTtl, CONFIG_STALE_MS);
 
   const routesOf = (adapters: ProviderAdapter[]): Route[] =>
     adapters.flatMap((adapter) => adapter.upstreams.map((upstream) => ({ adapter, upstream })));
@@ -287,9 +314,25 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
     track(engine.emit(orgId, compact(event)).catch(() => undefined));
   }
 
-  function findRoute(url: string): { route: Route; path: string; query: URLSearchParams } | null {
+  /**
+   * The provider a path is for: a built-in or operator adapter by prefix, or an org custom API
+   * (`/custom/<id>/...`), which is resolved only once the key says whose org it is.
+   */
+  function findRoute(
+    url: string,
+  ): { route: Route | null; customId?: string; path: string; query: URLSearchParams } | null {
     const q = url.indexOf('?');
     const pathname = q === -1 ? url : url.slice(0, q);
+    const custom = new RegExp(`^${CUSTOM_PREFIX}/([^/]+)(/.*)$`).exec(pathname);
+    if (custom) {
+      if (!CUSTOM_ID.test(custom[1]!)) return null;
+      return {
+        route: null,
+        customId: custom[1]!,
+        path: custom[2]!,
+        query: new URLSearchParams(q === -1 ? '' : url.slice(q + 1)),
+      };
+    }
     for (const route of routes) {
       const prefix = route.upstream.prefix;
       if (pathname.startsWith(`${prefix}/`)) {
@@ -352,6 +395,20 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
     return { key, org, stale: k.stale || o.stale };
   }
 
+  async function loadCustomApis(orgId: string): Promise<CustomApis> {
+    const apis: CustomApis = new Map();
+    for (const record of await registry.getCustomApis(orgId)) {
+      const id = (record as { id?: unknown } | null)?.id;
+      if (typeof id !== 'string') continue;
+      try {
+        apis.set(id, GenericAdapter.fromCustomApi(record));
+      } catch {
+        apis.set(id, 'invalid');
+      }
+    }
+    return apis;
+  }
+
   async function monthlyUnits(
     org: OrgRecord,
     skus: string[],
@@ -386,9 +443,8 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
     const found = findRoute(request.url);
     if (!found)
       return sendError(reply, 'unknown_route', 'No provider is configured for this path.');
-    const { route, path, query } = found;
-    const { adapter, upstream } = route;
-    labels.set(request, { provider: adapter.id, sku: '' });
+    const { path, query } = found;
+    if (found.route) labels.set(request, { provider: found.route.adapter.id, sku: '' });
 
     // 1. Authenticate.
     const token = virtualKeyFrom(request, query);
@@ -409,6 +465,32 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
     if (key.allowedIps && !key.allowedIps.includes(request.ip)) {
       return sendError(reply, 'invalid_key', 'Virtual key is not allowed from this address.');
     }
+    const { org } = auth;
+    // Custom APIs belong to an org: the same id in two orgs is two different APIs.
+    let route = found.route;
+    if (!route) {
+      let apis: CustomApis;
+      try {
+        apis = (await customCache.get(org.id, () => loadCustomApis(org.id))).value;
+      } catch {
+        return sendError(reply, 'budget_unavailable', 'Budget store unavailable; request blocked.');
+      }
+      const api = apis.get(found.customId!);
+      if (api === undefined) {
+        return sendError(reply, 'unknown_route', 'Your org has no custom API with this id.');
+      }
+      if (typeof api === 'string') {
+        return sendError(
+          reply,
+          'unknown_route',
+          'This custom API could not be loaded by the proxy; save it again in the dashboard.',
+        );
+      }
+      route = { adapter: api, upstream: api.upstreams[0] };
+      labels.set(request, { provider: api.id, sku: '' });
+    }
+    const { adapter, upstream } = route;
+    const custom = found.route === null;
     const credentialId = key.credentials[adapter.id];
     if (!credentialId) {
       return sendError(
@@ -417,7 +499,6 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
         `${capitalize(keyLabel(key))} may not call provider ${adapter.id}.`,
       );
     }
-    const { org } = auth;
     // A session key carries its session; otherwise the client may name one.
     const session = key.sessionId ?? request.headers['x-brake-session'];
     if (session !== undefined && (typeof session !== 'string' || !SESSION_ID.test(session))) {
@@ -746,6 +827,8 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
     // volume bands and the free allowance even when our price for it is zero.
     // Response size, once known (streamed responses report their Content-Length).
     let resBytes: number | undefined;
+    // Reported pricing (custom APIs): the cost was missing (charged at the max) or above the max.
+    let costNote: string | null = null;
     const settle = (
       actual: bigint,
       billed: boolean,
@@ -779,6 +862,7 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
         failOpen: failOpenDay ? '1' : undefined,
         keyError: keyError ? '1' : undefined,
         providerError: providerError ?? undefined,
+        costNote: costNote ?? undefined,
         error,
         ...call,
         resBytes: resBytes === undefined ? undefined : String(resBytes),
@@ -880,21 +964,36 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
     adapter.injectCredential(outgoing, secret);
     const base = deps.upstreamOverrides?.[upstream.origin] ?? upstream.origin;
     const url = upstreamUrl(base, path, outgoing.query);
+    const privateRefused = () => {
+      settle(0n, false, 0, 0, 'private_address');
+      return sendError(
+        reply,
+        'upstream_unavailable',
+        'This custom API points at a private address, which this proxy does not call; nothing was sent.',
+      );
+    };
+    // Custom API origins are user input: hostnames are checked when connecting (guarded agent),
+    // IP literals here, since no DNS lookup happens for them.
+    if (custom && !customEgress.allowPrivate && privateLiteralHost(url.href)) {
+      return privateRefused();
+    }
 
     const upstreamStart = performance.now();
     let res: Dispatcher.ResponseData;
     try {
+      const dispatcher = custom ? customEgress.agent : deps.dispatcher;
       res = await undiciRequest(url, {
         method: request.method,
         headers: outgoing.headers,
         body: rawBody && rawBody.length > 0 ? rawBody : null,
         headersTimeout: timeout,
         bodyTimeout: timeout,
-        ...(deps.dispatcher ? { dispatcher: deps.dispatcher } : {}),
+        ...(dispatcher ? { dispatcher } : {}),
       });
     } catch (err) {
       const code = (err as { code?: string; cause?: { code?: string } }).code;
       const cause = (err as { cause?: { code?: string } }).cause?.code;
+      if (code === PRIVATE_ADDRESS || cause === PRIVATE_ADDRESS) return privateRefused();
       const neverSent = [code, cause].some((c) =>
         ['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'UND_ERR_CONNECT_TIMEOUT'].includes(c ?? ''),
       );
@@ -930,6 +1029,15 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
         ...(body !== undefined ? { body } : {}),
       };
       const list = adapter.actual(priced.classified, upstreamRes, ctx);
+      costNote = adapter.costNote?.(priced.classified, upstreamRes) ?? null;
+      if (costNote) {
+        request.log.warn(
+          { provider: adapter.id, route: priced.route, costNote, costMicros: list.toString() },
+          costNote === 'over_max'
+            ? 'reported cost is above the route maximum; charged in full'
+            : 'no cost reported; charged the route maximum',
+        );
+      }
       if (list === 0n || !providerCfg.trustFreeTier || failOpenDay) {
         return { actual: list, billed: list > 0n };
       }
@@ -957,12 +1065,20 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
     if ((priced.classified && adapter.needsBody(priced.classified)) || res.statusCode >= 400) {
       let raw: Buffer;
       try {
-        raw = await readLimited(res.body, maxBuffered);
+        raw = custom
+          ? await readLimited(res.body, Math.min(maxBuffered, customMax), 'response_too_large')
+          : await readLimited(res.body, maxBuffered);
       } catch (err) {
         const { actual, billed } = await actualOf();
         settle(actual, billed, res.statusCode, upstreamMs, (err as Error).message);
         costHeaders(actual);
-        return sendError(reply, 'upstream_unavailable', 'Provider response failed mid-way.');
+        return sendError(
+          reply,
+          'upstream_unavailable',
+          (err as Error).message === 'response_too_large'
+            ? `The custom API answered with more than ${customMax} bytes; the response was cut.`
+            : 'Provider response failed mid-way.',
+        );
       }
       resBytes = raw.length;
       let body: unknown;
@@ -1005,6 +1121,40 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
     }
 
     const { actual, billed } = await actualOf();
+    if (custom) {
+      // Custom API responses are size-limited: one announced as too long is not passed on, and
+      // a stream that runs past the limit is cut. Settled once the stream ends either way.
+      if (resBytes !== undefined && resBytes > customMax) {
+        res.body.destroy();
+        settle(actual, billed, res.statusCode, upstreamMs, 'response_too_large');
+        costHeaders(actual);
+        return sendError(
+          reply,
+          'upstream_unavailable',
+          `The custom API answered with more than ${customMax} bytes; the response was cut.`,
+        );
+      }
+      const limited = new ByteLimit(customMax);
+      track(
+        new Promise<void>((resolve) => {
+          pipeline(res.body, limited, () => {
+            resBytes = limited.bytes;
+            if (limited.cut) outcomes.set(request, 'upstream_unavailable');
+            settle(
+              actual,
+              billed,
+              res.statusCode,
+              upstreamMs,
+              limited.cut ? 'response_too_large' : undefined,
+            );
+            resolve();
+          });
+        }),
+      );
+      reply.code(res.statusCode).headers(passHeaders);
+      costHeaders(actual);
+      return reply.send(limited);
+    }
     settle(actual, billed, res.statusCode, upstreamMs);
     reply.code(res.statusCode).headers(passHeaders);
     costHeaders(actual);
@@ -1045,13 +1195,37 @@ export function callInfo(
 export const loggerOptions = (level: string): FastifyServerOptions['logger'] =>
   redactingLoggerOptions(level);
 
-async function readLimited(body: AsyncIterable<Uint8Array>, limit: number): Promise<Buffer> {
+async function readLimited(
+  body: AsyncIterable<Uint8Array>,
+  limit: number,
+  tooLarge = 'response too large to price',
+): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of body) {
     size += chunk.byteLength;
-    if (size > limit) throw new Error('response too large to price');
+    if (size > limit) throw new Error(tooLarge);
     chunks.push(Buffer.from(chunk));
   }
   return Buffer.concat(chunks);
+}
+
+/** Passes bytes through until `limit`, then fails the stream (the client sees it cut). */
+class ByteLimit extends Transform {
+  bytes = 0;
+  cut = false;
+
+  constructor(private readonly limit: number) {
+    super();
+  }
+
+  override _transform(chunk: Buffer, _enc: BufferEncoding, done: TransformCallback): void {
+    this.bytes += chunk.length;
+    if (this.bytes > this.limit) {
+      this.cut = true;
+      done(new Error('response_too_large'));
+      return;
+    }
+    done(null, chunk);
+  }
 }

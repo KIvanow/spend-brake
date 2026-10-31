@@ -59,6 +59,8 @@ services:
       BRAKE_ACTION_SECRET: ${BRAKE_ACTION_SECRET:?set BRAKE_ACTION_SECRET in infra/.env}
       BRAKE_SETUP_TOKEN: ${BRAKE_SETUP_TOKEN:-}
       ALLOW_PRIVATE_COLLECTORS: ${ALLOW_PRIVATE_COLLECTORS:-false}
+      # Custom API origins may be private addresses (also on the proxy).
+      ALLOW_PRIVATE_CUSTOM_APIS: ${ALLOW_PRIVATE_CUSTOM_APIS:-false}
       # Sign in with emailed links (the notifier sends them: it needs SMTP_URL).
       BRAKE_EMAIL_SIGN_IN: ${BRAKE_EMAIL_SIGN_IN:-false}
       BRAKE_DASHBOARD_URL: ${BRAKE_DASHBOARD_URL:-http://localhost:3000}
@@ -87,6 +89,7 @@ services:
       LOG_LEVEL: info
       PORT: '8080'
       BRAKE_MASTER_KEY: ${BRAKE_MASTER_KEY}
+      ALLOW_PRIVATE_CUSTOM_APIS: ${ALLOW_PRIVATE_CUSTOM_APIS:-false}
     ports: ['8080:8080']
     depends_on:
       valkey: { condition: service_healthy }

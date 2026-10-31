@@ -101,6 +101,172 @@
           "message"
         ]
       },
+      "CustomApi": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "auth": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "header"
+                    ]
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "valuePrefix": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type",
+                  "name",
+                  "valuePrefix"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "query"
+                    ]
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type",
+                  "name"
+                ]
+              }
+            ]
+          },
+          "routes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "method": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "sku": {
+                  "type": "string"
+                },
+                "pricing": {
+                  "$ref": "#/components/schemas/CustomApiPricing"
+                }
+              },
+              "required": [
+                "method",
+                "path",
+                "sku",
+                "pricing"
+              ]
+            }
+          },
+          "billed": {
+            "type": "string",
+            "enum": [
+              "2xx",
+              "all"
+            ]
+          },
+          "timeoutBilled": {
+            "type": "boolean"
+          },
+          "proxyPath": {
+            "type": "string",
+            "description": "Call it at <proxy URL><proxyPath>/<path>"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "origin",
+          "auth",
+          "routes",
+          "billed",
+          "timeoutBilled",
+          "proxyPath",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "CustomApiPricing": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "model": {
+                "type": "string",
+                "enum": [
+                  "perRequest"
+                ]
+              },
+              "usd": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "model",
+              "usd"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "model": {
+                "type": "string",
+                "enum": [
+                  "reported"
+                ]
+              },
+              "header": {
+                "type": "string"
+              },
+              "jsonPath": {
+                "type": "string"
+              },
+              "usdPerUnit": {
+                "type": "string"
+              },
+              "maxPerRequest": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "model",
+              "usdPerUnit",
+              "maxPerRequest"
+            ]
+          }
+        ]
+      },
       "VirtualKey": {
         "type": "object",
         "properties": {
@@ -935,6 +1101,703 @@
                     "id",
                     "deleted",
                     "reboundKeys"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role too low",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/custom-apis": {
+      "get": {
+        "summary": "List the org's custom APIs (viewer)",
+        "tags": [
+          "Custom APIs"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CustomApi"
+                      }
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role too low",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Add a custom API (an API you price yourself) (admin)",
+        "tags": [
+          "Custom APIs"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_.-]{1,128}$"
+                  },
+                  "auth": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "header"
+                            ]
+                          },
+                          "name": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,128}$"
+                          },
+                          "valuePrefix": {
+                            "type": "string",
+                            "maxLength": 64,
+                            "default": ""
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "name"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "query"
+                            ]
+                          },
+                          "name": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "name"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "billed": {
+                    "type": "string",
+                    "enum": [
+                      "2xx",
+                      "all"
+                    ],
+                    "default": "2xx"
+                  },
+                  "timeoutBilled": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "origin": {
+                    "type": "string",
+                    "maxLength": 2048
+                  },
+                  "routes": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "method": {
+                          "type": "string",
+                          "pattern": "^(\\*|[A-Za-z]{1,16})$",
+                          "default": "*"
+                        },
+                        "path": {
+                          "type": "string",
+                          "maxLength": 512
+                        },
+                        "sku": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9_.-]{1,128}$"
+                        },
+                        "pricing": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "model": {
+                                  "type": "string",
+                                  "enum": [
+                                    "perRequest"
+                                  ]
+                                },
+                                "usd": {
+                                  "type": "string",
+                                  "pattern": "^\\d{1,9}(\\.\\d{1,6})?$"
+                                }
+                              },
+                              "required": [
+                                "model",
+                                "usd"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "model": {
+                                  "type": "string",
+                                  "enum": [
+                                    "reported"
+                                  ]
+                                },
+                                "header": {
+                                  "type": "string",
+                                  "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,128}$"
+                                },
+                                "jsonPath": {
+                                  "type": "string",
+                                  "pattern": "^[A-Za-z0-9_$-]{1,64}(\\.[A-Za-z0-9_$-]{1,64}){0,15}$"
+                                },
+                                "usdPerUnit": {
+                                  "type": "string",
+                                  "pattern": "^\\d{1,9}(\\.\\d{1,12})?$"
+                                },
+                                "maxPerRequest": {
+                                  "type": "string",
+                                  "pattern": "^\\d{1,9}(\\.\\d{1,6})?$"
+                                }
+                              },
+                              "required": [
+                                "model",
+                                "usdPerUnit",
+                                "maxPerRequest"
+                              ],
+                              "additionalProperties": false
+                            }
+                          ]
+                        },
+                        "pricePerRequest": {
+                          "type": "string",
+                          "pattern": "^\\d{1,9}(\\.\\d{1,6})?$"
+                        }
+                      },
+                      "required": [
+                        "path",
+                        "sku"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "minItems": 1,
+                    "maxItems": 100
+                  }
+                },
+                "required": [
+                  "id",
+                  "auth",
+                  "name",
+                  "origin",
+                  "routes"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomApi"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role too low",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/custom-apis/{id}": {
+      "get": {
+        "summary": "Get a custom API (viewer)",
+        "tags": [
+          "Custom APIs"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.-]{1,128}$"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomApi"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role too low",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Replace a custom API definition (its id stays) (admin)",
+        "tags": [
+          "Custom APIs"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.-]{1,128}$"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "auth": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "header"
+                            ]
+                          },
+                          "name": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,128}$"
+                          },
+                          "valuePrefix": {
+                            "type": "string",
+                            "maxLength": 64,
+                            "default": ""
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "name"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "query"
+                            ]
+                          },
+                          "name": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "name"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "billed": {
+                    "type": "string",
+                    "enum": [
+                      "2xx",
+                      "all"
+                    ],
+                    "default": "2xx"
+                  },
+                  "timeoutBilled": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "origin": {
+                    "type": "string",
+                    "maxLength": 2048
+                  },
+                  "routes": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "method": {
+                          "type": "string",
+                          "pattern": "^(\\*|[A-Za-z]{1,16})$",
+                          "default": "*"
+                        },
+                        "path": {
+                          "type": "string",
+                          "maxLength": 512
+                        },
+                        "sku": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9_.-]{1,128}$"
+                        },
+                        "pricing": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "model": {
+                                  "type": "string",
+                                  "enum": [
+                                    "perRequest"
+                                  ]
+                                },
+                                "usd": {
+                                  "type": "string",
+                                  "pattern": "^\\d{1,9}(\\.\\d{1,6})?$"
+                                }
+                              },
+                              "required": [
+                                "model",
+                                "usd"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "model": {
+                                  "type": "string",
+                                  "enum": [
+                                    "reported"
+                                  ]
+                                },
+                                "header": {
+                                  "type": "string",
+                                  "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,128}$"
+                                },
+                                "jsonPath": {
+                                  "type": "string",
+                                  "pattern": "^[A-Za-z0-9_$-]{1,64}(\\.[A-Za-z0-9_$-]{1,64}){0,15}$"
+                                },
+                                "usdPerUnit": {
+                                  "type": "string",
+                                  "pattern": "^\\d{1,9}(\\.\\d{1,12})?$"
+                                },
+                                "maxPerRequest": {
+                                  "type": "string",
+                                  "pattern": "^\\d{1,9}(\\.\\d{1,6})?$"
+                                }
+                              },
+                              "required": [
+                                "model",
+                                "usdPerUnit",
+                                "maxPerRequest"
+                              ],
+                              "additionalProperties": false
+                            }
+                          ]
+                        },
+                        "pricePerRequest": {
+                          "type": "string",
+                          "pattern": "^\\d{1,9}(\\.\\d{1,6})?$"
+                        }
+                      },
+                      "required": [
+                        "path",
+                        "sku"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "minItems": 1,
+                    "maxItems": 100
+                  }
+                },
+                "required": [
+                  "auth",
+                  "name",
+                  "origin",
+                  "routes"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomApi"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role too low",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a custom API and its provider keys (refused while Spend Brake keys use it) (admin)",
+        "tags": [
+          "Custom APIs"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.-]{1,128}$"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "deleted": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "deletedCredentials": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Provider keys stored for this custom API, deleted with it"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "deleted",
+                    "deletedCredentials"
                   ]
                 }
               }

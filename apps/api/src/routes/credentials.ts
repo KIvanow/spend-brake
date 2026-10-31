@@ -1,11 +1,12 @@
 import { providerCredentials } from '@spend-brake/db';
-import { credentialContext, encryptSecret, providerName } from '@spend-brake/shared';
+import { credentialContext, encryptSecret } from '@spend-brake/shared';
 import { and, desc, eq, isNull, ne } from '@spend-brake/db';
 import { z } from 'zod';
 import { type Ctx, audit, id } from '../common.js';
 import { newId } from '../ids.js';
 import { ApiError, type Router, notFound } from '../route.js';
 import { requireCapacity } from '../entitlements.js';
+import { providerLabel } from './custom-apis.js';
 import { keysUsing, rebindKeys } from './keys.js';
 
 const credential = z
@@ -195,7 +196,7 @@ export function credentialRoutes(r: Router, ctx: Ctx): void {
           throw new ApiError(
             409,
             'credential_in_use',
-            `Spend Brake key${users.length > 1 ? 's' : ''} ${names} use${users.length > 1 ? '' : 's'} this provider key. Add another ${providerName(existing.provider)} key first (the keys move to it), or revoke the keys.`,
+            `Spend Brake key${users.length > 1 ? 's' : ''} ${names} use${users.length > 1 ? '' : 's'} this provider key. Add another ${await providerLabel(ctx, auth.orgId, existing.provider)} key first (the keys move to it), or revoke the keys.`,
           );
         }
         rebound = await rebindKeys(

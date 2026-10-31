@@ -1,7 +1,8 @@
-import { providerName } from '@spend-brake/shared/providers';
+import { providerName as builtInName } from '@spend-brake/shared/providers';
 import { useQuery } from '@tanstack/react-query';
 import { type ReactNode, useState } from 'react';
 import { api, usd } from '../api.js';
+import { useCustomApis } from '../providers.js';
 import { useRole } from '../role.js';
 import {
   AddProviderKey,
@@ -68,6 +69,8 @@ export function Setup() {
   // Google's verdict on the key just added: shown after the step completes, too.
   const [check, setCheck] = useState<KeyCheck | null>(null);
 
+  const customApis = useCustomApis().data?.items ?? [];
+  const providerName = (id: string) => customApis.find((a) => a.id === id)?.name ?? builtInName(id);
   const creds = credentials.data?.items ?? [];
   const activeKeys = (keys.data?.items ?? []).filter((k) => k.status === 'active');
   const orgCaps = (caps.data?.items ?? []).filter((c) => c.scope === 'org' && c.hard !== null);

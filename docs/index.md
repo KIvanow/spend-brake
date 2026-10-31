@@ -39,8 +39,8 @@ HTTP/1.1 402 Payment Required
 ## Providers
 
 Built in: Google Maps Platform (Places, Geocoding, Routes), Twilio Messaging and Verify, Mapbox,
-HERE, and the agent search APIs Tavily, Exa, Brave and SerpApi. A self-hosted install can price
-any other API per request with the generic adapter.
+HERE, and the agent search APIs Tavily, Exa, Brave and SerpApi. Any other API can be added as a
+[custom API](custom-apis/), priced per request or at the cost it reports.
 
 ## Where to go next
 

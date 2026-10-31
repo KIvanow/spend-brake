@@ -13,6 +13,8 @@ interface BillingView {
   limits: {
     maxKeys: number | null;
     maxProviders: number | null;
+    /** Absent from billing services older than custom APIs. */
+    maxCustomApis?: number | null;
     agentSessionsPerMonth: number | null;
     requestsPerMonth: number | null;
     maxOrgMonthCapMicros: number | null;
@@ -21,6 +23,7 @@ interface BillingView {
   usage: {
     keys: number;
     providers: number;
+    customApis?: number;
     agentSessionsThisMonth: number;
     requestsThisMonth: number;
   };
@@ -125,6 +128,14 @@ export function Billing() {
           rows={[
             { what: 'Keys', value: of(b.usage.keys, b.limits.maxKeys) },
             { what: 'Providers', value: of(b.usage.providers, b.limits.maxProviders) },
+            ...(b.limits.maxCustomApis !== undefined
+              ? [
+                  {
+                    what: 'Custom APIs',
+                    value: of(b.usage.customApis ?? 0, b.limits.maxCustomApis),
+                  },
+                ]
+              : []),
             {
               what: 'Agent sessions this month',
               value: of(b.usage.agentSessionsThisMonth, b.limits.agentSessionsPerMonth),

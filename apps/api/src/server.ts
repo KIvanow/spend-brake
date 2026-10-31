@@ -12,6 +12,7 @@ import { adminRoutes } from './routes/admin.js';
 import { type PublicInfo, authRoutes } from './routes/auth.js';
 import { budgetRoutes } from './routes/budget.js';
 import { credentialRoutes } from './routes/credentials.js';
+import { type CustomApiPolicy, customApiRoutes } from './routes/custom-apis.js';
 import { keyRoutes } from './routes/keys.js';
 import { ledgerRoutes } from './routes/ledger.js';
 import type { KeyCheck } from './google-check.js';
@@ -44,6 +45,8 @@ export interface ApiDeps {
   emailSignIn?: EmailSignIn;
   /** For test spans to orgs' collectors; refuses private addresses unless told otherwise. */
   collectorDispatcher?: GuardedClient;
+  /** Where custom API origins may point (default: no private addresses, spendbrake.dev only). */
+  customApiPolicy?: CustomApiPolicy;
   /** What the dashboard may know before sign-in (GET /v1/auth/options). */
   publicInfo?: PublicInfo;
   /** Add routes and hooks after the core ones (separately licensed features plug in here). */
@@ -69,6 +72,7 @@ export function apiContext(deps: ApiDeps, hooks: ApiHooks = {}): Ctx {
     wrapper: deps.wrapper,
     now: deps.now ?? (() => new Date()),
     ...(deps.checkGoogleKey ? { checkGoogleKey: deps.checkGoogleKey } : {}),
+    ...(deps.customApiPolicy ? { customApiPolicy: deps.customApiPolicy } : {}),
   };
 }
 
@@ -130,6 +134,7 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
     ctx.hooks,
   );
   credentialRoutes(router, ctx);
+  customApiRoutes(router, ctx);
   keyRoutes(router, ctx);
   budgetRoutes(router, ctx);
   ledgerRoutes(router, ctx);

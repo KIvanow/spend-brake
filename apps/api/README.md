@@ -10,11 +10,11 @@ server validates with: `GET /v1/openapi.json`, committed as [`openapi.json`](ope
 `Authorization: Bearer sbt_…` (org API tokens, stored as SHA-256). Every query is scoped to the
 token's org; another org's ids answer 404.
 
-| Role     | Can                                                                   |
-| -------- | --------------------------------------------------------------------- |
-| `viewer` | Read keys, caps, credentials (no secrets), spend, events, status, org |
-| `admin`  | + create/update/revoke keys and credentials, set caps, kill/unkill    |
-| `owner`  | + admin tokens and org settings (time zone, provider policy, loop)    |
+| Role     | Can                                                                                |
+| -------- | ---------------------------------------------------------------------------------- |
+| `viewer` | Read keys, caps, credentials (no secrets), custom APIs, spend, events, status, org |
+| `admin`  | + create/update/revoke keys, credentials and custom APIs, set caps, kill/unkill    |
+| `owner`  | + admin tokens and org settings (time zone, provider policy, loop)                 |
 
 Bootstrap the first owner token (shown once):
 
@@ -65,13 +65,15 @@ never returned, logged or echoed in errors. Only the last 4 characters are kept 
 
 ## Configuration (env)
 
-| Variable                | Default                                        |
-| ----------------------- | ---------------------------------------------- |
-| `PORT`                  | `8081`                                         |
-| `DATABASE_URL`          | `postgres://brake:brake@localhost:15432/brake` |
-| `VALKEY_URL`            | `redis://localhost:16379`                      |
-| `BRAKE_MASTER_KEY`      | 32 bytes, base64 (`openssl rand -base64 32`)   |
-| `BRAKE_KMS_KEY_ID`      | KMS key id/alias; takes precedence             |
-| `RATE_LIMIT_PER_MINUTE` | `600` per token (or IP)                        |
+| Variable                                 | Default                                                          |
+| ---------------------------------------- | ---------------------------------------------------------------- |
+| `PORT`                                   | `8081`                                                           |
+| `DATABASE_URL`                           | `postgres://brake:brake@localhost:15432/brake`                   |
+| `VALKEY_URL`                             | `redis://localhost:16379`                                        |
+| `BRAKE_MASTER_KEY`                       | 32 bytes, base64 (`openssl rand -base64 32`)                     |
+| `BRAKE_KMS_KEY_ID`                       | KMS key id/alias; takes precedence                               |
+| `RATE_LIMIT_PER_MINUTE`                  | `600` per token (or IP)                                          |
+| `ALLOW_PRIVATE_CUSTOM_APIS`              | `false`: custom API origins may not be private addresses         |
+| `BRAKE_PROXY_DOMAIN`, `BRAKE_APP_DOMAIN` | The service's own hostnames: custom API origins may not use them |
 
 Migrations run on start.

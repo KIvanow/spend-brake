@@ -1,7 +1,7 @@
 import { type ValkeyClient, connectValkey } from '@spend-brake/budget';
 import { type Db, createDb, migrate } from '@spend-brake/db';
 import { guardedAgent, keyWrapperFromEnv, redactingLoggerOptions } from '@spend-brake/shared';
-import { loadEnv } from './config.js';
+import { loadEnv, ownHosts } from './config.js';
 import { checkGoogleKey } from './google-check.js';
 import { queueLoginMailer } from './login.js';
 import { resyncValkey } from './resync.js';
@@ -44,6 +44,7 @@ export async function runApi(opts: RunApiOptions = {}): Promise<void> {
       ? { emailSignIn: { dashboardUrl: env.BRAKE_DASHBOARD_URL, mailer } }
       : {}),
     collectorDispatcher: guardedAgent(env.ALLOW_PRIVATE_COLLECTORS, 'collector'),
+    customApiPolicy: { allowPrivate: env.ALLOW_PRIVATE_CUSTOM_APIS, ownHosts: ownHosts(env) },
     publicInfo: {
       signup: env.BRAKE_HOSTED_SIGNUP,
       egressIps: env.BRAKE_PROXY_EGRESS_IPS,

@@ -1,6 +1,6 @@
 ---
 title: Telemetry
-nav_order: 9
+nav_order: 10
 description: Each org's own Prometheus endpoint and OpenTelemetry export, plus the operator metrics of a self-hosted install.
 ---
 

@@ -15,6 +15,32 @@ interface Key {
   config: Record<string, unknown>;
 }
 
+interface CustomApi {
+  id: string;
+  name: string;
+  origin: string;
+  routes: unknown[];
+  proxyPath: string;
+}
+
+/** A JSON definition from a file, for custom-apis add and update. */
+async function readJson(file: string): Promise<Record<string, unknown>> {
+  const { readFileSync } = await import('node:fs');
+  let text: string;
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch {
+    throw new CliError(`cannot read ${file}`, EXIT.usage);
+  }
+  try {
+    const v = JSON.parse(text) as unknown;
+    if (typeof v !== 'object' || v === null || Array.isArray(v)) throw new Error();
+    return v as Record<string, unknown>;
+  } catch {
+    throw new CliError(`${file} is not a JSON object`, EXIT.usage);
+  }
+}
+
 interface Cap {
   scope: string;
   kind: 'd' | 'm';
@@ -108,6 +134,62 @@ export function adminCommands(program: Command, io: Io, done: (code: number) => 
     .argument('<id>')
     .action(async (id: string, _o: unknown, cmd: Command) => {
       print(io, await apiCall(io, 'DELETE', `/v1/keys/${encodeURIComponent(id)}`), pretty(cmd));
+      done(EXIT.ok);
+    });
+
+  // --- custom APIs -------------------------------------------------------------------------
+  const custom = program
+    .command('custom-apis')
+    .description('APIs you price yourself, called at <proxy>/custom/<id>/...');
+  leaf(custom, 'list').action(async (_o: unknown, cmd: Command) => {
+    const r = await apiCall<{ items: CustomApi[] }>(io, 'GET', '/v1/custom-apis');
+    print(
+      io,
+      r,
+      pretty(cmd),
+      r.items.map((a) => ({ ...a, routes: a.routes.length, path: a.proxyPath })),
+      ['id', 'name', 'origin', 'routes', 'path'],
+    );
+    done(EXIT.ok);
+  });
+  leaf(custom, 'show')
+    .argument('<id>')
+    .action(async (id: string, _o: unknown, cmd: Command) => {
+      print(io, await apiCall(io, 'GET', `/v1/custom-apis/${encodeURIComponent(id)}`), pretty(cmd));
+      done(EXIT.ok);
+    });
+  leaf(custom, 'add')
+    .description('Add one from a JSON file (id, name, origin, auth, routes; see the docs)')
+    .argument('<file>')
+    .action(async (file: string, _o: unknown, cmd: Command) => {
+      print(io, await apiCall(io, 'POST', '/v1/custom-apis', await readJson(file)), pretty(cmd));
+      done(EXIT.ok);
+    });
+  leaf(custom, 'update')
+    .description('Replace one from a JSON file (the id in the file, if any, must match)')
+    .argument('<id>')
+    .argument('<file>')
+    .action(async (id: string, file: string, _o: unknown, cmd: Command) => {
+      const { id: fileId, ...definition } = await readJson(file);
+      if (fileId !== undefined && fileId !== id) {
+        throw new CliError(`${file} is for ${JSON.stringify(fileId)}, not ${id}`, EXIT.usage);
+      }
+      print(
+        io,
+        await apiCall(io, 'PUT', `/v1/custom-apis/${encodeURIComponent(id)}`, definition),
+        pretty(cmd),
+      );
+      done(EXIT.ok);
+    });
+  leaf(custom, 'delete')
+    .description('Delete one and its provider keys (refused while Spend Brake keys use it)')
+    .argument('<id>')
+    .action(async (id: string, _o: unknown, cmd: Command) => {
+      print(
+        io,
+        await apiCall(io, 'DELETE', `/v1/custom-apis/${encodeURIComponent(id)}`),
+        pretty(cmd),
+      );
       done(EXIT.ok);
     });
 

@@ -114,6 +114,12 @@ export interface ProviderAdapter {
    * proxy already buffered (`needsBody`), so it never holds up a streamed response.
    */
   providerError?(c: PricedClassified, res: UpstreamRes): string | null;
+  /**
+   * Providers that report their own cost (custom APIs): why `actual()` did not simply charge the
+   * reported cost, i.e. none was readable (`cost_unreported`) or it was above the maximum
+   * reserved (`over_max`); null otherwise. Recorded on the usage event.
+   */
+  costNote?(c: PricedClassified, res: UpstreamRes): string | null;
   /** Whether the provider may have billed a request that timed out. */
   timeoutBilled: boolean;
   /**

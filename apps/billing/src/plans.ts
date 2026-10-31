@@ -1,6 +1,7 @@
 // Plans and what each includes. Indie, Team and Agents limits are the design doc's table; the
 // Free plan's "1 key, $50/month of protected spend" is from the pricing table, and its other
-// limits (1 provider, 20 agent sessions, 10,000 requests, 7 days) are this file's choice.
+// limits (1 provider, 20 agent sessions, 10,000 requests, 7 days) are this file's choice, as are
+// the custom API limits (1, 3, 10, 25).
 // Business and Enterprise are self-hosted licenses: their hosted org is only the customer
 // record, so it keeps Free limits.
 
@@ -15,6 +16,8 @@ export type CheckoutPlan = (typeof CHECKOUT_PLANS)[number];
 export interface Limits {
   maxKeys: number | null;
   maxProviders: number | null;
+  /** APIs the org defines and prices itself (custom APIs). */
+  maxCustomApis: number | null;
   agentSessionsPerMonth: number | null;
   requestsPerMonth: number | null;
   maxOrgMonthCapMicros: bigint | null;
@@ -28,6 +31,7 @@ export interface Limits {
 const FREE: Limits = {
   maxKeys: 1,
   maxProviders: 1,
+  maxCustomApis: 1,
   agentSessionsPerMonth: 20,
   requestsPerMonth: 10_000,
   maxOrgMonthCapMicros: 50_000_000n,
@@ -42,6 +46,7 @@ export const LIMITS: Record<Plan, Limits> = {
   indie: {
     maxKeys: null,
     maxProviders: 2,
+    maxCustomApis: 3,
     agentSessionsPerMonth: 100,
     requestsPerMonth: 100_000,
     maxOrgMonthCapMicros: null,
@@ -53,6 +58,7 @@ export const LIMITS: Record<Plan, Limits> = {
   team: {
     maxKeys: null,
     maxProviders: 5,
+    maxCustomApis: 10,
     agentSessionsPerMonth: 500,
     requestsPerMonth: 1_000_000,
     maxOrgMonthCapMicros: null,
@@ -64,6 +70,7 @@ export const LIMITS: Record<Plan, Limits> = {
   agents: {
     maxKeys: null,
     maxProviders: null,
+    maxCustomApis: 25,
     agentSessionsPerMonth: null,
     requestsPerMonth: 10_000_000,
     maxOrgMonthCapMicros: null,
