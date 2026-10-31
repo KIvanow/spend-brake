@@ -85,11 +85,34 @@ const SESSION_ID = /^[A-Za-z0-9_.-]{1,128}$/;
 const DEFAULT_COUNTRIES = ['US', 'CA'];
 const CONFIG_STALE_MS = 10 * 60_000;
 const DEFAULT_SKU = 'unpriced';
+/**
+ * How error messages name a key: `key "web app" (key_…)`, or by id alone when its record has no
+ * name (written before records carried one). Names are the org's own labels, never request
+ * data; control characters are dropped so the message stays one line.
+ */
+export function keyLabel(key: Pick<KeyRecord, 'id' | 'name'>): string {
+  // eslint-disable-next-line no-control-regex
+  const name = key.name?.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim();
+  return name ? `key "${name}" (${key.id})` : `key ${key.id}`;
+}
+
+const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/** A cap or kill scope in words: the caller's own key (and its parent) by name where known. */
+function scopeInWords(scope: string, key: KeyRecord): string {
+  if (scope === `key:${key.id}`) return keyLabel(key);
+  if (key.parentKeyId && scope === `key:${key.parentKeyId}`) {
+    return `the key that minted this session key (${scope})`;
+  }
+  return scope;
+}
+
 /** 429 loop_detected messages by what opened the key's circuit (it pauses the whole key). */
-const PAUSED_MESSAGE: Record<PauseReason, string> = {
-  loop: 'Repeated requests detected; this key is paused for all providers. Stop and ask the user.',
-  pumping:
-    'Too many messages to one number or number range (possible SMS pumping); this key is paused for all providers. Stop and ask the user.',
+const PAUSED_MESSAGE: Record<PauseReason, (key: string) => string> = {
+  loop: (key) =>
+    `Repeated requests detected; ${key} is paused for all providers. Stop and ask the user.`,
+  pumping: (key) =>
+    `Too many messages to one number or number range (possible SMS pumping); ${key} is paused for all providers. Stop and ask the user.`,
 };
 // Where a provider's own key goes, so a virtual key can take its place: Google `key`, Mapbox
 // `access_token`, HERE `apiKey`.
@@ -383,7 +406,11 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
     }
     const credentialId = key.credentials[adapter.id];
     if (!credentialId) {
-      return sendError(reply, 'sku_not_allowed', `Key may not call provider ${adapter.id}.`);
+      return sendError(
+        reply,
+        'sku_not_allowed',
+        `${capitalize(keyLabel(key))} may not call provider ${adapter.id}.`,
+      );
     }
     const { org } = auth;
     // A session key carries its session; otherwise the client may name one.
@@ -491,9 +518,14 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
     }
     labels.set(request, { provider: adapter.id, sku: priced.items[0]?.sku ?? '' });
     if (key.skus && !priced.items.every((i) => key.skus!.includes(i.sku))) {
-      return sendError(reply, 'sku_not_allowed', 'Key may not call this SKU.', {
-        skus: priced.items.map((i) => i.sku),
-      });
+      return sendError(
+        reply,
+        'sku_not_allowed',
+        `${capitalize(keyLabel(key))} may not call this SKU.`,
+        {
+          skus: priced.items.map((i) => i.sku),
+        },
+      );
     }
 
     // Messaging: destination country allow-list and the pumping guard, before any money moves.
@@ -513,7 +545,7 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
         return sendError(
           reply,
           'sku_not_allowed',
-          `This key may not send to ${dest.country ?? 'that number'}; allowed: ${allowed.join(', ')}.`,
+          `${capitalize(keyLabel(key))} may not send to ${dest.country ?? 'that number'}; allowed: ${allowed.join(', ')}.`,
           { country: dest.country },
         );
       }
@@ -538,7 +570,7 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
             prefix: dest.prefix,
           });
           reply.header('retry-after', String(pump.retryAfterSec));
-          return sendError(reply, 'loop_detected', PAUSED_MESSAGE[pump.reason], {
+          return sendError(reply, 'loop_detected', PAUSED_MESSAGE[pump.reason](keyLabel(key)), {
             retryAfter: pump.retryAfterSec,
             reason: pump.reason,
           });
@@ -629,11 +661,10 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
             target: r.target,
             ...base,
           });
-          // The proxy's key record carries no name; "this key" at least reads as the caller's.
           return sendError(
             reply,
             'killed',
-            `Spending is switched off for ${r.target === `key:${key.id}` ? `this key (${r.target})` : r.target}. Stop.`,
+            `Spending is switched off for ${scopeInWords(r.target, key)}. Stop.`,
             { target: r.target },
           );
         case 'loop_detected':
@@ -645,7 +676,7 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
             ...base,
           });
           reply.header('retry-after', String(r.retryAfterSec));
-          return sendError(reply, 'loop_detected', PAUSED_MESSAGE[r.reason], {
+          return sendError(reply, 'loop_detected', PAUSED_MESSAGE[r.reason](keyLabel(key)), {
             retryAfter: r.retryAfterSec,
             reason: r.reason,
           });
@@ -663,7 +694,7 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
           return sendError(
             reply,
             'budget_exceeded',
-            `Spend cap reached for ${r.scope}. Stop and ask the user to raise the cap.`,
+            `Spend cap reached for ${scopeInWords(r.scope, key)}. Stop and ask the user to raise the cap.`,
             {
               scope: r.scope,
               window: r.window,
@@ -691,7 +722,7 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
         return sendError(
           reply,
           'budget_exceeded',
-          'Budget store unavailable and the fail-open allowance is used up.',
+          `Budget store unavailable and the fail-open allowance of ${keyLabel(key)} is used up.`,
           {
             scope: `key:${key.id}`,
             window: `d:${failOpenDay.replaceAll('-', '')}`,
@@ -836,7 +867,7 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
       return sendError(
         reply,
         'upstream_unavailable',
-        `The ${adapter.id} provider key this Spend Brake key uses was deleted or cannot be read; nothing was sent. Point the key at another provider key in the dashboard (Keys).`,
+        `The ${adapter.id} provider key that Spend Brake ${keyLabel(key)} uses was deleted or cannot be read; nothing was sent. Point the key at another provider key in the dashboard (Keys).`,
       );
     }
     const headers = outgoingHeaders(request.headers);

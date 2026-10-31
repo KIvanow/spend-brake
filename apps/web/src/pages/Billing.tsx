@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { api, usd } from '../api.js';
+import { type Cap, api, usd } from '../api.js';
 import { useRole } from '../role.js';
 import { Table, Time } from '../ui.js';
 
@@ -38,6 +38,16 @@ export function Billing() {
     queryFn: () => api<BillingView>('/v1/billing'),
     retry: false,
   });
+  // Free sign-ups start with an org hard cap a month, and it stays after an upgrade: say so here,
+  // so paying for a plan is not mistaken for lifting it.
+  const caps = useQuery({
+    queryKey: ['caps'],
+    queryFn: () => api<{ items: Cap[] }>('/v1/caps'),
+    enabled: billing.isSuccess,
+  });
+  const orgCap = caps.data?.items.find(
+    (c) => c.scope === 'org' && c.kind === 'm' && c.hard !== null,
+  );
   const go = useMutation({
     mutationFn: (to: { checkout: string } | 'portal') =>
       to === 'portal'
@@ -97,6 +107,14 @@ export function Billing() {
         <p className="error">
           A payment failed. Existing keys and caps keep working; new keys, providers and sessions
           wait until it is paid. Update the card in Manage billing.
+        </p>
+      )}
+      {orgCap && (
+        <p className="callout" role="note">
+          Your org has a {usd(orgCap.hard, orgCap.hard! % 1_000_000 === 0 ? 0 : 2)}/month hard cap
+          {/* Version 1: the cap is as sign-up wrote it, never changed since. */}
+          {orgCap.version === 1 ? ' (set at sign-up)' : ''}. Calls stop when it&apos;s reached.
+          Change it on <a href="#/caps">Caps</a>.
         </p>
       )}
       {b.limits && (

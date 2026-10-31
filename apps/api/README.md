@@ -22,6 +22,19 @@ Bootstrap the first owner token (shown once):
 pnpm --filter @spend-brake/api bootstrap -- --org acme --name "Acme" --tz Europe/Sofia
 ```
 
+## CSV export
+
+`GET /v1/events.csv` (viewer) downloads the same events as `/v1/events`, newest first, with the
+same filters: `source` (`usage`, the default, or `audit`), `type`, `keyId`, and the time bounds
+`from` (inclusive) and `to` (exclusive), both ISO 8601. Both endpoints take `from`/`to`.
+
+- **Row cap:** one export holds at most 100,000 rows (the newest). The `X-Brake-Truncated: true`
+  header says more rows matched; export earlier ranges with `to` to get them.
+- **Columns:** request rows carry `key_name` (the key's current name) next to `key_id`, the
+  outcome, and the cost both in dollars (`cost_usd`, exact) and in micros. Times are UTC.
+- **Spreadsheet safety:** RFC 4180 quoting, CRLF line ends. Text cells starting with `=`, `+`,
+  `-`, `@`, a tab or a carriage return get a leading `'`, so they never run as formulas.
+
 ## Writes go to Valkey first
 
 The proxy reads only Valkey. Every change that affects enforcement (keys, caps, kills,

@@ -1,6 +1,6 @@
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import { api, usd } from '../api.js';
+import { api, download, usd } from '../api.js';
 import { TIME_LABEL, Table, Time } from '../ui.js';
 import { useKeys } from './Keys.js';
 
@@ -11,6 +11,24 @@ interface Page {
 
 export function Events() {
   const [source, setSource] = useState<'usage' | 'audit'>('usage');
+  const [exporting, setExporting] = useState(false);
+  const [exported, setExported] = useState<{ error?: string; truncated?: boolean } | null>(null);
+  // The current view: the tab shown. The API caps one file at its newest 100,000 rows.
+  const exportCsv = async () => {
+    setExporting(true);
+    setExported(null);
+    try {
+      const headers = await download(
+        `/v1/events.csv?source=${source}`,
+        `spend-brake-${source === 'usage' ? 'requests' : 'audit'}.csv`,
+      );
+      setExported({ truncated: headers.get('x-brake-truncated') === 'true' });
+    } catch (err) {
+      setExported({ error: (err as Error).message });
+    } finally {
+      setExporting(false);
+    }
+  };
   const q = useInfiniteQuery({
     queryKey: ['events', source],
     initialPageParam: null as string | null,
@@ -34,20 +52,37 @@ export function Events() {
     <section>
       <div className="row">
         <h2>Events</h2>
-        <div className="seg" role="tablist">
-          {(['usage', 'audit'] as const).map((x) => (
-            <button
-              key={x}
-              type="button"
-              role="tab"
-              aria-selected={source === x}
-              onClick={() => setSource(x)}
-            >
-              {x === 'usage' ? 'Requests' : 'Audit log'}
-            </button>
-          ))}
+        <div className="tools">
+          <div className="seg" role="tablist">
+            {(['usage', 'audit'] as const).map((x) => (
+              <button
+                key={x}
+                type="button"
+                role="tab"
+                aria-selected={source === x}
+                onClick={() => {
+                  setSource(x);
+                  setExported(null);
+                }}
+              >
+                {x === 'usage' ? 'Requests' : 'Audit log'}
+              </button>
+            ))}
+          </div>
+          <button type="button" disabled={exporting} onClick={() => void exportCsv()}>
+            {exporting ? 'Exporting…' : 'Export CSV'}
+          </button>
         </div>
       </div>
+      <p className="muted" role="status">
+        {exported?.error ? (
+          <span className="error">Export failed: {exported.error}</span>
+        ) : exported?.truncated ? (
+          'Exported the newest 100,000 rows, the most one file holds. Older rows are left out.'
+        ) : exported ? (
+          `Exported every ${source === 'usage' ? 'request' : 'audit log entry'} (times in UTC).`
+        ) : null}
+      </p>
       {q.isError && <p className="error">{q.error.message}</p>}
       {source === 'usage' ? (
         <Table

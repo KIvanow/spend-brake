@@ -417,7 +417,102 @@ describe('dashboard', () => {
     expect(nav.className).not.toContain('open');
     expect(screen.getByRole('button', { name: 'Menu, current page: Caps' })).toBeTruthy();
     expect(document.title).toBe('Caps · Spend Brake');
+    // Focus lands on the new page's heading, not on <body>.
+    expect(document.activeElement).toBe(screen.getByRole('heading', { level: 1, name: 'Caps' }));
+
+    // Tabbing out of the open list (to Sign out) closes it.
+    await user.click(screen.getByRole('button', { name: 'Menu, current page: Caps' }));
+    expect(nav.className).toContain('open');
+    screen.getByRole('button', { name: 'Sign out' }).focus();
+    await waitFor(() => expect(nav.className).not.toContain('open'));
+
+    // The skip link jumps past the header to the page.
+    await user.click(screen.getByRole('link', { name: 'Skip to content' }));
+    expect(document.activeElement).toBe(screen.getByRole('heading', { level: 1, name: 'Caps' }));
+    expect(window.location.hash).toBe('#/caps');
     window.location.hash = '';
+  });
+
+  it('exports the events shown as CSV through a blob download', async () => {
+    routes['GET /v1/events'] = () => [200, { items: [], nextCursor: null }];
+    routes['GET /v1/keys'] = () => [200, { items: [] }];
+    const json = globalThis.fetch;
+    const csvCalls: { url: string; auth: string | undefined }[] = [];
+    let truncated = 'false';
+    vi.stubGlobal('fetch', (input: string, init: RequestInit = {}) => {
+      if (!String(input).startsWith('/v1/events.csv')) return json(input, init);
+      csvCalls.push({
+        url: String(input),
+        auth: (init.headers as Record<string, string> | undefined)?.authorization,
+      });
+      return Promise.resolve(
+        new Response('time_utc,type\r\n', {
+          headers: {
+            'content-type': 'text/csv; charset=utf-8',
+            'content-disposition': 'attachment; filename="spend-brake-audit-2026-10-31.csv"',
+            'x-brake-truncated': truncated,
+          },
+        }),
+      );
+    });
+    const created: Blob[] = [];
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL: (b: Blob) => {
+        created.push(b);
+        return 'blob:test/1';
+      },
+      revokeObjectURL: () => undefined,
+    });
+    const clicked: HTMLAnchorElement[] = [];
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+      this: HTMLAnchorElement,
+    ) {
+      clicked.push(this);
+    });
+
+    const user = await signIn();
+    await user.click(screen.getByRole('button', { name: 'Events' }));
+    await user.click(await screen.findByRole('tab', { name: 'Audit log' }));
+    await user.click(screen.getByRole('button', { name: 'Export CSV' }));
+    expect(await screen.findByText(/Exported every audit log entry/)).toBeTruthy();
+    expect(csvCalls).toEqual([{ url: '/v1/events.csv?source=audit', auth: 'Bearer sbt_good' }]);
+    expect(await created[0]!.text()).toBe('time_utc,type\r\n');
+    expect(clicked[0]!.href).toBe('blob:test/1');
+    expect(clicked[0]!.download).toBe('spend-brake-audit-2026-10-31.csv');
+
+    truncated = 'true';
+    await user.click(screen.getByRole('button', { name: 'Export CSV' }));
+    expect(await screen.findByText(/newest 100,000 rows/)).toBeTruthy();
+    click.mockRestore();
+  });
+
+  it('notes an org monthly hard cap on Billing, with a link to Caps', async () => {
+    routes['GET /v1/billing'] = () => [
+      200,
+      {
+        plan: 'team',
+        planName: 'Team',
+        status: 'active',
+        currentPeriodEnd: null,
+        hasSubscription: true,
+        limits: null,
+        usage: { keys: 0, providers: 0, agentSessionsThisMonth: 0, requestsThisMonth: 0 },
+        plans: [],
+        licenses: [],
+      },
+    ];
+    routes['GET /v1/caps'] = () => [
+      200,
+      { items: [{ scope: 'org', kind: 'm', hard: 50_000_000, soft: null, version: 1 }] },
+    ];
+    const user = await signIn();
+    await user.click(screen.getByRole('button', { name: 'Billing' }));
+    const note = await screen.findByRole('note');
+    expect(note.textContent).toBe(
+      "Your org has a $50/month hard cap (set at sign-up). Calls stop when it's reached. Change it on Caps.",
+    );
+    expect(within(note).getByRole('link', { name: 'Caps' }).getAttribute('href')).toBe('#/caps');
   });
 
   it('charts spend and totals the period', async () => {

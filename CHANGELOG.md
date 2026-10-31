@@ -39,6 +39,8 @@ First release.
   started page: add a provider key, create a Spend Brake key with the exact change to make in
   the app, set caps, see the first call. Provider keys and Spend Brake keys can now be managed
   in the dashboard.
+- CSV export of requests and the audit log (`GET /v1/events.csv`, Export CSV on Events), with
+  key names and formula-safe cells; proxy errors name the key (`key "web app" (key_…)`).
 
 ### Telemetry for each org
 

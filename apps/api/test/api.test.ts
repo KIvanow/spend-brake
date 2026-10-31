@@ -1,9 +1,10 @@
-import { hashVirtualKey } from '@spend-brake/budget';
-import { auditLog, usageEvents } from '@spend-brake/db';
+import { type KeyRecord, hashVirtualKey } from '@spend-brake/budget';
+import { auditLog, eq, usageEvents, virtualKeys } from '@spend-brake/db';
 import { credentialContext, decryptSecret, type Envelope } from '@spend-brake/shared';
 import { sql } from '@spend-brake/db';
 import type { InjectOptions } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { CSV_ROW_CAP } from '../src/routes/ledger.js';
 import { type Env, type Org, bearer, newOrg, startEnv } from './harness.js';
 
 const SECRET = 'AIzaSy-test-provider-secret-9F3k';
@@ -300,6 +301,35 @@ describe('virtual keys', () => {
     expect(again.statusCode).toBe(409);
   });
 
+  it('carries the key name to the proxy record and follows renames', async () => {
+    const k = await key(a, { name: 'web app' });
+    expect((await env.registry.getKeyByToken(k.token))?.name).toBe('web app');
+    const renamed = await call(a.admin, {
+      method: 'PATCH',
+      url: `/v1/keys/${k.id}`,
+      payload: { name: 'store locator' },
+    });
+    expect(renamed.statusCode).toBe(200);
+    expect((await env.registry.getKeyByToken(k.token))?.name).toBe('store locator');
+
+    // A key written before records had names: any later write fills it from the row.
+    const [row] = await env.db.select().from(virtualKeys).where(eq(virtualKeys.id, k.id));
+    const legacy = { ...(row!.config as KeyRecord) };
+    delete legacy.name;
+    await env.registry.putKeyByHash(row!.tokenHash, legacy);
+    expect((await env.registry.getKeyByToken(k.token))?.name).toBeUndefined();
+    await call(a.admin, { method: 'PATCH', url: `/v1/keys/${k.id}`, payload: { env: 'prod' } });
+    expect(await env.registry.getKeyByToken(k.token)).toMatchObject({
+      name: 'store locator',
+      env: 'prod',
+    });
+    await call(a.admin, { method: 'DELETE', url: `/v1/keys/${k.id}` });
+    expect(await env.registry.getKeyByToken(k.token)).toMatchObject({
+      name: 'store locator',
+      status: 'revoked',
+    });
+  });
+
   it('only binds credentials of the same org and provider', async () => {
     const credB = await credential(b);
     const res = await call(a.admin, {
@@ -567,7 +597,151 @@ describe('ledger queries', () => {
     expect(blocked.json<{ items: unknown[] }>().items).toHaveLength(1);
     expect((await call(org.viewer, { url: '/v1/events?cursor=garbage' })).statusCode).toBe(400);
   });
+  it('exports events as CSV with key names, filters and formula-safe cells', async () => {
+    const org = await newOrg(env);
+    const k = await key(org, { name: '=HYPERLINK("http://x")' });
+    const row = (ts: string, streamId: string, extra: object = {}) => ({
+      orgId: org.id,
+      ts: new Date(ts),
+      streamId,
+      type: 'usage',
+      keyId: k.id,
+      provider: 'google-maps',
+      sku: 'geocoding',
+      costMicros: 5000n,
+      status: 200,
+      ...extra,
+    });
+    await env.db
+      .insert(usageEvents)
+      .values([
+        row('2026-10-29T06:00:00Z', '1-0', { data: { note: 'a, "quoted"\nline' } }),
+        row('2026-10-29T07:00:00Z', '2-0', { type: 'adjustment', costMicros: -2500n }),
+        row('2026-10-30T07:00:00Z', '3-0', { keyId: 'key_gone', costMicros: 1234567n }),
+      ]);
+
+    expect((await env.app.inject({ url: '/v1/events.csv' })).statusCode).toBe(401);
+    const res = await call(org.viewer, { url: '/v1/events.csv' });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toBe('text/csv; charset=utf-8');
+    expect(res.headers['content-disposition']).toMatch(
+      /^attachment; filename="spend-brake-requests-\d{4}-\d{2}-\d{2}\.csv"$/,
+    );
+    expect(res.headers['x-brake-truncated']).toBe('false');
+    expect(res.body.endsWith('\r\n')).toBe(true);
+    const [header, ...rows] = parseCsv(res.body);
+    expect(header).toEqual([
+      'time_utc',
+      'type',
+      'key_id',
+      'key_name',
+      'provider',
+      'route',
+      'sku',
+      'outcome',
+      'status',
+      'cost_usd',
+      'cost_micros',
+      'worst_micros',
+      'latency_ms',
+      'session',
+      'env',
+      'agent_id',
+      'request_id',
+      'data',
+    ]);
+    const col = (r: string[], name: string) => r[header!.indexOf(name)];
+    expect(rows.map((r) => col(r, 'time_utc'))).toEqual([
+      '2026-10-30T07:00:00.000Z',
+      '2026-10-29T07:00:00.000Z',
+      '2026-10-29T06:00:00.000Z',
+    ]);
+    // A deleted key has no name; a name that looks like a formula is defused.
+    expect(rows.map((r) => col(r, 'key_name'))).toEqual([
+      '',
+      `'=HYPERLINK("http://x")`,
+      `'=HYPERLINK("http://x")`,
+    ]);
+    expect(rows.map((r) => col(r, 'cost_usd'))).toEqual(['1.234567', '-0.0025', '0.005']);
+    // Numbers stay numbers: a negative amount is not prefixed.
+    expect(col(rows[1]!, 'cost_micros')).toBe('-2500');
+    expect(col(rows[2]!, 'outcome')).toBe('ok');
+    expect(JSON.parse(col(rows[2]!, 'data')!)).toEqual({ note: 'a, "quoted"\nline' });
+
+    const ranged = await call(org.viewer, {
+      url: '/v1/events.csv?from=2026-10-29T06:30:00Z&to=2026-10-30T00:00:00Z',
+    });
+    expect(
+      parseCsv(ranged.body)
+        .slice(1)
+        .map((r) => r[0]),
+    ).toEqual(['2026-10-29T07:00:00.000Z']);
+    const typed = await call(org.viewer, { url: '/v1/events.csv?type=adjustment' });
+    expect(parseCsv(typed.body)).toHaveLength(2);
+    // The JSON list takes the same time bounds.
+    const list = await call(org.viewer, { url: '/v1/events?from=2026-10-30T00:00:00Z' });
+    expect(list.json<{ items: unknown[] }>().items).toHaveLength(1);
+
+    const audit = await call(org.viewer, { url: '/v1/events.csv?source=audit' });
+    expect(audit.headers['content-disposition']).toMatch(/spend-brake-audit-/);
+    const [auditHeader, ...auditRows] = parseCsv(audit.body);
+    expect(auditHeader).toEqual(['time_utc', 'actor', 'action', 'target', 'reason', 'data']);
+    expect(auditRows.some((r) => r[2] === 'key.create' && r[3] === k.id)).toBe(true);
+
+    // Another org sees only its own rows.
+    const other = await call(b.viewer, { url: '/v1/events.csv' });
+    expect(other.body).not.toContain(k.id);
+    expect((await call(org.viewer, { url: '/v1/events.csv?from=yesterday' })).statusCode).toBe(400);
+  });
+
+  it('caps a CSV export and says so', async () => {
+    const org = await newOrg(env);
+    await env.db.execute(sql`
+      insert into usage_events (org_id, ts, stream_id, type, key_id, cost_micros, status)
+      select ${org.id}, timestamptz '2026-10-01T00:00:00Z' + make_interval(secs => g),
+        g || '-0', 'usage', 'k1', 1, 200
+      from generate_series(1, ${CSV_ROW_CAP + 5}) g`);
+    const res = await call(org.viewer, { url: '/v1/events.csv' });
+    expect(res.headers['x-brake-truncated']).toBe('true');
+    const lines = res.body.split('\r\n').filter(Boolean);
+    expect(lines).toHaveLength(CSV_ROW_CAP + 1);
+    // The newest rows, in order across batches.
+    expect(lines[1]).toMatch(/^2026-10-02T03:46:45\.000Z,/);
+    expect(new Set(lines).size).toBe(lines.length);
+    const ranged = await call(org.viewer, { url: '/v1/events.csv?to=2026-10-01T00:00:06Z' });
+    expect(ranged.headers['x-brake-truncated']).toBe('false');
+    expect(ranged.body.split('\r\n').filter(Boolean)).toHaveLength(6);
+  }, 60_000);
 });
+
+/** A strict RFC 4180 reader, enough to check the export round-trips. */
+function parseCsv(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
+  let quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]!;
+    if (quoted) {
+      if (c === '"' && text[i + 1] === '"') {
+        cell += '"';
+        i++;
+      } else if (c === '"') quoted = false;
+      else cell += c;
+    } else if (c === '"') quoted = true;
+    else if (c === ',') {
+      row.push(cell);
+      cell = '';
+    } else if (c === '\r' && text[i + 1] === '\n') {
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = '';
+      i++;
+    } else cell += c;
+  }
+  return rows;
+}
 
 describe('org settings', () => {
   it('mirrors provider policy and time zone to the proxy record', async () => {

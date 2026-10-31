@@ -16,6 +16,11 @@ interface OtlpView {
   queued: number;
 }
 
+/** Delivered since the last error. */
+const resolved = (o: { lastSuccessAt: string | null; lastErrorAt: string | null }) =>
+  o.lastSuccessAt !== null &&
+  (o.lastErrorAt === null || Date.parse(o.lastSuccessAt) > Date.parse(o.lastErrorAt));
+
 const when = (iso: string | null) =>
   iso ? (
     <>
@@ -178,11 +183,17 @@ function OpenTelemetry() {
           <p className="muted">
             Last delivered: {when(otlp.lastSuccessAt)}. Waiting: {otlp.queued}.
           </p>
-          {otlp.lastError && (
-            <p className="error">
-              Last error ({when(otlp.lastErrorAt)}): {otlp.lastError}
-            </p>
-          )}
+          {otlp.lastError &&
+            // An error from before the last delivery is history, not the current state.
+            (resolved(otlp) ? (
+              <p className="muted">
+                Earlier error, before the last delivery ({when(otlp.lastErrorAt)}): {otlp.lastError}
+              </p>
+            ) : (
+              <p className="error">
+                Last error ({when(otlp.lastErrorAt)}): {otlp.lastError}
+              </p>
+            ))}
           <div className="row" hidden={!can('admin')}>
             <button type="button" disabled={test.isPending} onClick={() => test.mutate()}>
               Send test span

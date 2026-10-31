@@ -109,7 +109,10 @@ describe('Twilio through the proxy', () => {
 
   it('caps one number at five messages an hour', async () => {
     const org = newOrg();
-    const { token } = await newKey(h, org, { credentials: { twilio: 'cred-twilio' } });
+    const { token, id } = await newKey(h, org, {
+      name: 'signup sms',
+      credentials: { twilio: 'cred-twilio' },
+    });
     const codes = [];
     for (let i = 0; i < 7; i++)
       codes.push((await sms(token, '+14155550199', `msg ${i}`)).statusCode);
@@ -119,5 +122,8 @@ describe('Twilio through the proxy', () => {
     expect(other.statusCode).toBe(429);
     expect(other.json()).toMatchObject({ error: 'loop_detected', reason: 'pumping' });
     expect(other.json<{ message: string }>().message).toMatch(/SMS pumping.*all providers/);
+    expect(other.json<{ message: string }>().message).toContain(
+      `key "signup sms" (${id}) is paused`,
+    );
   });
 });

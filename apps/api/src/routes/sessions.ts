@@ -162,9 +162,11 @@ export function sessionRoutes(
       ),
     );
     const agentId = body.agentId ?? parent.agentId ?? 'cli';
+    const name = body.name ?? `session ${sessionId}`;
     const record: KeyRecord = {
       ...parent,
       id: keyId,
+      name,
       status: 'active',
       expiresAt: expiresAt.toISOString(),
       agentId,
@@ -185,7 +187,7 @@ export function sessionRoutes(
     await ctx.db.insert(virtualKeys).values({
       id: keyId,
       orgId,
-      name: body.name ?? `session ${sessionId}`,
+      name,
       tokenHash: hashVirtualKey(token),
       prefix: token.slice(0, 12),
       config: record,
@@ -235,7 +237,7 @@ export function sessionRoutes(
       throw notFound('Session');
     }
     if (row.status === 'active') {
-      const revoked = { ...rec, status: 'revoked' as const };
+      const revoked = { ...rec, name: row.name, status: 'revoked' as const };
       await ctx.registry.putKeyByHash(row.tokenHash, revoked);
       await ctx.db
         .update(virtualKeys)

@@ -29,6 +29,7 @@ export async function resyncValkey(ctx: Ctx, orgId?: string): Promise<ResyncResu
     for (const k of await ctx.db.select().from(virtualKeys).where(eq(virtualKeys.orgId, org.id))) {
       await ctx.registry.putKeyByHash(k.tokenHash, {
         ...(k.config as KeyRecord),
+        name: k.name,
         status: k.status,
       });
       result.keys++;

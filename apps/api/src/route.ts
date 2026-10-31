@@ -37,6 +37,8 @@ interface RouteDef<B extends z.ZodType, Q extends z.ZodType, P extends z.ZodType
   query?: Q;
   params?: P;
   response: z.ZodType;
+  /** Media type of a successful response (default JSON). The handler sets the header. */
+  contentType?: string;
   status?: number;
   handler: (ctx: {
     auth: Auth;
@@ -89,7 +91,7 @@ export class Router {
       responses: {
         [status]: {
           description: 'OK',
-          content: { 'application/json': { schema: def.response } },
+          content: { [def.contentType ?? 'application/json']: { schema: def.response } },
         },
         400: {
           description: 'Invalid request',

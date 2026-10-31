@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../src/App.js';
 import { getToken, setToken, takeLoginCode } from '../src/api.js';
 import { redeemLoginCode } from '../src/pages/Auth.js';
+import { afterDelete } from '../src/pages/Webhooks.js';
 
 // Node 26 defines its own (empty) localStorage global, which hides jsdom's: stand one in.
 if (!window.localStorage) {
@@ -431,11 +432,27 @@ describe('webhooks', () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     await user.click(screen.getByRole('button', { name: 'Delete webhook Slack' }));
     expect(confirm).toHaveBeenCalledWith(
-      'Delete the webhook "Slack"? Alerts go back to the alert email.',
+      'Delete the webhook "Slack"? Alerts will be dropped: no alert email is set.',
     );
     expect(await screen.findByText(/No webhooks/)).toBeTruthy();
     // The deleted webhook's secret is no longer on screen.
     expect(screen.queryByText('whsec_once')).toBeNull();
+  });
+
+  it('says where alerts go after a delete, from the alert email and the other webhooks', () => {
+    const all = { events: [] };
+    const some = { events: ['loop'] };
+    expect(afterDelete([], 'ops@example.com')).toBe(
+      'Alerts go back to the alert email (ops@example.com).',
+    );
+    expect(afterDelete([], null)).toBe('Alerts will be dropped: no alert email is set.');
+    expect(afterDelete([some, all], null)).toBe('The other webhooks keep getting every alert.');
+    expect(afterDelete([some], 'ops@example.com')).toBe(
+      'Alerts no other webhook takes go back to the alert email (ops@example.com).',
+    );
+    expect(afterDelete([some], null)).toBe(
+      'Alerts no other webhook takes will be dropped: no alert email is set.',
+    );
   });
 
   it('shows viewers the webhooks without the add form or delete buttons', async () => {
@@ -927,6 +944,30 @@ describe('telemetry', () => {
     expect(await screen.findByText(/with x-honeycomb-team/)).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'Send test span' }));
     expect(await screen.findByText(/Delivered/)).toBeTruthy();
+  });
+
+  it('shows an error from before the last delivery as history, not in red', async () => {
+    const otlp = {
+      endpoint: 'https://api.honeycomb.io',
+      headerNames: [],
+      enabled: true,
+      lastSuccessAt: '2026-10-30T10:05:00Z',
+      lastErrorAt: '2026-10-30T10:00:00Z',
+      lastError: 'HTTP 503',
+      queued: 0,
+    };
+    routes['GET /v1/telemetry/otlp'] = () => [200, { otlp }];
+    window.location.hash = '/telemetry';
+    signedInByEmail();
+    const old = await screen.findByText(/Earlier error, before the last delivery/);
+    expect(old.className).toBe('muted');
+    expect(old.textContent).toContain('HTTP 503');
+    cleanup();
+
+    otlp.lastErrorAt = '2026-10-30T10:10:00Z';
+    signedInByEmail();
+    const now = await screen.findByText(/^Last error/);
+    expect(now.className).toBe('error');
   });
 
   it('says when the plan does not include OpenTelemetry export', async () => {

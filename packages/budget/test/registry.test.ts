@@ -41,6 +41,31 @@ describe('virtual keys', () => {
     await registry.revokeKey(token);
     expect((await registry.getKeyByToken(token))?.status).toBe('revoked');
   });
+
+  it('carry an optional name; records without one still parse', async () => {
+    const org = newOrg();
+    const named = await registry.createKey({
+      id: 'k2',
+      orgId: org,
+      name: 'web app',
+      credentials: { 'google-maps': 'cred1' },
+    });
+    expect((await registry.getKeyByToken(named.token))?.name).toBe('web app');
+
+    // A record written before keys had names (raw JSON, no `name` field).
+    const token = generateVirtualKey();
+    await valkey.client.set(
+      `bk:vk:${hashVirtualKey(token)}`,
+      JSON.stringify({ id: 'k3', orgId: org, credentials: { 'google-maps': 'cred1' } }),
+    );
+    const old = await registry.getKeyByToken(token);
+    expect(old).toMatchObject({ id: 'k3', status: 'active' });
+    expect(old?.name).toBeUndefined();
+
+    await expect(
+      registry.createKey({ id: 'k4', orgId: org, name: 'x'.repeat(201), credentials: {} }),
+    ).rejects.toThrow();
+  });
 });
 
 describe('orgs', () => {

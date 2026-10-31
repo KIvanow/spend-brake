@@ -55,7 +55,10 @@ describe('resync from Postgres', () => {
       org.id,
     );
     expect(result).toEqual({ orgs: 1, keys: 2, caps: 1, credentials: 1 });
-    expect((await env.registry.getKeyByToken(live.token))?.status).toBe('active');
+    expect(await env.registry.getKeyByToken(live.token)).toMatchObject({
+      status: 'active',
+      name: 'live',
+    });
     expect((await env.registry.getKeyByToken(dead.token))?.status).toBe('revoked');
     expect((await env.registry.getOrg(org.id))?.timeZone).toBe('Europe/Sofia');
     expect(await env.registry.getCredential(org.id, cred)).not.toBeNull();

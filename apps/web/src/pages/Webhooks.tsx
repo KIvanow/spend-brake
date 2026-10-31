@@ -23,14 +23,32 @@ interface Delivery {
   at: string;
 }
 
+const useOrg = () =>
+  useQuery({
+    queryKey: ['org'],
+    queryFn: () => api<{ settings?: { alertEmail?: string | null } }>('/v1/org'),
+  });
+
+/**
+ * What deleting a webhook does to alerts. Alerts any webhook takes are not emailed, so: other
+ * webhooks that take every alert keep getting them; the rest go to the alert email, or are
+ * dropped when none is set.
+ */
+export function afterDelete(others: Pick<Webhook, 'events'>[], email: string | null): string {
+  if (others.some((o) => o.events.length === 0)) {
+    return 'The other webhooks keep getting every alert.';
+  }
+  const which = others.length === 0 ? 'Alerts' : 'Alerts no other webhook takes';
+  return email
+    ? `${which} go back to the alert email (${email}).`
+    : `${which} will be dropped: no alert email is set.`;
+}
+
 /** Where alerts go when no webhook takes them: the org's alert email (owners change it). */
 function AlertEmail() {
   const qc = useQueryClient();
   const { can } = useRole();
-  const org = useQuery({
-    queryKey: ['org'],
-    queryFn: () => api<{ settings?: { alertEmail?: string | null } }>('/v1/org'),
-  });
+  const org = useOrg();
   const current = org.data?.settings?.alertEmail ?? null;
   const [email, setEmail] = useState<string | null>(null);
   const save = useMutation({
@@ -135,7 +153,7 @@ function AddWebhook({ removed }: { removed: ReadonlySet<string> }) {
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder={info.name}
+            placeholder="e.g. ops alerts"
             maxLength={200}
           />
         </label>
@@ -189,6 +207,7 @@ export function Webhooks() {
       void qc.invalidateQueries({ queryKey: ['webhooks'] });
     },
   });
+  const org = useOrg();
   const hooks = useQuery({
     queryKey: ['webhooks'],
     queryFn: () => api<{ items: Webhook[] }>('/v1/webhooks'),
@@ -237,10 +256,10 @@ export function Webhooks() {
                       aria-label={`Delete webhook ${w.name}`}
                       disabled={remove.isPending}
                       onClick={() => {
-                        const last = (hooks.data?.items.length ?? 0) <= 1;
-                        const next = last
-                          ? 'Alerts go back to the alert email.'
-                          : 'Alerts no other webhook takes go back to the alert email.';
+                        const next = afterDelete(
+                          (hooks.data?.items ?? []).filter((x) => x.id !== w.id),
+                          org.data?.settings?.alertEmail ?? null,
+                        );
                         if (window.confirm(`Delete the webhook "${w.name}"? ${next}`)) {
                           remove.mutate(w.id);
                         }

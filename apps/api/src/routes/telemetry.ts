@@ -85,6 +85,7 @@ export function telemetryRoutes(r: Router, ctx: Ctx, dispatcher: GuardedClient):
     tag: 'Telemetry',
     summary: "The org's calls, cost, latency and budget in the Prometheus text format",
     response: z.string(),
+    contentType: 'text/plain',
     handler: async ({ auth, reply }) => {
       const hash = await ctx.valkey.hgetall(orgMetricsKey(auth.orgId));
       const keys = await ctx.db

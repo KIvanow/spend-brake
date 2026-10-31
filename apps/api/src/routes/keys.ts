@@ -82,6 +82,8 @@ function record(keyId: string, orgId: string, f: Fields, base?: KeyRecord): KeyR
   return {
     id: keyId,
     orgId,
+    // The proxy names the key in its error messages.
+    ...((f.name ?? base?.name) !== undefined ? { name: f.name ?? base?.name } : {}),
     status: base?.status ?? 'active',
     expiresAt: pick('expiresAt', base?.expiresAt ?? null, (v) => new Date(v).toISOString()),
     credentials: f.credentials ?? base?.credentials ?? {},
@@ -123,7 +125,11 @@ export async function rebindKeys(
     const rec = row.config as KeyRecord;
     const current = rec.credentials?.[provider];
     if (current === undefined || current === to || !from(current)) continue;
-    const next: KeyRecord = { ...rec, credentials: { ...rec.credentials, [provider]: to } };
+    const next: KeyRecord = {
+      ...rec,
+      name: row.name,
+      credentials: { ...rec.credentials, [provider]: to },
+    };
     await ctx.registry.putKeyByHash(row.tokenHash, next);
     await ctx.db.update(virtualKeys).set({ config: next }).where(eq(virtualKeys.id, row.id));
     moved.push({ id: row.id, name: row.name });
@@ -195,6 +201,7 @@ export function keyRoutes(r: Router, ctx: Ctx): void {
           : c.expiresAt;
       const next: KeyRecord = {
         ...c,
+        name: child.name,
         status: parent.status === 'revoked' ? 'revoked' : c.status,
         credentials: parent.credentials,
         skus: parent.skus,
@@ -304,7 +311,13 @@ export function keyRoutes(r: Router, ctx: Ctx): void {
       if (row.status !== 'active') throw new ApiError(409, 'conflict', 'Key is revoked.');
       if (body.loop) await requireFeature(ctx, auth.orgId, 'customLoopRules');
       if (body.credentials) await checkCredentials(auth.orgId, body.credentials);
-      const rec = record(row.id, auth.orgId, body, row.config as KeyRecord);
+      // Records written before keys carried a name get it from the row.
+      const rec = record(
+        row.id,
+        auth.orgId,
+        { ...body, name: body.name ?? row.name },
+        row.config as KeyRecord,
+      );
       await ctx.registry.putKeyByHash(row.tokenHash, rec);
       const [updated] = await ctx.db
         .update(virtualKeys)
@@ -331,7 +344,7 @@ export function keyRoutes(r: Router, ctx: Ctx): void {
     response: keyView,
     handler: async ({ auth, params }) => {
       const row = await load(auth.orgId, params.id);
-      const rec = { ...(row.config as KeyRecord), status: 'revoked' as const };
+      const rec = { ...(row.config as KeyRecord), name: row.name, status: 'revoked' as const };
       await ctx.registry.putKeyByHash(row.tokenHash, rec);
       const [updated] = await ctx.db
         .update(virtualKeys)

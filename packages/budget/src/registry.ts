@@ -41,6 +41,11 @@ export const orgRecordSchema = z.strictObject({
 export const keyRecordSchema = z.strictObject({
   id,
   orgId: id,
+  /**
+   * The key's display name, for the proxy's error messages. Optional: records written before it
+   * existed (or by an older API) have none, and the proxy then names the key by id only.
+   */
+  name: z.string().max(200).optional(),
   status: z.enum(['active', 'revoked']).default('active'),
   /** ISO timestamp after which the key stops working. */
   expiresAt: z.string().datetime().nullable().default(null),

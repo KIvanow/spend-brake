@@ -174,7 +174,7 @@ describe('error contract', () => {
 
   it('402 budget_exceeded names the scope and nothing reaches Google', async () => {
     const org = newOrg();
-    const { token, id } = await newKey(h, org);
+    const { token, id } = await newKey(h, org, { name: 'web app' });
     await engine.setCap(org, { kind: 'key', id }, 'd', { hard: 50_000n, soft: null });
     expect((await textSearch(token)).statusCode).toBe(200);
     const before = mock.seen.length;
@@ -182,7 +182,7 @@ describe('error contract', () => {
     expect(res.statusCode).toBe(402);
     expect(res.json()).toEqual({
       error: 'budget_exceeded',
-      message: `Spend cap reached for key:${id}. Stop and ask the user to raise the cap.`,
+      message: `Spend cap reached for key "web app" (${id}). Stop and ask the user to raise the cap.`,
       scope: `key:${id}`,
       window: 'd:20261029',
       cap: 50_000,
@@ -224,8 +224,16 @@ describe('error contract', () => {
     expect(res.statusCode).toBe(403);
     expect(res.json()).toMatchObject({ error: 'killed', target: `key:${id}` });
     expect(res.json<{ message: string }>().message).toBe(
-      `Spending is switched off for this key (key:${id}). Stop.`,
+      `Spending is switched off for key ${id}. Stop.`,
     );
+    // A named key is named, with its id kept for support.
+    const named = await newKey(h, org, { name: 'store "locator"\nv2' });
+    await engine.kill(org, { kind: 'key', id: named.id });
+    expect((await textSearch(named.token)).json()).toEqual({
+      error: 'killed',
+      message: `Spending is switched off for key "store "locator" v2" (${named.id}). Stop.`,
+      target: `key:${named.id}`,
+    });
     await engine.unkill(org, { kind: 'key', id });
     await engine.kill(org, { kind: 'sess', id: 'bad-run' });
     expect((await textSearch(token, { 'x-brake-session': 'bad-run' })).statusCode).toBe(403);
@@ -238,13 +246,18 @@ describe('error contract', () => {
     const org = newOrg();
     const { token } = await newKey(h, org, { skus: ['geocoding'] });
     expect((await textSearch(token)).json()).toMatchObject({ error: 'sku_not_allowed' });
-    const none = await newKey(h, org, { credentials: { other: 'cred-x' } });
-    expect((await textSearch(none.token)).statusCode).toBe(403);
+    const none = await newKey(h, org, { name: 'ci', credentials: { other: 'cred-x' } });
+    const res = await textSearch(none.token);
+    expect(res.statusCode).toBe(403);
+    expect(res.json<{ message: string }>().message).toBe(
+      `Key "ci" (${none.id}) may not call provider google-maps.`,
+    );
   });
 
   it('429 loop_detected with Retry-After after identical requests', async () => {
     const org = newOrg();
-    const { token } = await newKey(h, org, {
+    const { token, id } = await newKey(h, org, {
+      name: 'web app',
       loop: { identical: 3, windowSec: 60, perMinute: 1000, cooldownSec: 600 },
     });
     const same = () =>
@@ -255,7 +268,9 @@ describe('error contract', () => {
     expect(res.statusCode).toBe(429);
     expect(res.headers['retry-after']).toBe('600');
     expect(res.json()).toMatchObject({ error: 'loop_detected', retryAfter: 600, reason: 'loop' });
-    expect(res.json<{ message: string }>().message).toMatch(/Repeated requests.*all providers/);
+    expect(res.json<{ message: string }>().message).toBe(
+      `Repeated requests detected; key "web app" (${id}) is paused for all providers. Stop and ask the user.`,
+    );
     expect((await events(org)).some((e) => e.type === 'loop')).toBe(true);
   });
 
@@ -312,7 +327,10 @@ describe('upstream behaviour', () => {
 
   it('names the missing provider key when a credential was deleted, and sends nothing', async () => {
     const org = newOrg();
-    const { token } = await newKey(h, org, { credentials: { 'google-maps': 'cred-deleted' } });
+    const { token, id } = await newKey(h, org, {
+      name: 'web app',
+      credentials: { 'google-maps': 'cred-deleted' },
+    });
     let reached = false;
     mock.respond = (_req, reply) => {
       reached = true;
@@ -320,7 +338,9 @@ describe('upstream behaviour', () => {
     };
     const res = await h.proxy.inject(`/google-maps/maps/api/geocode/json?address=x&key=${token}`);
     expect(res.statusCode).toBe(502);
-    expect(res.json<{ message: string }>().message).toContain('provider key');
+    expect(res.json<{ message: string }>().message).toContain(
+      `The google-maps provider key that Spend Brake key "web app" (${id}) uses was deleted`,
+    );
     expect(reached).toBe(false);
     const [usage] = (await events(org)).filter((e) => e.type === 'usage');
     expect(usage).toMatchObject({ error: 'credential_unavailable', status: '0' });

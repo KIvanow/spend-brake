@@ -229,6 +229,42 @@ describe('OpenTelemetry export', () => {
     await fresh.alerts.queue.close();
   });
 
+  it('records the first delivery after an error at once, so the error reads as over', async () => {
+    received = [];
+    const org = await newOrg();
+    await exportTo(org, {});
+    let clock = NOW.getTime();
+    const w = new Worker({
+      db,
+      valkey,
+      queueConnection: queueConn,
+      workerId: 'w-4',
+      log: quiet,
+      wrapper,
+      allowPrivateCollectors: true,
+      now: () => new Date(clock),
+    });
+    const row = async () =>
+      (await db.select().from(telemetryExports).where(eq(telemetryExports.orgId, org)))[0]!;
+    await call(org, { reqId: 'r1' });
+    await worker.ledgerOnce();
+    expect(await w.otlp.runOnce()).toBe(1);
+    clock += 10_000;
+    collectorDown = true;
+    await call(org, { reqId: 'r2' });
+    await worker.ledgerOnce();
+    expect(await w.otlp.runOnce()).toBe(0);
+    expect((await row()).lastErrorAt?.getTime()).toBe(clock);
+    // Back 10 s later: inside the once-a-minute throttle, but written because it follows an error.
+    clock += 10_000;
+    collectorDown = false;
+    expect(await w.otlp.runOnce()).toBe(1);
+    const after = await row();
+    expect(after.lastSuccessAt?.getTime()).toBe(clock);
+    expect(after.lastSuccessAt!.getTime()).toBeGreaterThan(after.lastErrorAt!.getTime());
+    await w.alerts.queue.close();
+  });
+
   it('queues nothing for orgs that do not export', async () => {
     const org = await newOrg();
     await call(org, { reqId: 'r1' });
@@ -278,6 +314,8 @@ describe('OpenTelemetry export', () => {
     expect(await strict.otlp.runOnce()).toBe(0);
     const [row] = await db.select().from(telemetryExports).where(eq(telemetryExports.orgId, org));
     expect(row!.lastError).toContain('private address');
+    // The stored error names the setting to change.
+    expect(row!.lastError).toContain('ALLOW_PRIVATE_COLLECTORS=true on the API and the worker');
     await strict.alerts.queue.close();
   });
 });

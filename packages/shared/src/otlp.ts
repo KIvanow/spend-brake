@@ -193,6 +193,13 @@ export interface ExportResult {
   error: string | null;
 }
 
+/** What to set when a collector is refused for its address: the stored error names it. */
+export const PRIVATE_COLLECTOR_HINT =
+  'A collector on a private address (a local one, say) needs ALLOW_PRIVATE_COLLECTORS=true on the API and the worker.';
+
+const withHint = (error: string) =>
+  error.includes('private address') ? `${error}. ${PRIVATE_COLLECTOR_HINT}` : error;
+
 /** POST spans to an org's collector, refusing private addresses. Never follows redirects. */
 export async function postSpans(
   endpoint: string,
@@ -204,7 +211,11 @@ export async function postSpans(
   const url = tracesUrl(endpoint);
   const literal = privateLiteralHost(url);
   if (literal && !opts.dispatcher.allowPrivate) {
-    return { ok: false, status: null, error: `collector host is a private address (${literal})` };
+    return {
+      ok: false,
+      status: null,
+      error: withHint(`collector host is a private address (${literal})`),
+    };
   }
   try {
     const res = await request(url, {
@@ -233,7 +244,7 @@ export async function postSpans(
     return {
       ok: false,
       status: null,
-      error: redactText((err as Error).message, Object.values(headers)).slice(0, 300),
+      error: withHint(redactText((err as Error).message, Object.values(headers)).slice(0, 180)),
     };
   }
 }

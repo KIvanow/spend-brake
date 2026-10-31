@@ -49,7 +49,7 @@ const pageLabel = (p: PageName) => LABELS[p] ?? p;
  * service (where sign-up is open) leaves them out.
  *
  * Below 1180px the links fold into a menu, as on the website: the Menu button names the current
- * page, opens the list, and Escape or picking a page closes it.
+ * page, opens the list, and Escape, focus or a click outside it, or picking a page closes it.
  */
 function Nav({ page, setPage }: { page: PageName; setPage: (p: PageName) => void }) {
   const options = useAuthOptions();
@@ -66,15 +66,18 @@ function Nav({ page, setPage }: { page: PageName; setPage: (p: PageName) => void
       setOpen(false);
       toggle.current?.focus();
     };
-    const onClick = (e: MouseEvent) => {
+    const outside = (e: Event) => {
       const t = e.target as Node;
       if (!list.current?.contains(t) && !toggle.current?.contains(t)) setOpen(false);
     };
     document.addEventListener('keydown', onKey);
-    document.addEventListener('click', onClick);
+    document.addEventListener('click', outside);
+    // Tab past the last page (to Sign out, say) closes the list too.
+    document.addEventListener('focusin', outside);
     return () => {
       document.removeEventListener('keydown', onKey);
-      document.removeEventListener('click', onClick);
+      document.removeEventListener('click', outside);
+      document.removeEventListener('focusin', outside);
     };
   }, [open]);
   return (
@@ -213,9 +216,20 @@ export function App({
       );
   }, [signedIn]);
 
+  const heading = useRef<HTMLHeadingElement>(null);
+  const [focusHeading, setFocusHeading] = useState(false);
+  // A page picked from the nav: move focus to its heading, so keyboard and screen-reader users
+  // land on the new page instead of at the top of the document.
+  useEffect(() => {
+    if (!focusHeading) return;
+    setFocusHeading(false);
+    heading.current?.focus();
+  }, [focusHeading, page]);
+
   const setPage = (p: PageName) => {
     window.location.hash = `/${p.toLowerCase()}`;
     setPageState(p);
+    setFocusHeading(true);
   };
 
   if (pending) {
@@ -248,6 +262,17 @@ export function App({
   const Page = PAGES[page];
   return (
     <QueryClientProvider key={session} client={client}>
+      {/* A hash link would change the page (routes live in the hash), so it moves focus itself. */}
+      <a
+        className="skip-link"
+        href="#main"
+        onClick={(e) => {
+          e.preventDefault();
+          heading.current?.focus();
+        }}
+      >
+        Skip to content
+      </a>
       <header className="top">
         <strong className="brand">
           <Brand />
@@ -268,9 +293,11 @@ export function App({
           Sign out
         </button>
       </header>
-      <main>
+      <main id="main">
         {/* Each page's own headings start at h2; this names the page for the outline. */}
-        <h1 className="visually-hidden">{pageLabel(page)}</h1>
+        <h1 className="visually-hidden" ref={heading} tabIndex={-1}>
+          {pageLabel(page)}
+        </h1>
         <Page />
       </main>
     </QueryClientProvider>

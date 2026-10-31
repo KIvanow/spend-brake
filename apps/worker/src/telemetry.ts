@@ -56,6 +56,8 @@ export class OtlpExporter {
   private loadedAt = 0;
   private failures = new Map<string, { count: number; until: number }>();
   private statusAt = new Map<string, number>();
+  /** Orgs whose last recorded outcome was an error. */
+  private readonly erred = new Set<string>();
 
   constructor(
     private readonly deps: {
@@ -194,9 +196,13 @@ export class OtlpExporter {
   private async status(orgId: string, error: string | null): Promise<void> {
     const now = this.deps.now();
     if (error === null) {
+      // The first success after an error is always written, so the dashboard can tell the
+      // error is over (it shows an error older than the last delivery as history).
       const last = this.statusAt.get(orgId) ?? 0;
-      if (now.getTime() - last < STATUS_EVERY_MS) return;
+      if (!this.erred.delete(orgId) && now.getTime() - last < STATUS_EVERY_MS) return;
       this.statusAt.set(orgId, now.getTime());
+    } else {
+      this.erred.add(orgId);
     }
     await this.deps.db
       .update(telemetryExports)

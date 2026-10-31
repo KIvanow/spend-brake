@@ -107,10 +107,17 @@ export async function api<T>(
     },
     ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
   });
-  const data = (await res.json().catch(() => ({}))) as {
-    message?: string;
-    issues?: { message?: string }[];
-  };
+  const data = (await res.json().catch(() => ({}))) as ErrorBody;
+  check(res, data, token);
+  return data as T;
+}
+
+interface ErrorBody {
+  message?: string;
+  issues?: { message?: string }[];
+}
+
+function check(res: Response, data: ErrorBody, token: string | null): void {
   // Expired or revoked (sessions end when a role changes): back to the sign-in page. A request
   // that was in flight when the person signed out (or in again) changes nothing. A 401 on a
   // request sent with no token means another tab signed out and took the shared token with it.
@@ -125,7 +132,35 @@ export async function api<T>(
       data.issues?.[0]?.message ?? data.message ?? `HTTP ${res.status}`,
     );
   }
-  return data as T;
+}
+
+/**
+ * Download an API file (a CSV export) under the name the API gives it. The token goes in a
+ * header, so a plain link cannot do it: fetch (connect-src 'self'), then save the body through
+ * a `blob:` URL and `<a download>`. A download is a navigation, which no CSP directive in
+ * nginx.conf governs (img-src and frame-src are for embedding), so the CSP needs no change.
+ * Returns the response headers (for X-Brake-Truncated).
+ */
+export async function download(path: string, fallbackName: string): Promise<Headers> {
+  const token = getToken();
+  const res = await fetch(path, {
+    headers: token ? { authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) check(res, (await res.json().catch(() => ({}))) as ErrorBody, token);
+  const blob = await res.blob();
+  const name =
+    /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '')?.[1] ?? fallbackName;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.hidden = true;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  // Give the browser a moment to start the download before the URL goes away.
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  return res.headers;
 }
 
 export const usd = (micros: number | null | undefined, decimals = 2): string => {
