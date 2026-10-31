@@ -139,9 +139,12 @@ function check(res: Response, data: ErrorBody, token: string | null): void {
  * header, so a plain link cannot do it: fetch (connect-src 'self'), then save the body through
  * a `blob:` URL and `<a download>`. A download is a navigation, which no CSP directive in
  * nginx.conf governs (img-src and frame-src are for embedding), so the CSP needs no change.
- * Returns the response headers (for X-Brake-Truncated).
+ * Returns the response headers (for X-Brake-Truncated) and the file saved.
  */
-export async function download(path: string, fallbackName: string): Promise<Headers> {
+export async function download(
+  path: string,
+  fallbackName: string,
+): Promise<{ headers: Headers; blob: Blob }> {
   const token = getToken();
   const res = await fetch(path, {
     headers: token ? { authorization: `Bearer ${token}` } : {},
@@ -160,7 +163,7 @@ export async function download(path: string, fallbackName: string): Promise<Head
   a.remove();
   // Give the browser a moment to start the download before the URL goes away.
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
-  return res.headers;
+  return { headers: res.headers, blob };
 }
 
 export const usd = (micros: number | null | undefined, decimals = 2): string => {

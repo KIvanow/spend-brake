@@ -9,6 +9,45 @@ interface Page {
   nextCursor: string | null;
 }
 
+/**
+ * The start of a local calendar day (a date input's `YYYY-MM-DD`, plus `addDays`) in this
+ * browser's time zone, as ISO 8601 with its offset: `2026-10-31T00:00:00+02:00`. Where a zone
+ * skips midnight (a DST change), it is the first local time that day.
+ */
+export function localDayStart(day: string, addDays = 0): string {
+  const [y, m, d] = day.split('-').map(Number);
+  const t = new Date(y!, m! - 1, d! + addDays);
+  const p = (v: number) => String(v).padStart(2, '0');
+  const off = -t.getTimezoneOffset();
+  const sign = off < 0 ? '-' : '+';
+  return (
+    `${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())}` +
+    `T${p(t.getHours())}:${p(t.getMinutes())}:00${sign}${p(Math.floor(Math.abs(off) / 60))}:${p(Math.abs(off) % 60)}`
+  );
+}
+
+/** What a complete export holds, in words. */
+function exportedText(source: 'usage' | 'audit', rows: number, ranged: boolean): string {
+  const [one, many] =
+    source === 'usage' ? ['request', 'requests'] : ['audit log entry', 'audit log entries'];
+  const days = ranged ? ' in the dates picked (your local days)' : '';
+  if (rows === 0) return `No ${many}${days}: the file has only the header row.`;
+  const count = rows === 1 ? `1 ${one}` : `${rows.toLocaleString('en-US')} ${many}`;
+  return `Exported ${count}${days}. Times in the file are UTC.`;
+}
+
+/** Data rows in an exported CSV: row ends outside quotes, less the header. */
+function csvDataRows(text: string): number {
+  let rows = 0;
+  let quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === '"') quoted = !quoted;
+    else if (!quoted && c === '\n') rows++;
+  }
+  return Math.max(rows - 1, 0);
+}
+
 export function Events() {
   const [source, setSource] = useState<'usage' | 'audit'>('usage');
   const [exporting, setExporting] = useState(false);
@@ -16,21 +55,30 @@ export function Events() {
     error?: string;
     truncated?: boolean;
     ranged?: boolean;
+    rows?: number;
   } | null>(null);
-  // Optional UTC days: the API takes `to` as a whole day, so From = To exports that one day.
+  // Optional local days, as the table shows times: From's midnight up to the midnight after To.
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const backwards = !!from && !!to && from > to;
   // The current view: the tab shown. The API caps one file at its newest 100,000 rows.
   const exportCsv = async () => {
+    if (backwards) return;
     setExporting(true);
     setExported(null);
-    const range = `${from ? `&from=${from}` : ''}${to ? `&to=${to}` : ''}`;
+    const bound = (name: string, day: string, addDays: number) =>
+      day ? `&${name}=${encodeURIComponent(localDayStart(day, addDays))}` : '';
+    const range = `${bound('from', from, 0)}${bound('to', to, 1)}`;
     try {
-      const headers = await download(
+      const { headers, blob } = await download(
         `/v1/events.csv?source=${source}${range}`,
         `spend-brake-${source === 'usage' ? 'requests' : 'audit'}.csv`,
       );
-      setExported({ truncated: headers.get('x-brake-truncated') === 'true', ranged: !!range });
+      setExported({
+        truncated: headers.get('x-brake-truncated') === 'true',
+        ranged: !!range,
+        rows: csvDataRows(await blob.text()),
+      });
     } catch (err) {
       setExported({ error: (err as Error).message });
     } finally {
@@ -95,18 +143,20 @@ export function Events() {
               onChange={(e) => setTo(e.target.value)}
             />
           </label>
-          <button type="button" disabled={exporting} onClick={() => void exportCsv()}>
+          <button type="button" disabled={exporting || backwards} onClick={() => void exportCsv()}>
             {exporting ? 'Exporting…' : 'Export CSV'}
           </button>
         </div>
       </div>
       <p className="muted" role="status">
-        {exported?.error ? (
+        {backwards ? (
+          <span className="error">From is after To. Pick a From date on or before To.</span>
+        ) : exported?.error ? (
           <span className="error">Export failed: {exported.error}</span>
         ) : exported?.truncated ? (
           'Exported the newest 100,000 rows, the most one file holds. Older rows are left out: set an earlier To date to get them.'
         ) : exported ? (
-          `Exported every ${source === 'usage' ? 'request' : 'audit log entry'}${exported.ranged ? ' in the dates picked (UTC days)' : ''} (times in UTC).`
+          exportedText(source, exported.rows ?? 0, !!exported.ranged)
         ) : null}
       </p>
       {q.isError && <p className="error">{q.error.message}</p>}

@@ -240,6 +240,14 @@ describe('error contract', () => {
     expect((await textSearch(bidi.token)).json<{ message: string }>().message).toBe(
       `Spending is switched off for key "opsevil x" (${bidi.id}). Stop.`,
     );
+    // Line and paragraph separators become spaces; zero-width characters are dropped.
+    const hidden = await newKey(h, org, {
+      name: 'a\u2028b\u2029c\u200Bd\u200Ce\u200Df\u2060g\uFEFFh',
+    });
+    await engine.kill(org, { kind: 'key', id: hidden.id });
+    expect((await textSearch(hidden.token)).json<{ message: string }>().message).toBe(
+      `Spending is switched off for key "a b cdefgh" (${hidden.id}). Stop.`,
+    );
     await engine.unkill(org, { kind: 'key', id });
     await engine.kill(org, { kind: 'sess', id: 'bad-run' });
     expect((await textSearch(token, { 'x-brake-session': 'bad-run' })).statusCode).toBe(403);

@@ -32,7 +32,11 @@ same filters: `source` (`usage`, the default, or `audit`), `type`, `keyId`, and 
   `2026-10-31T11:00:00+02:00`; write `+` as `%2B` in a URL), or a plain date. A plain `from` date
   starts at 00:00 UTC; a plain `to` date takes in that whole day, up to 00:00 UTC the next day.
   So `from=2026-10-01&to=2026-10-31` is all of October (UTC). A time without `Z` or an offset is
-  refused.
+  refused. The dashboard's From / To are the browser's local days: it sends From's local
+  midnight and the midnight after To, with their offsets.
+- **File name:** `spend-brake-requests-<from>_<to>.csv` (or `-audit-`) for a range, by the days
+  as written; a `to` at midnight is exclusive, so the name shows the day before. `start` or
+  `now` stands in for a bound left out, and an export without bounds is named by today's date.
 
 - **Row cap:** one export holds at most 100,000 rows (the newest). The `X-Brake-Truncated: true`
   header says more rows matched; export earlier ranges with `to` to get them.

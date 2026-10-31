@@ -114,11 +114,24 @@ encrypted credentials; it is useless without `BRAKE_MASTER_KEY`, which is not in
 
 The API and worker apply database migrations on start (one at a time, under a lock).
 
+If the release changes `infra/Caddyfile`, recreate Caddy after `up`:
+`docker compose ... up -d --force-recreate caddy`. The Caddyfile is mounted as a single file,
+and `git pull` replaces it with a new file rather than editing it in place, so the container
+keeps seeing the old one and `caddy reload` reloads stale settings. (A directory mount would
+avoid this, but it would move the file existing installs have customized; recreating is one
+command.)
+
 ### Upgrading and rolling back
 
 - **Back up first**, every time (section 5). The backup is your rollback.
-- **Roll back by restoring that backup**, then start the previous version:
-  `scripts/restore.sh backups/<timestamp>`, check out the previous release, build and `up -d`.
+- **Roll back by restoring that backup into the previous version:**
+  1. Check out the previous release and build its images (`docker compose ... build`, or load
+     them if you keep release images). Don't `up` yet: the running services are not touched.
+  2. Run `scripts/restore.sh backups/<timestamp>`. It stops the services, swaps the data in and
+     starts them again, now on the previous release's images, so the newer version never runs
+     on the restored data. To start them yourself instead, run it with `NO_START=1`.
+- Keys created after the backup are not in it and stop working (401) after the rollback;
+  create them again. Changes made since (caps, kills, names, members) are undone too.
 - Starting the old images on the upgraded data is not a rollback. Migrations only move
   forward, and a newer API rewrites the Valkey records the proxy reads at start-up. Builds
   from this release on ignore record fields they don't know, but older builds may refuse them

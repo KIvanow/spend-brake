@@ -32,7 +32,10 @@ const cursor = {
 };
 
 /** An ISO 8601 time with `Z` or an offset (`+02:00`), or a plain date (a UTC day). */
-const instant = z.union([z.iso.datetime({ offset: true }), z.iso.date()]);
+const instant = (param: 'from' | 'to') =>
+  z.union([z.iso.datetime({ offset: true }), z.iso.date()], {
+    error: `${param} must be an ISO 8601 time with Z or an offset (2026-10-31T00:00:00+02:00) or a date (2026-10-31).`,
+  });
 const PLAIN_DATE = /^\d{4}-\d{2}-\d{2}$/;
 /** A plain `from` date starts at 00:00 UTC that day. */
 const fromTime = (v: string) => new Date(PLAIN_DATE.test(v) ? `${v}T00:00:00Z` : v);
@@ -49,18 +52,33 @@ const eventFilters = {
   source: z.enum(['usage', 'audit']).default('usage'),
   type: z.string().max(64).optional(),
   keyId: id.optional(),
-  from: instant.optional().openapi({
+  from: instant('from').optional().openapi({
     description:
       'Inclusive lower bound on the event time: ISO 8601 with Z or an offset, or a date (00:00 UTC).',
     example: '2026-10-01',
   }),
-  to: instant.optional().openapi({
+  to: instant('to').optional().openapi({
     description:
       'Exclusive upper bound on the event time: ISO 8601 with Z or an offset, or a date (through the end of that day, UTC).',
     example: '2026-10-31T18:00:00+02:00',
   }),
 };
 type EventFilters = z.output<z.ZodObject<typeof eventFilters>>;
+
+/**
+ * The days an export covers, for its file name, as the caller wrote them: `from`'s date, and the
+ * last day before `to` (a `to` at midnight, such as the next local day, is exclusive).
+ */
+function rangeLabel(q: EventFilters): string | null {
+  if (!q.from && !q.to) return null;
+  let last = q.to?.slice(0, 10);
+  if (q.to && !PLAIN_DATE.test(q.to) && /^T00:00(?::00(?:\.0+)?)?(?:Z|[+-])/.test(q.to.slice(10))) {
+    const d = new Date(`${last}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() - 1);
+    last = d.toISOString().slice(0, 10);
+  }
+  return `${q.from?.slice(0, 10) ?? 'start'}_${last ?? 'now'}`;
+}
 
 function usageWhere(orgId: string, q: EventFilters): SQL[] {
   const where = [eq(usageEvents.orgId, orgId)];
@@ -377,12 +395,13 @@ export function ledgerRoutes(r: Router, ctx: Ctx): void {
               .from(usageEvents)
               .where(and(...usageWhere(auth.orgId, query)));
       const truncated = (await probe.offset(CSV_ROW_CAP).limit(1)).length > 0;
-      const day = ctx.now().toISOString().slice(0, 10);
+      // Named by the range picked, or by today's date for everything.
+      const days = rangeLabel(query) ?? ctx.now().toISOString().slice(0, 10);
       reply
         .type('text/csv; charset=utf-8')
         .header(
           'content-disposition',
-          `attachment; filename="spend-brake-${query.source === 'audit' ? 'audit' : 'requests'}-${day}.csv"`,
+          `attachment; filename="spend-brake-${query.source === 'audit' ? 'audit' : 'requests'}-${days}.csv"`,
         )
         .header('cache-control', 'no-store')
         .header('x-brake-truncated', truncated ? 'true' : 'false');

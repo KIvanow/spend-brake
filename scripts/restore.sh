@@ -2,6 +2,8 @@
 # Restore a backup made by scripts/backup.sh into a Compose install, replacing its data:
 #   scripts/restore.sh backups/20261030T120000Z
 # Spend recorded after the backup was taken is not in it: live counters go back to that time.
+# Services start again at the end; NO_START=1 leaves them stopped (Postgres and Valkey stay up),
+# for example to start a different release on the restored data yourself.
 set -euo pipefail
 COMPOSE_FILES="${COMPOSE_FILES:--f infra/docker-compose.yml}"
 ENV_FILE="${ENV_FILE:-infra/.env}"
@@ -36,5 +38,9 @@ docker run --rm -v "$volume:/data" -v "$(cd "$dir" && pwd):/backup:ro" valkey/va
   valkey-cli -p 6399 shutdown
   while valkey-cli -p 6399 ping >/dev/null 2>&1; do sleep 0.2; done
   chown -R valkey:valkey /data'
+if [ "${NO_START:-}" = 1 ]; then
+  echo "Restored from $dir. Services left stopped: start them with docker compose ... up -d --wait."
+  exit 0
+fi
 compose up -d --wait
 echo "Restored from $dir."

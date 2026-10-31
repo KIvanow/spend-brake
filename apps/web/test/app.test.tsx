@@ -3,6 +3,7 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../src/App.js';
+import { localDayStart } from '../src/pages/Events.js';
 import { getToken, setToken, takeSsoToken, toMicros, usd } from '../src/api.js';
 
 interface Call {
@@ -439,6 +440,7 @@ describe('dashboard', () => {
     const json = globalThis.fetch;
     const csvCalls: { url: string; auth: string | undefined }[] = [];
     let truncated = 'false';
+    let body = '\uFEFFtime_utc,type\r\n';
     vi.stubGlobal('fetch', (input: string, init: RequestInit = {}) => {
       if (!String(input).startsWith('/v1/events.csv')) return json(input, init);
       csvCalls.push({
@@ -446,7 +448,7 @@ describe('dashboard', () => {
         auth: (init.headers as Record<string, string> | undefined)?.authorization,
       });
       return Promise.resolve(
-        new Response('\uFEFFtime_utc,type\r\n', {
+        new Response(body, {
           headers: {
             'content-type': 'text/csv; charset=utf-8',
             'content-disposition': 'attachment; filename="spend-brake-audit-2026-10-31.csv"',
@@ -475,7 +477,9 @@ describe('dashboard', () => {
     await user.click(screen.getByRole('button', { name: 'Events' }));
     await user.click(await screen.findByRole('tab', { name: 'Audit log' }));
     await user.click(screen.getByRole('button', { name: 'Export CSV' }));
-    expect(await screen.findByText(/Exported every audit log entry/)).toBeTruthy();
+    expect(
+      await screen.findByText('No audit log entries: the file has only the header row.'),
+    ).toBeTruthy();
     expect(csvCalls).toEqual([{ url: '/v1/events.csv?source=audit', auth: 'Bearer sbt_good' }]);
     // The file is saved byte for byte, byte order mark included.
     expect([...new Uint8Array(await created[0]!.arrayBuffer()).subarray(0, 3)]).toEqual([
@@ -489,14 +493,51 @@ describe('dashboard', () => {
     expect(await screen.findByText(/newest 100,000 rows/)).toBeTruthy();
     expect(screen.getByText(/set an earlier To date/)).toBeTruthy();
 
-    // Optional From / To days go to the API as from / to.
+    // From / To are local days: From's midnight up to the midnight after To, with offsets
+    // (Sofia leaves summer time on 2026-10-25, so the two offsets differ).
     truncated = 'false';
-    await user.type(screen.getByLabelText('From'), '2026-10-01');
-    await user.type(screen.getByLabelText('To'), '2026-10-31');
-    await user.click(screen.getByRole('button', { name: 'Export CSV' }));
-    expect(await screen.findByText(/in the dates picked \(UTC days\)/)).toBeTruthy();
-    expect(csvCalls.at(-1)!.url).toBe('/v1/events.csv?source=audit&from=2026-10-01&to=2026-10-31');
+    body =
+      '\uFEFFtime_utc,type\r\n2026-10-02T00:00:00.000Z,"a ""b""\r\nc"\r\n2026-10-01T00:00:00.000Z,x\r\n';
+    const tz = process.env.TZ;
+    process.env.TZ = 'Europe/Sofia';
+    try {
+      await user.type(screen.getByLabelText('From'), '2026-10-01');
+      await user.type(screen.getByLabelText('To'), '2026-10-31');
+      await user.click(screen.getByRole('button', { name: 'Export CSV' }));
+      expect(
+        await screen.findByText(
+          'Exported 2 audit log entries in the dates picked (your local days). Times in the file are UTC.',
+        ),
+      ).toBeTruthy();
+      expect(csvCalls.at(-1)!.url).toBe(
+        '/v1/events.csv?source=audit&from=2026-10-01T00%3A00%3A00%2B03%3A00&to=2026-11-01T00%3A00%3A00%2B02%3A00',
+      );
+      // From after To is refused before anything is sent.
+      await user.clear(screen.getByLabelText('From'));
+      await user.type(screen.getByLabelText('From'), '2026-11-02');
+      expect(screen.getByText(/From is after To/)).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Export CSV' })).toHaveProperty('disabled', true);
+    } finally {
+      restoreTz(tz);
+    }
     click.mockRestore();
+  });
+
+  it('turns a local day into its midnight with the offset', () => {
+    const tz = process.env.TZ;
+    try {
+      process.env.TZ = 'America/Los_Angeles';
+      expect(localDayStart('2026-10-31')).toBe('2026-10-31T00:00:00-07:00');
+      expect(localDayStart('2026-10-31', 1)).toBe('2026-11-01T00:00:00-07:00');
+      expect(localDayStart('2026-11-01', 1)).toBe('2026-11-02T00:00:00-08:00');
+      expect(localDayStart('2026-12-31', 1)).toBe('2027-01-01T00:00:00-08:00');
+      process.env.TZ = 'Asia/Kolkata';
+      expect(localDayStart('2026-10-31')).toBe('2026-10-31T00:00:00+05:30');
+      process.env.TZ = 'UTC';
+      expect(localDayStart('2026-10-31')).toBe('2026-10-31T00:00:00+00:00');
+    } finally {
+      restoreTz(tz);
+    }
   });
 
   it('notes an org monthly hard cap on Billing, with a link to Caps', async () => {
@@ -612,3 +653,9 @@ describe('dashboard', () => {
     window.location.hash = '';
   });
 });
+
+/** Put the process time zone back (an unset TZ must stay unset, not become "undefined"). */
+function restoreTz(tz: string | undefined): void {
+  if (tz === undefined) delete process.env.TZ;
+  else process.env.TZ = tz;
+}

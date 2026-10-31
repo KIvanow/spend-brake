@@ -679,6 +679,19 @@ describe('ledger queries', () => {
         .slice(1)
         .map((r) => r[0]),
     ).toEqual(['2026-10-29T07:00:00.000Z']);
+    // A ranged file is named by its days; a `to` at midnight is exclusive, so the day before.
+    expect(ranged.headers['content-disposition']).toBe(
+      'attachment; filename="spend-brake-requests-2026-10-29_2026-10-29.csv"',
+    );
+    const named = async (query: string) =>
+      (await call(org.viewer, { url: `/v1/events.csv?${query}` })).headers['content-disposition'];
+    // Local days from the dashboard: midnight to the next midnight, with the offset.
+    expect(
+      await named('source=audit&from=2026-10-01T00:00:00%2B03:00&to=2026-11-01T00:00:00%2B02:00'),
+    ).toBe('attachment; filename="spend-brake-audit-2026-10-01_2026-10-31.csv"');
+    expect(await named('from=2026-10-01&to=2026-10-31')).toMatch(/-2026-10-01_2026-10-31\.csv"$/);
+    expect(await named('to=2026-10-31T18:00:00Z')).toMatch(/-start_2026-10-31\.csv"$/);
+    expect(await named('from=2026-10-01')).toMatch(/-2026-10-01_now\.csv"$/);
     const times = async (query: string) =>
       parseCsv((await call(org.viewer, { url: `/v1/events.csv?${query}` })).body)
         .slice(1)
@@ -705,7 +718,17 @@ describe('ledger queries', () => {
     // Another org sees only its own rows.
     const other = await call(b.viewer, { url: '/v1/events.csv' });
     expect(other.body).not.toContain(k.id);
-    expect((await call(org.viewer, { url: '/v1/events.csv?from=yesterday' })).statusCode).toBe(400);
+    const bad = await call(org.viewer, { url: '/v1/events.csv?from=yesterday' });
+    expect(bad.statusCode).toBe(400);
+    // A bad date names the parameter and the formats it takes.
+    const badDay = await call(org.viewer, { url: '/v1/events.csv?to=2026-02-30' });
+    expect(badDay.statusCode).toBe(400);
+    expect(badDay.json<{ issues: { path: string; message: string }[] }>().issues[0]).toEqual({
+      in: 'query',
+      path: 'to',
+      message:
+        'to must be an ISO 8601 time with Z or an offset (2026-10-31T00:00:00+02:00) or a date (2026-10-31).',
+    });
     // A time without Z or an offset is ambiguous.
     const local = await call(org.viewer, { url: '/v1/events.csv?from=2026-10-29T06:30:00' });
     expect(local.statusCode).toBe(400);
