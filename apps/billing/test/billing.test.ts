@@ -3,6 +3,8 @@ import { type LoginMail, buildApi, redeemLoginLink } from '@spend-brake/api';
 import { BudgetEngine, connectValkey, type ValkeyClient } from '@spend-brake/budget';
 import {
   type Db,
+  and,
+  auditLog,
   createDb,
   eq,
   issuedLicenses,
@@ -326,6 +328,55 @@ describe('sign-up and checkout', () => {
       event('customer.subscription.created', subscription(orgId, 'cus_lic', 'business', 'active')),
     );
     expect(await view()).toContain('business');
+  });
+
+  it("says the org cap is sign-up's only while it is unchanged", async () => {
+    const signupCap = async (token: string) =>
+      (await billing.inject({ url: '/v1/billing', headers: bearer(token) })).json<{
+        signupCap: boolean;
+      }>().signupCap;
+    const setCap = (token: string, hard: number) =>
+      api.inject({
+        method: 'PUT',
+        url: '/v1/caps/org',
+        headers: bearer(token),
+        payload: { month: { hard } },
+      });
+
+    const changed = await signup('free', '10.0.0.78');
+    expect(await signupCap(changed.ownerToken)).toBe(true);
+    expect((await setCap(changed.ownerToken, 40_500_000)).statusCode).toBe(200);
+    expect(await signupCap(changed.ownerToken)).toBe(false);
+
+    // Removed, then set again at the same amount: a new cap, back at version 1.
+    const again = await signup('free', '10.0.0.79');
+    await post(
+      event(
+        'customer.subscription.created',
+        subscription(again.orgId, 'cus_cap', 'team', 'active'),
+      ),
+    );
+    const removed = await api.inject({
+      method: 'DELETE',
+      url: '/v1/caps/org',
+      headers: bearer(again.ownerToken),
+    });
+    expect(removed.statusCode, removed.body).toBe(200);
+    expect(await signupCap(again.ownerToken)).toBe(false);
+    const reset = await setCap(again.ownerToken, 50_000_000);
+    expect(reset.json()).toMatchObject({ items: [{ version: 1 }] });
+    expect(await signupCap(again.ownerToken)).toBe(false);
+
+    // The cap sign-up set is in the audit log.
+    const [entry] = await db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.orgId, again.orgId), eq(auditLog.actor, 'system')));
+    expect(entry).toMatchObject({
+      action: 'cap.set',
+      target: 'org:m',
+      data: { hard: 50_000_000, soft: null, version: 1, source: 'signup' },
+    });
   });
 
   it('only lets owners buy, and sends existing subscribers to the portal', async () => {

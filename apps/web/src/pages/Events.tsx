@@ -12,17 +12,25 @@ interface Page {
 export function Events() {
   const [source, setSource] = useState<'usage' | 'audit'>('usage');
   const [exporting, setExporting] = useState(false);
-  const [exported, setExported] = useState<{ error?: string; truncated?: boolean } | null>(null);
+  const [exported, setExported] = useState<{
+    error?: string;
+    truncated?: boolean;
+    ranged?: boolean;
+  } | null>(null);
+  // Optional UTC days: the API takes `to` as a whole day, so From = To exports that one day.
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
   // The current view: the tab shown. The API caps one file at its newest 100,000 rows.
   const exportCsv = async () => {
     setExporting(true);
     setExported(null);
+    const range = `${from ? `&from=${from}` : ''}${to ? `&to=${to}` : ''}`;
     try {
       const headers = await download(
-        `/v1/events.csv?source=${source}`,
+        `/v1/events.csv?source=${source}${range}`,
         `spend-brake-${source === 'usage' ? 'requests' : 'audit'}.csv`,
       );
-      setExported({ truncated: headers.get('x-brake-truncated') === 'true' });
+      setExported({ truncated: headers.get('x-brake-truncated') === 'true', ranged: !!range });
     } catch (err) {
       setExported({ error: (err as Error).message });
     } finally {
@@ -69,6 +77,24 @@ export function Events() {
               </button>
             ))}
           </div>
+          <label>
+            From
+            <input
+              type="date"
+              value={from}
+              max={to || undefined}
+              onChange={(e) => setFrom(e.target.value)}
+            />
+          </label>
+          <label>
+            To
+            <input
+              type="date"
+              value={to}
+              min={from || undefined}
+              onChange={(e) => setTo(e.target.value)}
+            />
+          </label>
           <button type="button" disabled={exporting} onClick={() => void exportCsv()}>
             {exporting ? 'Exporting…' : 'Export CSV'}
           </button>
@@ -78,9 +104,9 @@ export function Events() {
         {exported?.error ? (
           <span className="error">Export failed: {exported.error}</span>
         ) : exported?.truncated ? (
-          'Exported the newest 100,000 rows, the most one file holds. Older rows are left out.'
+          'Exported the newest 100,000 rows, the most one file holds. Older rows are left out: set an earlier To date to get them.'
         ) : exported ? (
-          `Exported every ${source === 'usage' ? 'request' : 'audit log entry'} (times in UTC).`
+          `Exported every ${source === 'usage' ? 'request' : 'audit log entry'}${exported.ranged ? ' in the dates picked (UTC days)' : ''} (times in UTC).`
         ) : null}
       </p>
       {q.isError && <p className="error">{q.error.message}</p>}

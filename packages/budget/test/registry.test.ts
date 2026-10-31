@@ -66,6 +66,36 @@ describe('virtual keys', () => {
       registry.createKey({ id: 'k4', orgId: org, name: 'x'.repeat(201), credentials: {} }),
     ).rejects.toThrow();
   });
+
+  it('strip fields a newer build added instead of rejecting the record', async () => {
+    const org = newOrg();
+    const token = generateVirtualKey();
+    const hash = hashVirtualKey(token);
+    // A record as a later version might write it, with fields this build does not know.
+    await valkey.client.set(
+      `bk:vk:${hash}`,
+      JSON.stringify({
+        id: 'k5',
+        orgId: org,
+        credentials: { 'google-maps': 'cred1' },
+        futureField: 'x',
+        loop: { identical: 5, windowSec: 60, perMinute: 100, cooldownSec: 60, futureToo: 1 },
+      }),
+    );
+    const read = await registry.getKeyByToken(token);
+    expect(read).toMatchObject({ id: 'k5', loop: { identical: 5 } });
+    expect(read).not.toHaveProperty('futureField');
+    expect(read?.loop).not.toHaveProperty('futureToo');
+
+    // The API's resync spreads the Postgres config, which may carry newer fields too.
+    const written = await registry.putKeyByHash(hash, {
+      id: 'k5',
+      orgId: org,
+      credentials: {},
+      futureField: 'x',
+    } as Parameters<Registry['putKeyByHash']>[1]);
+    expect(written).not.toHaveProperty('futureField');
+  });
 });
 
 describe('orgs', () => {
@@ -79,5 +109,16 @@ describe('orgs', () => {
       loop: { identical: 20, windowSec: 60, perMinute: 300, cooldownSec: 600 },
     });
     expect(await registry.getOrg(newOrg())).toBeNull();
+  });
+
+  it('strip unknown fields from records a newer build wrote', async () => {
+    const org = newOrg();
+    await valkey.client.set(
+      `bk:{o:${org}}:org`,
+      JSON.stringify({ id: org, futureField: true, providers: { twilio: { futureToo: 1 } } }),
+    );
+    const read = await registry.getOrg(org);
+    expect(read).not.toHaveProperty('futureField');
+    expect(read?.providers.twilio).toEqual({ trustFreeTier: false, unpricedPolicy: 'deny' });
   });
 });

@@ -23,6 +23,8 @@ interface BillingView {
     agentSessionsThisMonth: number;
     requestsThisMonth: number;
   };
+  /** The org month cap is still the one sign-up set, unchanged since. */
+  signupCap?: boolean;
   plans: { id: string; name: string }[];
   licenses: { id: string; edition: string; expiresAt: string; issuedAt: string }[];
 }
@@ -112,9 +114,8 @@ export function Billing() {
       {orgCap && (
         <p className="callout" role="note">
           Your org has a {usd(orgCap.hard, orgCap.hard! % 1_000_000 === 0 ? 0 : 2)}/month hard cap
-          {/* Version 1: the cap is as sign-up wrote it, never changed since. */}
-          {orgCap.version === 1 ? ' (set at sign-up)' : ''}. Calls stop when it&apos;s reached.
-          Change it on <a href="#/caps">Caps</a>.
+          {b.signupCap ? ' (set at sign-up)' : ''}. Calls stop when it&apos;s reached. Change it on{' '}
+          <a href="#/caps">Caps</a>.
         </p>
       )}
       {b.limits && (

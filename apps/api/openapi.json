@@ -2219,19 +2219,41 @@
           },
           {
             "schema": {
-              "type": "string",
-              "format": "date-time"
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "string",
+                  "format": "date"
+                }
+              ],
+              "description": "Inclusive lower bound on the event time: ISO 8601 with Z or an offset, or a date (00:00 UTC).",
+              "example": "2026-10-01"
             },
             "required": false,
+            "description": "Inclusive lower bound on the event time: ISO 8601 with Z or an offset, or a date (00:00 UTC).",
             "name": "from",
             "in": "query"
           },
           {
             "schema": {
-              "type": "string",
-              "format": "date-time"
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "string",
+                  "format": "date"
+                }
+              ],
+              "description": "Exclusive upper bound on the event time: ISO 8601 with Z or an offset, or a date (through the end of that day, UTC).",
+              "example": "2026-10-31T18:00:00+02:00"
             },
             "required": false,
+            "description": "Exclusive upper bound on the event time: ISO 8601 with Z or an offset, or a date (through the end of that day, UTC).",
             "name": "to",
             "in": "query"
           },
@@ -2364,19 +2386,41 @@
           },
           {
             "schema": {
-              "type": "string",
-              "format": "date-time"
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "string",
+                  "format": "date"
+                }
+              ],
+              "description": "Inclusive lower bound on the event time: ISO 8601 with Z or an offset, or a date (00:00 UTC).",
+              "example": "2026-10-01"
             },
             "required": false,
+            "description": "Inclusive lower bound on the event time: ISO 8601 with Z or an offset, or a date (00:00 UTC).",
             "name": "from",
             "in": "query"
           },
           {
             "schema": {
-              "type": "string",
-              "format": "date-time"
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "string",
+                  "format": "date"
+                }
+              ],
+              "description": "Exclusive upper bound on the event time: ISO 8601 with Z or an offset, or a date (through the end of that day, UTC).",
+              "example": "2026-10-31T18:00:00+02:00"
             },
             "required": false,
+            "description": "Exclusive upper bound on the event time: ISO 8601 with Z or an offset, or a date (through the end of that day, UTC).",
             "name": "to",
             "in": "query"
           }

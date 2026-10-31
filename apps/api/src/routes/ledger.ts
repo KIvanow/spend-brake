@@ -31,15 +31,34 @@ const cursor = {
   },
 };
 
+/** An ISO 8601 time with `Z` or an offset (`+02:00`), or a plain date (a UTC day). */
+const instant = z.union([z.iso.datetime({ offset: true }), z.iso.date()]);
+const PLAIN_DATE = /^\d{4}-\d{2}-\d{2}$/;
+/** A plain `from` date starts at 00:00 UTC that day. */
+const fromTime = (v: string) => new Date(PLAIN_DATE.test(v) ? `${v}T00:00:00Z` : v);
+/** A plain `to` date includes that whole UTC day: the bound is 00:00 UTC the next day. */
+function toTime(v: string): Date {
+  if (!PLAIN_DATE.test(v)) return new Date(v);
+  const d = new Date(`${v}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d;
+}
+
 /** Filters shared by /v1/events and /v1/events.csv. */
 const eventFilters = {
   source: z.enum(['usage', 'audit']).default('usage'),
   type: z.string().max(64).optional(),
   keyId: id.optional(),
-  /** Inclusive lower bound on the event time (ISO 8601). */
-  from: z.iso.datetime().optional(),
-  /** Exclusive upper bound on the event time (ISO 8601). */
-  to: z.iso.datetime().optional(),
+  from: instant.optional().openapi({
+    description:
+      'Inclusive lower bound on the event time: ISO 8601 with Z or an offset, or a date (00:00 UTC).',
+    example: '2026-10-01',
+  }),
+  to: instant.optional().openapi({
+    description:
+      'Exclusive upper bound on the event time: ISO 8601 with Z or an offset, or a date (through the end of that day, UTC).',
+    example: '2026-10-31T18:00:00+02:00',
+  }),
 };
 type EventFilters = z.output<z.ZodObject<typeof eventFilters>>;
 
@@ -47,16 +66,16 @@ function usageWhere(orgId: string, q: EventFilters): SQL[] {
   const where = [eq(usageEvents.orgId, orgId)];
   if (q.type) where.push(eq(usageEvents.type, q.type));
   if (q.keyId) where.push(eq(usageEvents.keyId, q.keyId));
-  if (q.from) where.push(gte(usageEvents.ts, new Date(q.from)));
-  if (q.to) where.push(lt(usageEvents.ts, new Date(q.to)));
+  if (q.from) where.push(gte(usageEvents.ts, fromTime(q.from)));
+  if (q.to) where.push(lt(usageEvents.ts, toTime(q.to)));
   return where;
 }
 
 function auditWhere(orgId: string, q: EventFilters): SQL[] {
   const where = [eq(auditLog.orgId, orgId)];
   if (q.type) where.push(eq(auditLog.action, q.type));
-  if (q.from) where.push(gte(auditLog.at, new Date(q.from)));
-  if (q.to) where.push(lt(auditLog.at, new Date(q.to)));
+  if (q.from) where.push(gte(auditLog.at, fromTime(q.from)));
+  if (q.to) where.push(lt(auditLog.at, toTime(q.to)));
   return where;
 }
 
@@ -85,6 +104,8 @@ const USAGE_CSV = [
   'data',
 ];
 const AUDIT_CSV = ['time_utc', 'actor', 'action', 'target', 'reason', 'data'];
+/** A UTF-8 byte order mark first, so Excel reads the file as UTF-8 (names in any script). */
+const BOM = '\uFEFF';
 
 const json = (v: unknown): string | null =>
   v === null || v === undefined || (typeof v === 'object' && Object.keys(v).length === 0)
@@ -107,7 +128,7 @@ function usdOf(m: bigint | null): number | null {
 export function ledgerRoutes(r: Router, ctx: Ctx): void {
   /** Usage rows, newest first, in batches by keyset, with each key's current name. */
   async function* usageCsv(orgId: string, q: EventFilters): AsyncGenerator<string> {
-    yield csvRow(USAGE_CSV);
+    yield BOM + csvRow(USAGE_CSV);
     let after: { ts: Date; streamId: string } | null = null;
     let left = CSV_ROW_CAP;
     while (left > 0) {
@@ -164,7 +185,7 @@ export function ledgerRoutes(r: Router, ctx: Ctx): void {
   }
 
   async function* auditCsv(orgId: string, q: EventFilters): AsyncGenerator<string> {
-    yield csvRow(AUDIT_CSV);
+    yield BOM + csvRow(AUDIT_CSV);
     let before: bigint | null = null;
     let left = CSV_ROW_CAP;
     while (left > 0) {

@@ -629,6 +629,9 @@ describe('ledger queries', () => {
     );
     expect(res.headers['x-brake-truncated']).toBe('false');
     expect(res.body.endsWith('\r\n')).toBe(true);
+    // A UTF-8 byte order mark first, so Excel reads non-ASCII names correctly.
+    expect([...res.rawPayload.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
+    expect(res.body.startsWith('\uFEFFtime_utc,')).toBe(true);
     const [header, ...rows] = parseCsv(res.body);
     expect(header).toEqual([
       'time_utc',
@@ -676,6 +679,17 @@ describe('ledger queries', () => {
         .slice(1)
         .map((r) => r[0]),
     ).toEqual(['2026-10-29T07:00:00.000Z']);
+    const times = async (query: string) =>
+      parseCsv((await call(org.viewer, { url: `/v1/events.csv?${query}` })).body)
+        .slice(1)
+        .map((r) => r[0]);
+    // Offsets and plain dates: a plain `to` date takes in that whole UTC day.
+    expect(await times('from=2026-10-29T08:30:00%2B02:00&to=2026-10-29')).toEqual([
+      '2026-10-29T07:00:00.000Z',
+    ]);
+    expect(await times('to=2026-10-29')).toHaveLength(2);
+    expect(await times('from=2026-10-30')).toEqual(['2026-10-30T07:00:00.000Z']);
+    expect(await times('source=audit&to=2000-01-01')).toEqual([]);
     const typed = await call(org.viewer, { url: '/v1/events.csv?type=adjustment' });
     expect(parseCsv(typed.body)).toHaveLength(2);
     // The JSON list takes the same time bounds.
@@ -692,6 +706,9 @@ describe('ledger queries', () => {
     const other = await call(b.viewer, { url: '/v1/events.csv' });
     expect(other.body).not.toContain(k.id);
     expect((await call(org.viewer, { url: '/v1/events.csv?from=yesterday' })).statusCode).toBe(400);
+    // A time without Z or an offset is ambiguous.
+    const local = await call(org.viewer, { url: '/v1/events.csv?from=2026-10-29T06:30:00' });
+    expect(local.statusCode).toBe(400);
   });
 
   it('caps a CSV export and says so', async () => {
@@ -705,6 +722,7 @@ describe('ledger queries', () => {
     expect(res.headers['x-brake-truncated']).toBe('true');
     const lines = res.body.split('\r\n').filter(Boolean);
     expect(lines).toHaveLength(CSV_ROW_CAP + 1);
+    expect(lines[0]!.startsWith('\uFEFFtime_utc,')).toBe(true);
     // The newest rows, in order across batches.
     expect(lines[1]).toMatch(/^2026-10-02T03:46:45\.000Z,/);
     expect(new Set(lines).size).toBe(lines.length);
@@ -715,7 +733,9 @@ describe('ledger queries', () => {
 });
 
 /** A strict RFC 4180 reader, enough to check the export round-trips. */
-function parseCsv(text: string): string[][] {
+function parseCsv(withBom: string): string[][] {
+  expect(withBom.startsWith('\uFEFF')).toBe(true);
+  const text = withBom.slice(1);
   const rows: string[][] = [];
   let row: string[] = [];
   let cell = '';

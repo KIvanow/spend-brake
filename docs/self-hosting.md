@@ -113,7 +113,18 @@ encrypted credentials; it is useless without `BRAKE_MASTER_KEY`, which is not in
 3. `git pull` the release, then `docker compose ... build && docker compose ... up -d --wait`.
 
 The API and worker apply database migrations on start (one at a time, under a lock).
-Migrations only move forward: to roll back, restore the backup and start the previous version.
+
+### Upgrading and rolling back
+
+- **Back up first**, every time (section 5). The backup is your rollback.
+- **Roll back by restoring that backup**, then start the previous version:
+  `scripts/restore.sh backups/<timestamp>`, check out the previous release, build and `up -d`.
+- Starting the old images on the upgraded data is not a rollback. Migrations only move
+  forward, and a newer API rewrites the Valkey records the proxy reads at start-up. Builds
+  from this release on ignore record fields they don't know, but older builds may refuse them
+  and block every call.
+- Spend recorded since the backup is not in it (section 5), so caps can let that much through
+  again after the restore.
 
 ## 7. Scaling and high availability
 

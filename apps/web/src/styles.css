@@ -751,6 +751,13 @@ section > p.muted.empty {
   align-items: center;
   gap: 8px 12px;
 }
+.tools label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
 .seg {
   display: inline-flex;
   gap: 2px;

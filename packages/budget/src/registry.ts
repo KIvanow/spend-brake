@@ -9,25 +9,29 @@ import type { ValkeyClient } from './scripts.js';
 //
 // Virtual keys are looked up by hash before the org is known, so `bk:vk:<sha256>` is the one
 // record outside an org hash tag. It is a single-key GET and never touched by a Lua script.
+//
+// These records are shared across versions (a newer API may write them for an older proxy, and a
+// rollback reads records a newer build wrote), so the schemas strip unknown fields instead of
+// rejecting them: a field added later must not break a build that predates it.
 
 const id = z.string().regex(/^[A-Za-z0-9_.-]{1,128}$/);
 const micros = z.string().regex(/^\d{1,16}$/);
 
-const loopPolicy = z.strictObject({
+const loopPolicy = z.object({
   identical: z.number().int().positive(),
   windowSec: z.number().int().positive(),
   perMinute: z.number().int().positive(),
   cooldownSec: z.number().int().positive(),
 });
 
-export const orgRecordSchema = z.strictObject({
+export const orgRecordSchema = z.object({
   id,
   /** Day and month cap windows are cut in this zone. */
   timeZone: z.string().default('UTC'),
   providers: z
     .record(
       z.string(),
-      z.strictObject({
+      z.object({
         trustFreeTier: z.boolean().default(false),
         unpricedPolicy: z.enum(['deny', 'allow-with-default-price']).default('deny'),
         /** Micros charged for an unpriced route when the policy allows it. */
@@ -38,7 +42,7 @@ export const orgRecordSchema = z.strictObject({
   loop: loopPolicy.default(DEFAULT_LOOP_POLICY),
 });
 
-export const keyRecordSchema = z.strictObject({
+export const keyRecordSchema = z.object({
   id,
   orgId: id,
   /**
@@ -72,7 +76,7 @@ export const keyRecordSchema = z.strictObject({
     .nullable()
     .default(null),
   pumping: z
-    .strictObject({
+    .object({
       perNumberPerHour: z.number().int().positive(),
       perPrefixPerHour: z.number().int().positive(),
       cooldownSec: z.number().int().positive(),

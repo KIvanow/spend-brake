@@ -17,9 +17,13 @@ import type { ValkeyClient } from '@spend-brake/budget';
 import {
   type Db,
   and,
+  auditLog,
+  caps,
   desc,
   eq,
+  gt,
   gte,
+  inArray,
   isNull,
   issuedLicenses,
   orgs,
@@ -267,6 +271,51 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
       .orderBy(desc(issuedLicenses.issuedAt))
       .limit(10);
     const limits = LIMITS[plan?.plan ?? 'free'];
+    const [signupMark] = await deps.db
+      .select({ id: auditLog.id, at: auditLog.at, data: auditLog.data })
+      .from(auditLog)
+      .where(
+        and(
+          eq(auditLog.orgId, a.orgId),
+          eq(auditLog.actor, 'system'),
+          eq(auditLog.action, 'cap.set'),
+          eq(auditLog.target, 'org:m'),
+          sql`${auditLog.data}->>'source' = 'signup'`,
+        ),
+      )
+      .orderBy(desc(auditLog.id))
+      .limit(1);
+    const [orgCap] = await deps.db
+      .select()
+      .from(caps)
+      .where(and(eq(caps.orgId, a.orgId), eq(caps.scope, 'org'), eq(caps.kind, 'm')))
+      .limit(1);
+    const [changedSince] = signupMark
+      ? await deps.db
+          .select({ id: auditLog.id })
+          .from(auditLog)
+          .where(
+            and(
+              eq(auditLog.orgId, a.orgId),
+              gt(auditLog.id, signupMark.id),
+              sql`${auditLog.action} like 'cap.%'`,
+              inArray(auditLog.target, ['org', 'org:m']),
+            ),
+          )
+          .limit(1)
+      : [];
+    const mark = signupMark?.data as { hard?: number; version?: number } | undefined;
+    // The org month cap is still the one sign-up wrote: no cap change audited since, same amount
+    // and version, and not written since (a cap removed and set again starts over at version 1).
+    const signupCap = Boolean(
+      signupMark &&
+      !changedSince &&
+      orgCap &&
+      orgCap.hardMicros !== null &&
+      Number(orgCap.hardMicros) === mark?.hard &&
+      orgCap.version === mark?.version &&
+      orgCap.updatedAt <= signupMark.at,
+    );
     // Where sign-up is open (the hosted service), self-hosted licenses are not offered to orgs
     // that use the hosted plans; an org that already has one keeps seeing it.
     const licensed =
@@ -288,6 +337,7 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
           }
         : null,
       usage,
+      signupCap,
       plans: offered.map((p) => ({ id: p, name: PLAN_NAMES[p] })),
       licenses: licenses.map((l) => ({
         ...l,
@@ -393,9 +443,16 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
         return result;
       });
       // The Free plan protects up to its monthly amount from the first request.
-      await writeCap(ctx, orgId, 'org', 'm', {
-        hard: LIMITS.free.maxOrgMonthCapMicros,
-        soft: null,
+      const capHard = LIMITS.free.maxOrgMonthCapMicros;
+      const capVersion = await writeCap(ctx, orgId, 'org', 'm', { hard: capHard, soft: null });
+      // Marks the cap as sign-up's, so Billing can say so while it stays unchanged.
+      await deps.db.insert(auditLog).values({
+        orgId,
+        actor: 'system',
+        action: 'cap.set',
+        target: 'org:m',
+        data: { hard: Number(capHard), soft: null, version: capVersion, source: 'signup' },
+        at: now(),
       });
       if (deps.signIn && created.ownerId) {
         await deps.signIn.mailer.send({

@@ -26,12 +26,21 @@ pnpm --filter @spend-brake/api bootstrap -- --org acme --name "Acme" --tz Europe
 
 `GET /v1/events.csv` (viewer) downloads the same events as `/v1/events`, newest first, with the
 same filters: `source` (`usage`, the default, or `audit`), `type`, `keyId`, and the time bounds
-`from` (inclusive) and `to` (exclusive), both ISO 8601. Both endpoints take `from`/`to`.
+`from` (inclusive) and `to` (exclusive). Both endpoints take `from`/`to`.
+
+- **Times:** ISO 8601 with `Z` or an offset (`2026-10-31T09:00:00Z`,
+  `2026-10-31T11:00:00+02:00`; write `+` as `%2B` in a URL), or a plain date. A plain `from` date
+  starts at 00:00 UTC; a plain `to` date takes in that whole day, up to 00:00 UTC the next day.
+  So `from=2026-10-01&to=2026-10-31` is all of October (UTC). A time without `Z` or an offset is
+  refused.
 
 - **Row cap:** one export holds at most 100,000 rows (the newest). The `X-Brake-Truncated: true`
   header says more rows matched; export earlier ranges with `to` to get them.
 - **Columns:** request rows carry `key_name` (the key's current name) next to `key_id`, the
   outcome, and the cost both in dollars (`cost_usd`, exact) and in micros. Times are UTC.
+- **Encoding:** UTF-8 with a byte order mark, so Excel shows names in any script. Excel in
+  locales that use `;` as the list separator (de-DE, bg-BG, ...) puts each row in one column
+  when you double-click the file; use Data > From Text/CSV and pick comma instead.
 - **Spreadsheet safety:** RFC 4180 quoting, CRLF line ends. Text cells starting with `=`, `+`,
   `-`, `@`, a tab or a carriage return get a leading `'`, so they never run as formulas.
 

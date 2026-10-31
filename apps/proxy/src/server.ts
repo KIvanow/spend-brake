@@ -88,11 +88,15 @@ const DEFAULT_SKU = 'unpriced';
 /**
  * How error messages name a key: `key "web app" (key_…)`, or by id alone when its record has no
  * name (written before records carried one). Names are the org's own labels, never request
- * data; control characters are dropped so the message stays one line.
+ * data; control characters are dropped so the message stays one line, and bidi marks, embeddings,
+ * overrides and isolates are dropped so a name cannot reorder the rest of the message on screen.
  */
 export function keyLabel(key: Pick<KeyRecord, 'id' | 'name'>): string {
-  // eslint-disable-next-line no-control-regex
-  const name = key.name?.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim();
+  const name = key.name
+    // eslint-disable-next-line no-control-regex
+    ?.replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ')
+    .replace(/[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '')
+    .trim();
   return name ? `key "${name}" (${key.id})` : `key ${key.id}`;
 }
 

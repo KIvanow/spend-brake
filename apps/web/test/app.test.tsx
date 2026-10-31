@@ -446,7 +446,7 @@ describe('dashboard', () => {
         auth: (init.headers as Record<string, string> | undefined)?.authorization,
       });
       return Promise.resolve(
-        new Response('time_utc,type\r\n', {
+        new Response('\uFEFFtime_utc,type\r\n', {
           headers: {
             'content-type': 'text/csv; charset=utf-8',
             'content-disposition': 'attachment; filename="spend-brake-audit-2026-10-31.csv"',
@@ -477,17 +477,30 @@ describe('dashboard', () => {
     await user.click(screen.getByRole('button', { name: 'Export CSV' }));
     expect(await screen.findByText(/Exported every audit log entry/)).toBeTruthy();
     expect(csvCalls).toEqual([{ url: '/v1/events.csv?source=audit', auth: 'Bearer sbt_good' }]);
-    expect(await created[0]!.text()).toBe('time_utc,type\r\n');
+    // The file is saved byte for byte, byte order mark included.
+    expect([...new Uint8Array(await created[0]!.arrayBuffer()).subarray(0, 3)]).toEqual([
+      0xef, 0xbb, 0xbf,
+    ]);
     expect(clicked[0]!.href).toBe('blob:test/1');
     expect(clicked[0]!.download).toBe('spend-brake-audit-2026-10-31.csv');
 
     truncated = 'true';
     await user.click(screen.getByRole('button', { name: 'Export CSV' }));
     expect(await screen.findByText(/newest 100,000 rows/)).toBeTruthy();
+    expect(screen.getByText(/set an earlier To date/)).toBeTruthy();
+
+    // Optional From / To days go to the API as from / to.
+    truncated = 'false';
+    await user.type(screen.getByLabelText('From'), '2026-10-01');
+    await user.type(screen.getByLabelText('To'), '2026-10-31');
+    await user.click(screen.getByRole('button', { name: 'Export CSV' }));
+    expect(await screen.findByText(/in the dates picked \(UTC days\)/)).toBeTruthy();
+    expect(csvCalls.at(-1)!.url).toBe('/v1/events.csv?source=audit&from=2026-10-01&to=2026-10-31');
     click.mockRestore();
   });
 
   it('notes an org monthly hard cap on Billing, with a link to Caps', async () => {
+    let signupCap = true;
     routes['GET /v1/billing'] = () => [
       200,
       {
@@ -498,6 +511,7 @@ describe('dashboard', () => {
         hasSubscription: true,
         limits: null,
         usage: { keys: 0, providers: 0, agentSessionsThisMonth: 0, requestsThisMonth: 0 },
+        signupCap,
         plans: [],
         licenses: [],
       },
@@ -513,6 +527,16 @@ describe('dashboard', () => {
       "Your org has a $50/month hard cap (set at sign-up). Calls stop when it's reached. Change it on Caps.",
     );
     expect(within(note).getByRole('link', { name: 'Caps' }).getAttribute('href')).toBe('#/caps');
+
+    // A cap the owner set later (also at version 1) is not labelled as sign-up's.
+    signupCap = false;
+    await user.click(screen.getByRole('button', { name: 'Keys' }));
+    await user.click(screen.getByRole('button', { name: 'Billing' }));
+    await waitFor(() =>
+      expect(screen.getByRole('note').textContent).toBe(
+        "Your org has a $50/month hard cap. Calls stop when it's reached. Change it on Caps.",
+      ),
+    );
   });
 
   it('charts spend and totals the period', async () => {

@@ -234,6 +234,12 @@ describe('error contract', () => {
       message: `Spending is switched off for key "store "locator" v2" (${named.id}). Stop.`,
       target: `key:${named.id}`,
     });
+    // Bidi overrides and isolates are dropped too, so a name cannot reorder the message.
+    const bidi = await newKey(h, org, { name: 'ops\u202Eevil\u2066 x\u2069\u200F' });
+    await engine.kill(org, { kind: 'key', id: bidi.id });
+    expect((await textSearch(bidi.token)).json<{ message: string }>().message).toBe(
+      `Spending is switched off for key "opsevil x" (${bidi.id}). Stop.`,
+    );
     await engine.unkill(org, { kind: 'key', id });
     await engine.kill(org, { kind: 'sess', id: 'bad-run' });
     expect((await textSearch(token, { 'x-brake-session': 'bad-run' })).statusCode).toBe(403);
@@ -654,7 +660,8 @@ describe('security', () => {
 
 describe('Valkey outage', () => {
   it('fails closed by default and fails open within the allowance when configured', async () => {
-    const side = await startProxy(valkeyUrl, mock, { configTtlMs: 1 });
+    // Only the explicit replay below runs: a timer replay racing it would record twice or first.
+    const side = await startProxy(valkeyUrl, mock, { configTtlMs: 1, replayIntervalMs: 3_600_000 });
     const org = newOrg();
     const closed = await newKey(side, org);
     const open = await newKey(side, org, { failOpenMicros: '40000' });
@@ -670,7 +677,11 @@ describe('Valkey outage', () => {
     expect((await call(closed.token)).statusCode).toBe(200);
     expect((await call(open.token)).statusCode).toBe(200);
     await side.proxy.brakeDrain();
+    // disconnect() only half-closes the socket: the client stays "ready" (refusing commands) until
+    // the server closes its side. Wait for "end", or connect() below finds it still connected.
+    const ended = new Promise<void>((r) => side.valkey.once('end', () => r()));
     side.valkey.disconnect();
+    await ended;
 
     const c = await call(closed.token);
     expect(c.statusCode).toBe(503);
@@ -686,8 +697,8 @@ describe('Valkey outage', () => {
     expect(o2.headers['x-brake-remaining-micros']).toBe('0');
 
     // Valkey is back: the fail-open spend is recorded and shows up in the ledger stream.
-    side.valkey.connect().catch(() => undefined);
-    await new Promise<void>((r) => side.valkey.once('ready', () => r()));
+    // Resolves once the client is ready again, and rejects (rather than hangs) if it cannot be.
+    await side.valkey.connect();
     expect(await side.proxy.brakeReplayFailOpen()).toBe(1);
     expect(await h.valkey.get(`bk:{o:${org}}:spent:key:${open.id}:d:20261029`)).toBe('64000');
     const evs = await events(org);
