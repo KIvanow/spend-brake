@@ -78,6 +78,18 @@ export interface BillingDeps {
 
 const ORG_ID = /^[A-Za-z0-9_-]{3,64}$/;
 
+/** The Terms of Service and Privacy Policy a paid checkout agrees to (their date). */
+export const TERMS_VERSION = '2026-10-31';
+
+/** Shown on the Stripe payment page, above the pay button. */
+export const CHECKOUT_WAIVER_MESSAGE =
+  'Your plan starts as soon as you pay. You asked for it to start right away and agreed that ' +
+  'you lose your 14-day right of withdrawal once it starts. Fees are non-refundable.';
+
+const TERMS_REQUIRED =
+  'To buy a plan, agree to the Terms of Service and Privacy Policy and ask for the service to ' +
+  'start now (acceptTerms: true).';
+
 /**
  * Hosted billing: sign-up, plan purchase through Stripe Checkout, plan changes and payment
  * details through the Customer Portal, license files for Business / Enterprise, and the Stripe
@@ -154,6 +166,28 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
     return customer.id;
   }
 
+  /** Paid plans need the buyer's consent: the terms, and starting now without withdrawal. */
+  const requireTerms = (acceptTerms: boolean | undefined) => {
+    if (acceptTerms !== true) throw new ApiError(400, 'terms_required', TERMS_REQUIRED);
+  };
+
+  /** Records the consent given before a paid checkout, in the org's audit log. */
+  async function recordTerms(
+    orgId: string,
+    actor: string,
+    plan: CheckoutPlan,
+    from: 'billing' | 'signup',
+  ) {
+    await deps.db.insert(auditLog).values({
+      orgId,
+      actor,
+      action: 'billing.terms_accepted',
+      target: `plan:${plan}`,
+      data: { plan, termsVersion: TERMS_VERSION, withdrawalWaiver: true, source: from },
+      at: now(),
+    });
+  }
+
   async function checkout(
     orgId: string,
     plan: CheckoutPlan,
@@ -173,7 +207,10 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
       customer,
       client_reference_id: orgId,
       line_items: [{ price: await priceId(plan), quantity: 1 }],
-      subscription_data: { metadata: { orgId } },
+      subscription_data: {
+        metadata: { orgId, terms_version: TERMS_VERSION, withdrawal_waiver: 'true' },
+      },
+      custom_text: { submit: { message: CHECKOUT_WAIVER_MESSAGE } },
       // From sign-up the buyer is not signed in yet: the welcome page says to check their email.
       success_url:
         from === 'signup' ? `${dashboard}/#/welcome` : `${dashboard}/#/billing?checkout=done`,
@@ -349,8 +386,14 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
 
   app.post('/v1/billing/checkout', async (req) => {
     const a = await auth(req, 'owner');
-    const body = parse(z.object({ plan: z.enum(CHECKOUT_PLANS) }), req.body);
-    return { url: await checkout(a.orgId, body.plan) };
+    const body = parse(
+      z.object({ plan: z.enum(CHECKOUT_PLANS), acceptTerms: z.boolean().optional() }),
+      req.body,
+    );
+    requireTerms(body.acceptTerms);
+    const url = await checkout(a.orgId, body.plan);
+    await recordTerms(a.orgId, a.actor, body.plan, 'billing');
+    return { url };
   });
 
   app.post('/v1/billing/portal', async (req) => {
@@ -389,6 +432,8 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
     email: z.string().trim().pipe(z.email().max(320)),
     plan: z.enum(['free', ...CHECKOUT_PLANS]).default('free'),
     timeZone: z.string().max(64).optional(),
+    /** Paid plans: the terms, and starting now without the 14-day withdrawal right. */
+    acceptTerms: z.boolean().optional(),
   });
   const validZone = (tz: string | undefined) => {
     if (!tz) return 'UTC';
@@ -415,6 +460,7 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
     async (req, reply) => {
       if (!deps.signup) throw new ApiError(404, 'not_found', 'Sign-up is not open here.');
       const body = parse(signupBody, req.body);
+      if (body.plan !== 'free') requireTerms(body.acceptTerms);
       const email = body.email.trim().toLowerCase();
       // Each sign-up emails the address: keep anyone from flooding someone else's inbox.
       if (deps.signIn && !(await allowLinkTo(deps.valkey, email))) {
@@ -454,10 +500,22 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
         data: { hard: Number(capHard), soft: null, version: capVersion, source: 'signup' },
         at: now(),
       });
+      const paidPlan = body.plan !== 'free' ? body.plan : null;
+      if (paidPlan) {
+        await recordTerms(
+          orgId,
+          created.ownerId ? `user:${created.ownerId}` : 'system',
+          paidPlan,
+          'signup',
+        );
+      }
       if (deps.signIn && created.ownerId) {
         await deps.signIn.mailer.send({
           email,
           purpose: 'welcome',
+          ...(paidPlan
+            ? { paidPlan: { name: PLAN_NAMES[paidPlan], termsVersion: TERMS_VERSION } }
+            : {}),
           links: [
             {
               orgId,
@@ -474,9 +532,7 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
       return {
         orgId,
         ...(created.ownerToken ? { ownerToken: created.ownerToken } : { emailSent: true }),
-        ...(body.plan !== 'free'
-          ? { checkoutUrl: await checkout(orgId, body.plan, 'signup') }
-          : {}),
+        ...(paidPlan ? { checkoutUrl: await checkout(orgId, paidPlan, 'signup') } : {}),
       };
     },
   );

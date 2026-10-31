@@ -30,6 +30,13 @@ Free limits.
 | GET    | `/v1/billing/license`  | owner  | The latest license file                                                                                               |
 | POST   | `/v1/billing/webhook`  | Stripe | Signed events, each applied once                                                                                      |
 
+A paid plan (sign-up or checkout) needs `"acceptTerms": true`: the buyer agrees to the Terms of
+Service and Privacy Policy and asks for the plan to start now, waiving the 14-day right of
+withdrawal. Without it the answer is 400 `terms_required`. The consent is written to the org's
+audit log (`billing.terms_accepted`, with the plan and terms version), passed to Stripe as
+subscription metadata (`terms_version`, `withdrawal_waiver`), and restated on the Checkout page
+and in the welcome email.
+
 Webhook events: `checkout.session.completed`, `customer.subscription.created`, `.updated`,
 `.deleted`, `invoice.paid` (clears a failed payment; issues or renews the license for Business
 and Enterprise lines, valid to the end of the paid period, emailed through the notifier and
@@ -68,7 +75,7 @@ STRIPE_SECRET_KEY=sk_test_... STRIPE_WEBHOOK_SECRET=whsec_... BRAKE_HOSTED_SIGNU
   pnpm --filter @spend-brake/billing dev
 # sign up and buy Indie: open the returned checkout URL and pay with card 4242 4242 4242 4242
 curl -s localhost:8083/v1/billing/signup -H 'content-type: application/json' \
-  -d '{"orgId":"acme","name":"Acme","email":"you@example.com","plan":"indie"}'
+  -d '{"orgId":"acme","name":"Acme","email":"you@example.com","plan":"indie","acceptTerms":true}'
 stripe trigger invoice.payment_failed       # other events, for a quick look
 ```
 

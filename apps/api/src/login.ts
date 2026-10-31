@@ -25,6 +25,11 @@ export interface LoginMail {
   /** Invites: who sent it (their email, when a person did) and the role given. */
   invitedBy?: string | null;
   role?: string;
+  /**
+   * Welcome after a paid sign-up: the plan chosen and the terms agreed to, so the email confirms
+   * the immediate start and the waived withdrawal right.
+   */
+  paidPlan?: { name: string; termsVersion: string };
 }
 
 export interface LoginMailer {

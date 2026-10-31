@@ -25,7 +25,7 @@ import Stripe from 'stripe';
 import { GenericContainer, type StartedTestContainer, Wait } from 'testcontainers';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PLAN_METADATA, type Plan, lookupKey } from '../src/plans.js';
-import { buildServer } from '../src/server.js';
+import { CHECKOUT_WAIVER_MESSAGE, TERMS_VERSION, buildServer } from '../src/server.js';
 import { seedStripe } from '../src/seed.js';
 import { stripeClient } from '../src/stripe.js';
 import type { LicenseMail } from '../src/webhooks.js';
@@ -155,7 +155,13 @@ async function signup(plan: Plan | 'free' = 'free', remoteAddress?: string) {
     method: 'POST',
     url: '/v1/billing/signup',
     ...(remoteAddress ? { remoteAddress } : {}),
-    payload: { orgId, name: orgId, email: `${orgId}@example.com`, plan },
+    payload: {
+      orgId,
+      name: orgId,
+      email: `${orgId}@example.com`,
+      plan,
+      ...(plan === 'free' ? {} : { acceptTerms: true }),
+    },
   });
   expect(res.statusCode, res.body).toBe(201);
   return { orgId, ...res.json<{ ownerToken: string; checkoutUrl?: string }>() };
@@ -298,7 +304,7 @@ describe('sign-up and checkout', () => {
       method: 'POST',
       url: '/v1/billing/checkout',
       headers: bearer(ownerToken),
-      payload: { plan: 'indie' },
+      payload: { plan: 'indie', acceptTerms: true },
     });
     expect(res.json()).toMatchObject({
       url: expect.stringMatching(/^https:\/\/checkout\.stripe\.test\//) as string,
@@ -307,7 +313,10 @@ describe('sign-up and checkout', () => {
       mode: 'subscription',
       client_reference_id: orgId,
       line_items: [{ price: `price_${lookupKey('indie')}`, quantity: 1 }],
-      subscription_data: { metadata: { orgId } },
+      subscription_data: {
+        metadata: { orgId, terms_version: TERMS_VERSION, withdrawal_waiver: 'true' },
+      },
+      custom_text: { submit: { message: CHECKOUT_WAIVER_MESSAGE } },
     });
     const customer = (await plan(orgId)).stripeCustomerId!;
     expect(customers.get(customer)?.metadata).toEqual({ orgId });
@@ -379,6 +388,112 @@ describe('sign-up and checkout', () => {
     });
   });
 
+  it('refuses a paid checkout without consent to the terms and the withdrawal waiver', async () => {
+    const before = checkouts.length;
+    const orgId = `org_${++seq}_${randomBytes(2).toString('hex')}`;
+    const refused = await billing.inject({
+      method: 'POST',
+      url: '/v1/billing/signup',
+      remoteAddress: '10.0.0.90',
+      payload: { orgId, name: orgId, email: `${orgId}@example.com`, plan: 'team' },
+    });
+    expect(refused.statusCode).toBe(400);
+    expect(refused.json()).toMatchObject({
+      error: 'terms_required',
+      message: expect.stringContaining('Terms of Service') as string,
+    });
+    // Nothing was created.
+    expect(await db.select().from(orgs).where(eq(orgs.id, orgId))).toEqual([]);
+    const notTrue = await billing.inject({
+      method: 'POST',
+      url: '/v1/billing/signup',
+      remoteAddress: '10.0.0.90',
+      payload: {
+        orgId,
+        name: orgId,
+        email: `${orgId}@example.com`,
+        plan: 'team',
+        acceptTerms: false,
+      },
+    });
+    expect(notTrue.json()).toMatchObject({ error: 'terms_required' });
+
+    const { ownerToken, orgId: freeOrg } = await signup('free', '10.0.0.91');
+    for (const payload of [{ plan: 'indie' }, { plan: 'indie', acceptTerms: false }]) {
+      const res = await billing.inject({
+        method: 'POST',
+        url: '/v1/billing/checkout',
+        headers: bearer(ownerToken),
+        payload,
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toMatchObject({ error: 'terms_required' });
+    }
+    expect(checkouts.length).toBe(before);
+    const terms = await db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.orgId, freeOrg), eq(auditLog.action, 'billing.terms_accepted')));
+    expect(terms).toEqual([]);
+  });
+
+  it('records the consent given before a paid checkout and passes it to Stripe', async () => {
+    const termsEntries = (orgId: string) =>
+      db
+        .select()
+        .from(auditLog)
+        .where(and(eq(auditLog.orgId, orgId), eq(auditLog.action, 'billing.terms_accepted')));
+
+    // Sign-up with a paid plan.
+    const paid = await signup('agents', '10.0.0.92');
+    expect(checkouts.at(-1)).toMatchObject({
+      client_reference_id: paid.orgId,
+      subscription_data: {
+        metadata: { orgId: paid.orgId, terms_version: '2026-10-31', withdrawal_waiver: 'true' },
+      },
+      custom_text: {
+        submit: { message: expect.stringContaining('14-day right of withdrawal') as string },
+      },
+    });
+    expect(checkouts.at(-1)).not.toHaveProperty('consent_collection');
+    expect(await termsEntries(paid.orgId)).toMatchObject([
+      {
+        actor: 'system',
+        target: 'plan:agents',
+        data: {
+          plan: 'agents',
+          termsVersion: '2026-10-31',
+          withdrawalWaiver: true,
+          source: 'signup',
+        },
+      },
+    ]);
+    // A Free sign-up agrees to no checkout.
+    const free = await signup('free', '10.0.0.93');
+    expect(await termsEntries(free.orgId)).toEqual([]);
+
+    // Upgrading from Billing: recorded against whoever bought.
+    const res = await billing.inject({
+      method: 'POST',
+      url: '/v1/billing/checkout',
+      headers: bearer(free.ownerToken),
+      payload: { plan: 'team', acceptTerms: true },
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(checkouts.at(-1)).toMatchObject({
+      client_reference_id: free.orgId,
+      subscription_data: {
+        metadata: { orgId: free.orgId, terms_version: '2026-10-31', withdrawal_waiver: 'true' },
+      },
+    });
+    const [entry] = await termsEntries(free.orgId);
+    expect(entry).toMatchObject({
+      target: 'plan:team',
+      data: { plan: 'team', termsVersion: '2026-10-31', withdrawalWaiver: true, source: 'billing' },
+    });
+    expect(entry!.actor).toMatch(/^(token|user):/);
+  });
+
   it('only lets owners buy, and sends existing subscribers to the portal', async () => {
     const { orgId, ownerToken } = await signup();
     await post(
@@ -388,7 +503,7 @@ describe('sign-up and checkout', () => {
       method: 'POST',
       url: '/v1/billing/checkout',
       headers: bearer(ownerToken),
-      payload: { plan: 'team' },
+      payload: { plan: 'team', acceptTerms: true },
     });
     expect(again.json()).toMatchObject({ error: 'has_subscription' });
     const portal = await billing.inject({
@@ -673,6 +788,7 @@ describe('sign-up with email sign-in', () => {
         email: ' Founder@Acme.test ',
         plan: 'team',
         timeZone: 'Europe/Sofia',
+        acceptTerms: true,
       },
     });
     expect(res.statusCode, res.body).toBe(201);
@@ -687,7 +803,11 @@ describe('sign-up with email sign-in', () => {
     });
 
     expect(sent).toHaveLength(1);
-    expect(sent[0]).toMatchObject({ email: 'founder@acme.test', purpose: 'welcome' });
+    expect(sent[0]).toMatchObject({
+      email: 'founder@acme.test',
+      purpose: 'welcome',
+      paidPlan: { name: 'Team', termsVersion: TERMS_VERSION },
+    });
     expect(sent[0]!.links[0]).toMatchObject({ orgId: body.orgId, orgName: 'Acme, Inc.' });
     const code = /#login=(.+)$/.exec(sent[0]!.links[0]!.url)![1]!;
     const signedIn = await redeemLoginLink(

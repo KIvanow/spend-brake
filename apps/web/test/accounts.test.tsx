@@ -682,10 +682,14 @@ describe('sign-up', () => {
     expect(screen.queryByText('Enterprise')).toBeNull();
     await user.type(screen.getByLabelText('Work email'), 'ana@acme.test');
     await user.type(screen.getByLabelText('Team or project name'), 'Acme');
+    // Free: a plain line about the terms, no checkbox.
+    expect(screen.getByText(/By creating an account you agree to the/)).toBeTruthy();
+    expect(screen.queryByRole('checkbox')).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Create account' }));
     expect(await screen.findByRole('heading', { name: 'Check your email' })).toBeTruthy();
     const body = calls.find((c) => c.url === '/v1/billing/signup')!.body as Record<string, string>;
     expect(body).toMatchObject({ name: 'Acme', email: 'ana@acme.test', plan: 'free' });
+    expect(body).not.toHaveProperty('acceptTerms');
     expect(body.timeZone).toBeTruthy();
   });
 
@@ -717,10 +721,29 @@ describe('sign-up', () => {
     await screen.findByText('Team');
     await user.type(screen.getByLabelText('Work email'), 'ana@acme.test');
     await user.type(screen.getByLabelText('Team or project name'), 'Acme');
-    await user.click(screen.getByRole('button', { name: 'Continue to payment' }));
+    // Paid plans need the consent first: unchecked, and the button waits for it.
+    const consent = screen.getByRole('checkbox', { name: /I agree to the Terms of Service/ });
+    expect(consent).toHaveProperty('checked', false);
+    expect(consent.closest('label')!.textContent).toContain(
+      'I lose my 14-day right of withdrawal once it starts. Fees are non-refundable.',
+    );
+    expect(screen.getByRole('link', { name: 'Terms of Service' }).getAttribute('href')).toBe(
+      'https://spendbrake.dev/terms',
+    );
+    expect(screen.getByRole('link', { name: 'Privacy Policy' }).getAttribute('href')).toBe(
+      'https://spendbrake.dev/privacy',
+    );
+    const pay = screen.getByRole('button', { name: 'Continue to payment' });
+    expect(pay).toHaveProperty('disabled', true);
+    await user.click(pay);
+    expect(calls.some((c) => c.url === '/v1/billing/signup')).toBe(false);
+    await user.click(consent);
+    expect(pay).toHaveProperty('disabled', false);
+    await user.click(pay);
     await waitFor(() =>
       expect(calls.find((c) => c.url === '/v1/billing/signup')!.body).toMatchObject({
         plan: 'team',
+        acceptTerms: true,
       }),
     );
   });

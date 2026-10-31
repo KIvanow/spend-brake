@@ -1,8 +1,65 @@
+---
+title: Self-hosting
+nav_order: 6
+description: Run Spend Brake on your own Docker host, with HTTPS, backups, upgrades, rollbacks and scaling.
+permalink: /self-hosting/
+---
+
 # Self-hosting Spend Brake
 
 A single Docker host runs everything: the proxy (what apps and agents call), the admin API, the
 worker, the notifier, the dashboard, Postgres and Valkey. This guide covers going from the
-5-minute quickstart to something you can depend on.
+5-minute quickstart to something you can depend on. Every setting is listed in
+[Configuration](https://docs.spendbrake.dev/configuration/).
+
+## Try it locally in 5 minutes
+
+Requirements: Docker, Node 22+ (for the CLI), a Google Maps Platform key.
+
+```sh
+git clone https://github.com/KIvanow/spend-brake && cd spend-brake
+cp infra/.env.example infra/.env
+# fill in the secrets, e.g.:
+sed -i "s|^BRAKE_MASTER_KEY=.*|BRAKE_MASTER_KEY=$(openssl rand -base64 32)|; \
+        s|^BRAKE_ACTION_SECRET=.*|BRAKE_ACTION_SECRET=$(openssl rand -base64 32)|; \
+        s|^BRAKE_SETUP_TOKEN=.*|BRAKE_SETUP_TOKEN=$(openssl rand -hex 24)|; \
+        s|^VALKEY_PASSWORD=.*|VALKEY_PASSWORD=$(openssl rand -hex 24)|; \
+        s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$(openssl rand -hex 24)|" infra/.env
+
+docker compose -f infra/docker-compose.yml up -d --build --wait
+```
+
+That starts the proxy (`:8080`), admin API (`:8081`), notifier (`:8082`), dashboard (`:3000`),
+worker, Valkey and Postgres. Valkey and Postgres are only reachable from the other containers.
+Then set up your org, store the Google key and get a virtual key:
+
+```sh
+pnpm install && pnpm --filter @spend-brake/cli build
+alias brake="node $PWD/apps/cli/dist/brake.cjs"
+
+# Secrets from the environment (or omit them to be prompted): flags would land in shell history.
+export BRAKE_SETUP_TOKEN="$(grep BRAKE_SETUP_TOKEN infra/.env | cut -d= -f2)"
+read -rs GOOGLE_MAPS_KEY && export GOOGLE_MAPS_KEY
+brake init --api-url http://localhost:8081 --proxy-url http://localhost:8080 \
+  --org acme --day-cap 5 --month-cap 50
+```
+
+`init` prints the owner token once (keep it in a password manager) and saves an admin token for
+the CLI in `~/.config/brake/config.json`. It also prints your virtual key once, checks whether
+the Google key is restricted, and prints the Google Cloud steps (console and `gcloud`) to
+restrict the real key to the proxy's egress IPs and the Maps APIs. Then call the proxy instead
+of Google:
+
+```diff
+- https://maps.googleapis.com/maps/api/geocode/json?address=Sofia&key=AIza…
++ http://localhost:8080/google-maps/maps/api/geocode/json?address=Sofia&key=sb_live_…
+```
+
+Open the dashboard at http://localhost:3000 with the owner token, or the admin token
+`brake init` saved.
+
+The CLI and the Docker images are built from source for now; published packages
+(`npx @spend-brake/cli`) and images are coming.
 
 ## 1. Install
 
@@ -20,7 +77,7 @@ docker compose --env-file infra/.env $F up -d --wait
 
 Published images are coming; until then there is nothing to pull, and
 `infra/docker-compose.release.yml` is for when they are. Business / Enterprise: add
-`-f infra/docker-compose.ee.yml` right after the base file (see [ee/README.md](../ee/README.md)).
+`-f infra/docker-compose.ee.yml` right after the base file (see [ee/README.md](https://github.com/KIvanow/spend-brake/blob/main/ee/README.md)).
 
 Then build the CLI (`pnpm install && pnpm --filter @spend-brake/cli build`, which writes
 `apps/cli/dist/brake.cjs`; published packages are coming too), run
@@ -108,7 +165,7 @@ encrypted credentials; it is useless without `BRAKE_MASTER_KEY`, which is not in
 
 ## 6. Upgrades
 
-1. Read the release notes in [CHANGELOG.md](../CHANGELOG.md).
+1. Read the release notes in [CHANGELOG.md](https://github.com/KIvanow/spend-brake/blob/main/CHANGELOG.md).
 2. Back up (section 5).
 3. `git pull` the release, then `docker compose ... build && docker compose ... up -d --wait`.
 
@@ -165,7 +222,8 @@ command.)
 
 ### Each org's own telemetry
 
-Separate from the operator metrics above, every org gets telemetry for its own calls:
+Separate from the operator metrics above, every org gets telemetry for its own calls (details
+in [Telemetry](https://docs.spendbrake.dev/telemetry/)):
 
 - **Prometheus:** `GET https://<app domain>/v1/metrics` with any of the org's tokens (create a
   read-only one under Telemetry). Requests, cost and refunds by provider, SKU, key, agent,
@@ -175,7 +233,8 @@ Separate from the operator metrics above, every org gets telemetry for its own c
   encrypted); the worker sends every call as a span, inside the caller's trace when the request
   carried a `traceparent` header. A collector that is down delays spans (up to 10,000 wait per
   org); private addresses are refused (`ALLOW_PRIVATE_COLLECTORS=true` on the worker and the API
-  allows them, and a local `http://` collector, for development). On the hosted service this comes with the Team and Agents plans.
+  allows them, and a local `http://` collector, for development). On the hosted service this
+  comes with the Team and Agents plans.
 
 Neither ever includes query strings or request bodies: those hold addresses, phone numbers and
 search terms.

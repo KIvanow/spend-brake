@@ -278,6 +278,9 @@ export function App({
           <Brand />
         </strong>
         <Nav page={page} setPage={setPage} />
+        <a className="docs" href="https://docs.spendbrake.dev/">
+          Docs
+        </a>
         <button
           type="button"
           className="link signout"

@@ -206,6 +206,28 @@ describe('alert messages', () => {
     expect(m.text).toContain('twilio.sms.DE: 0.0951 each -> none');
   });
 
+  it('confirms the immediate start and the waived withdrawal right after a paid sign-up', () => {
+    const welcome = (extra: object) =>
+      buildMessage(
+        'a1',
+        {
+          type: 'login_link',
+          orgId: null,
+          email: 'ana@acme.test',
+          purpose: 'welcome',
+          links: [{ orgId: 'acme', orgName: 'Acme', url: 'https://app.example.com/#login=x' }],
+          ...extra,
+        },
+        links,
+      );
+    const paid = welcome({ paidPlan: { name: 'Team', termsVersion: '2026-10-31' } });
+    expect(paid.title).toBe('Welcome to Spend Brake');
+    expect(paid.text).toContain('You chose the Team plan');
+    expect(paid.text).toContain('(version 2026-10-31)');
+    expect(paid.text).toContain('you lose your 14-day right of withdrawal once it starts');
+    expect(welcome({}).text).not.toContain('withdrawal');
+  });
+
   it('maps scopes to the kill target that stops them', () => {
     expect(killTargetFor('key:k1')).toBe('key:k1');
     expect(killTargetFor('sess:s1')).toBe('sess:s1');

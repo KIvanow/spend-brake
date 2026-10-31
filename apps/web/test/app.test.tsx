@@ -313,11 +313,20 @@ describe('dashboard', () => {
     expect(await screen.findByText('1,234 of 10,000')).toBeTruthy();
     expect(screen.getByText('$50.00')).toBeTruthy();
     expect(screen.getByText(/A payment failed/)).toBeTruthy();
-    await user.click(screen.getByRole('button', { name: 'Buy Indie' }));
+    // Buying waits for the consent to the terms and the withdrawal waiver.
+    const buy = screen.getByRole('button', { name: 'Buy Indie' });
+    const consent = screen.getByRole('checkbox', { name: /I agree to the Terms of Service/ });
+    expect(consent).toHaveProperty('checked', false);
+    expect(buy).toHaveProperty('disabled', true);
+    await user.click(buy);
+    expect(calls.some((c) => c.url === '/v1/billing/checkout')).toBe(false);
+    await user.click(consent);
+    expect(buy).toHaveProperty('disabled', false);
+    await user.click(buy);
     await waitFor(() =>
       expect(calls.find((c) => c.url === '/v1/billing/checkout')).toMatchObject({
         method: 'POST',
-        body: { plan: 'indie' },
+        body: { plan: 'indie', acceptTerms: true },
       }),
     );
   });
@@ -342,6 +351,7 @@ describe('dashboard', () => {
     await user.click(screen.getByRole('button', { name: 'Billing' }));
     expect(await screen.findByText('Owners manage billing.')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Buy Indie' })).toBeNull();
+    expect(screen.queryByRole('checkbox')).toBeNull();
   });
 
   it('says billing is not part of a self-hosted install', async () => {

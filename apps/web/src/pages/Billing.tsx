@@ -1,7 +1,8 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
 import { type Cap, api, usd } from '../api.js';
 import { useRole } from '../role.js';
-import { Table, Time } from '../ui.js';
+import { Table, TermsConsent, Time } from '../ui.js';
 
 interface BillingView {
   plan: string | null;
@@ -35,6 +36,7 @@ const of = (used: number, max: number | null | undefined) =>
 /** The hosted plan: usage against limits, buying and managing it, license files. */
 export function Billing() {
   const { can } = useRole();
+  const [acceptTerms, setAcceptTerms] = useState(false);
   const billing = useQuery({
     queryKey: ['billing'],
     queryFn: () => api<BillingView>('/v1/billing'),
@@ -56,7 +58,7 @@ export function Billing() {
         ? api<{ url: string }>('/v1/billing/portal', { method: 'POST', body: {} })
         : api<{ url: string }>('/v1/billing/checkout', {
             method: 'POST',
-            body: { plan: to.checkout },
+            body: { plan: to.checkout, acceptTerms },
           }),
     onSuccess: (r) => window.location.assign(r.url),
   });
@@ -143,6 +145,9 @@ export function Billing() {
         />
       )}
       {!can('owner') && <p className="muted">Owners manage billing.</p>}
+      {can('owner') && !b.hasSubscription && b.plans.length > 0 && (
+        <TermsConsent checked={acceptTerms} onChange={setAcceptTerms} />
+      )}
       <div className="row actions">
         {!can('owner') ? null : b.hasSubscription ? (
           <button type="button" disabled={go.isPending} onClick={() => go.mutate('portal')}>
@@ -153,7 +158,7 @@ export function Billing() {
             <button
               key={p.id}
               type="button"
-              disabled={go.isPending}
+              disabled={go.isPending || !acceptTerms}
               onClick={() => go.mutate({ checkout: p.id })}
             >
               Buy {p.name}

@@ -1,0 +1,9 @@
+# Local preview only: GitHub Pages builds the site itself from _config.yml.
+#   bundle install && bundle exec jekyll serve
+source "https://rubygems.org"
+
+gem "jekyll", "~> 4.3"
+gem "jekyll-remote-theme"
+gem "jekyll-seo-tag"
+gem "jekyll-include-cache"
+gem "webrick"

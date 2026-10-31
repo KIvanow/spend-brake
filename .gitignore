@@ -9,3 +9,11 @@ coverage/
 *.tsbuildinfo
 # License signing key mounted by docker-compose.hosted.yml.
 infra/license-key/
+# Docs site build output (docs/ is built by GitHub Pages).
+docs/_site/
+docs/.jekyll-cache/
+docs/.jekyll-metadata
+docs/.sass-cache/
+docs/.bundle/
+docs/vendor/
+docs/Gemfile.lock

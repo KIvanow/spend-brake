@@ -10,10 +10,15 @@ and SerpApi; any other API can be priced per request with the generic adapter.
 You keep your provider account and your own key. The real key never leaves Spend Brake; clients
 only ever hold revocable virtual keys.
 
+**Documentation: [docs.spendbrake.dev](https://docs.spendbrake.dev)**. Hosted service:
+[spendbrake.dev](https://spendbrake.dev).
+
 ## 5-minute quickstart
 
 For a production install (HTTPS, published images, backups, upgrades, scaling), see
-[docs/self-hosting.md](docs/self-hosting.md).
+[Self-hosting](https://docs.spendbrake.dev/self-hosting/) ([docs/self-hosting.md](docs/self-hosting.md)
+in this repo). To use the hosted service instead, see the
+[Quickstart](https://docs.spendbrake.dev/quickstart/).
 
 Requirements: Docker, Node 22+ (for the CLI), a Google Maps Platform key.
 
@@ -88,7 +93,8 @@ counts against the agent's $20 per day and the parent key's caps, and is revoked
 exits. Inside, the agent calls `brake maps geocode "…"`, `brake maps search "…"` or
 `brake call <provider> <method> <path>`; each prints JSON with the cost. When a cap or the loop
 breaker stops a call, `brake` exits 3 or 4 with one line telling the agent to stop and ask you.
-See [apps/cli](apps/cli/README.md).
+See [Capping an AI agent](https://docs.spendbrake.dev/agents/) and the
+[CLI reference](https://docs.spendbrake.dev/cli/).
 
 Run the agent as a different OS user than the one that ran `brake init` (or with
 `XDG_CONFIG_HOME` pointing elsewhere): the agent must not be able to read the saved admin token,
@@ -108,7 +114,8 @@ or it could lift its own caps. `brake session` warns when it can.
 | Kill switch                   | No                        | Set quota to 0 by hand                     | No                                                        | One call, link or button; immediate                                            |
 | Alerts with actions           | Email, Pub/Sub            | No                                         | No                                                        | Webhooks (Slack, Discord, Teams, raw) and email with Kill / Raise / Mute links |
 
-Keep Google's own budgets and quotas on as a backstop.
+Keep Google's own budgets and quotas on as a backstop. More in
+[Google's controls vs Spend Brake](https://docs.spendbrake.dev/google-controls/).
 
 ## Terms of service
 
@@ -155,19 +162,11 @@ key opts into a small fail-open allowance.
 | [packages/db](packages/db/README.md)           | Postgres schema and migrations                                                                              |
 | packages/shared                                | Envelope encryption, signing, redaction, telemetry                                                          |
 
-**Migration estimate:** `brake estimate` (or the dashboard) prices your last 30 days of Google
-usage on Geoapify, Stadia Maps, Open Places API, Mapbox and HERE side by side, and shows what
-would stay on Google.
-
-**Reconciliation (Business / Enterprise):** connect the Google Cloud Billing export (`brake
-reconcile set --table project.dataset.table --service-account reader.json`) and the worker
-compares the ledger with Google's bill every day, per SKU family (and Twilio's Usage Records);
-drift above 5% raises an alert. Without it, the dashboard says spend is measured by the proxy
-only.
-
-**Tracing:** set `OTEL_EXPORTER_OTLP_ENDPOINT` and the services export OpenTelemetry traces;
-secrets are stripped from every span. Prometheus metrics are on `:9465` (proxy) and `:9464`
-(worker).
+Also: a migration estimate (`brake estimate`), daily reconciliation with Google's billing
+export (Business / Enterprise), [alerts and signed webhooks](https://docs.spendbrake.dev/alerts/),
+[Prometheus and OpenTelemetry](https://docs.spendbrake.dev/telemetry/),
+[CSV export](https://docs.spendbrake.dev/csv-export/) and the
+[admin API](https://docs.spendbrake.dev/api/).
 
 ## Development
 

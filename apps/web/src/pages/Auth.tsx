@@ -1,6 +1,6 @@
 import { type FormEvent, type ReactNode, useEffect, useState } from 'react';
 import { ApiError, type AuthOptions, api, setToken } from '../api.js';
-import { Brand } from '../ui.js';
+import { Brand, PRIVACY_URL, TERMS_URL, TermsConsent } from '../ui.js';
 
 export interface Plan {
   id: string;
@@ -206,6 +206,7 @@ export function Signup() {
   const [unknownPlan, setUnknownPlan] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [acceptTerms, setAcceptTerms] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
@@ -226,8 +227,10 @@ export function Signup() {
       .catch(() => setPlans([]));
   }, [wanted]);
 
+  const paid = plan !== 'free';
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    if (paid && !acceptTerms) return;
     setBusy(true);
     setError(null);
     try {
@@ -238,6 +241,7 @@ export function Signup() {
           email: email.trim(),
           plan,
           timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          ...(paid ? { acceptTerms } : {}),
         },
       });
       if (r.checkoutUrl) window.location.assign(r.checkoutUrl);
@@ -313,8 +317,23 @@ export function Signup() {
             </label>
           ))}
         </fieldset>
-        <button type="submit" className="primary" disabled={busy}>
-          {plan === 'free' ? 'Create account' : 'Continue to payment'}
+        {paid ? (
+          <TermsConsent checked={acceptTerms} onChange={setAcceptTerms} />
+        ) : (
+          <p className="muted">
+            By creating an account you agree to the{' '}
+            <a href={TERMS_URL} target="_blank" rel="noreferrer">
+              Terms of Service
+            </a>{' '}
+            and{' '}
+            <a href={PRIVACY_URL} target="_blank" rel="noreferrer">
+              Privacy Policy
+            </a>
+            .
+          </p>
+        )}
+        <button type="submit" className="primary" disabled={busy || (paid && !acceptTerms)}>
+          {paid ? 'Continue to payment' : 'Create account'}
         </button>
         {error && <p className="error">{error}</p>}
       </form>

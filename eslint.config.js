@@ -4,7 +4,18 @@ import prettier from 'eslint-config-prettier';
 import globals from 'globals';
 
 export default tseslint.config(
-  { ignores: ['**/dist/**', '**/coverage/**', '**/.turbo/**', '**/node_modules/**'] },
+  {
+    ignores: [
+      '**/dist/**',
+      '**/coverage/**',
+      '**/.turbo/**',
+      '**/node_modules/**',
+      // A local build of the docs site (docs/ is built by GitHub Pages).
+      'docs/_site/**',
+      'docs/vendor/**',
+      'docs/.jekyll-cache/**',
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
   {

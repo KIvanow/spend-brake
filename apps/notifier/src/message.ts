@@ -273,12 +273,18 @@ function loginMessage(job: AlertJob): Pick<Message, 'title' | 'text' | 'actions'
         actions,
       };
     }
-    case 'welcome':
+    case 'welcome': {
+      const paid = job.paidPlan as { name?: unknown; termsVersion?: unknown } | undefined;
+      const waiver =
+        paid && typeof paid.name === 'string' && typeof paid.termsVersion === 'string'
+          ? ` You chose the ${paid.name} plan and agreed to the Terms of Service and Privacy Policy (version ${paid.termsVersion}). You asked for the plan to start as soon as you pay and agreed that you lose your 14-day right of withdrawal once it starts; fees are non-refundable.`
+          : '';
       return {
         title: 'Welcome to Spend Brake',
-        text: `Your org ${org} is ready. Open the link to sign in and connect your first API.`,
+        text: `Your org ${org} is ready. Open the link to sign in and connect your first API.${waiver}`,
         actions,
       };
+    }
     default:
       return {
         title: 'Your Spend Brake sign-in link',

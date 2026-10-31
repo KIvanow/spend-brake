@@ -4,3 +4,8 @@ coverage/
 .turbo/
 packages/db/drizzle/
 apps/api/openapi.json
+# Docs site: Liquid templates and Jekyll build output.
+docs/assets/css/*.scss
+docs/_site/
+docs/.jekyll-cache/
+docs/vendor/

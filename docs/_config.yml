@@ -1,0 +1,60 @@
+title: Spend Brake Docs
+description: Hard dollar caps, enforced in real time, for the paid APIs your apps and AI agents call.
+remote_theme: just-the-docs/just-the-docs@v0.10.0
+
+url: https://docs.spendbrake.dev
+baseurl: ''
+permalink: pretty
+
+# GitHub Pages enables these for remote themes; listed so local builds match.
+plugins:
+  - jekyll-remote-theme
+  - jekyll-seo-tag
+  - jekyll-include-cache
+
+# Every page uses the theme's layout (GitHub Pages would add it anyway; local builds need it).
+defaults:
+  - scope:
+      path: ''
+    values:
+      layout: default
+
+search_enabled: true
+search:
+  heading_level: 3
+
+# Light by default; _includes/head_custom.html adds the dark scheme when the system asks for it.
+color_scheme: spendbrake
+
+# Header links
+aux_links:
+  '← spendbrake.dev':
+    - 'https://spendbrake.dev'
+  'Dashboard':
+    - 'https://app.spendbrake.dev'
+  'GitHub':
+    - 'https://github.com/KIvanow/spend-brake'
+
+aux_links_new_tab: false
+
+# Footer
+footer_content: >-
+  Spend Brake is run by Kristiyan Ivanov · <a href="https://spendbrake.dev">spendbrake.dev</a> ·
+  <a href="https://spendbrake.dev/privacy">Privacy</a> ·
+  <a href="https://spendbrake.dev/terms">Terms</a>
+
+back_to_top: true
+back_to_top_text: 'Back to top'
+enable_copy_code_button: true
+heading_anchors: true
+
+# Never published.
+exclude:
+  - Gemfile
+  - Gemfile.lock
+  - vendor/
+  - .bundle/
+  - .jekyll-cache/
+  - .sass-cache/
+  - node_modules/
+  - README.md

@@ -14,6 +14,39 @@ export function Brand() {
   );
 }
 
+export const TERMS_URL = 'https://spendbrake.dev/terms';
+export const PRIVACY_URL = 'https://spendbrake.dev/privacy';
+
+/**
+ * The consent a paid plan needs before checkout: the terms, and starting now without the 14-day
+ * right of withdrawal. Unchecked until the buyer checks it.
+ */
+export function TermsConsent({
+  checked,
+  onChange,
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="consent">
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <span>
+        I agree to the{' '}
+        <a href={TERMS_URL} target="_blank" rel="noreferrer">
+          Terms of Service
+        </a>{' '}
+        and{' '}
+        <a href={PRIVACY_URL} target="_blank" rel="noreferrer">
+          Privacy Policy
+        </a>
+        . I ask for the service to start now and understand that I lose my 14-day right of
+        withdrawal once it starts. Fees are non-refundable.
+      </span>
+    </label>
+  );
+}
+
 /**
  * A time as the dashboard shows every time: in the browser's time zone, named in the tooltip
  * with the UTC original.

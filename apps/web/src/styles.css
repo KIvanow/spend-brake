@@ -244,13 +244,28 @@ header.top nav button[aria-current='page'] {
   background: var(--surface-2);
   font-weight: 600;
 }
+header.top .docs,
 header.top .signout {
   order: 3;
-  margin-left: auto;
   padding: 6px 10px;
+  border-radius: 6px;
   color: var(--muted);
   font-weight: 500;
 }
+/* The Docs link and Sign out sit together at the right end of the bar. */
+header.top .docs {
+  margin-left: auto;
+}
+/* Phones: no room in the bar; Get started links to the docs instead. */
+@media (max-width: 479px) {
+  header.top .docs {
+    display: none;
+  }
+  header.top .signout {
+    margin-left: auto;
+  }
+}
+header.top .docs:hover,
 header.top .signout:hover {
   color: var(--text);
   background: var(--surface-2);
@@ -288,6 +303,7 @@ header.top .signout:hover {
     padding: 6px 10px;
     font-size: 14px;
   }
+  header.top .docs,
   header.top .signout {
     order: 0;
     margin-left: 0;
@@ -943,6 +959,18 @@ body:has(main.signin) {
   gap: 6px;
   font-size: 14px;
   font-weight: 500;
+}
+.signin label.consent,
+label.consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 400;
+}
+label.consent input {
+  flex: none;
+  margin: 3px 0 0;
 }
 .signin button.primary {
   width: 100%;

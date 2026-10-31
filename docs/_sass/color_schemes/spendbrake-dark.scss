@@ -1,0 +1,27 @@
+// Spend Brake dark: the website's dark palette. Loaded by _includes/head_custom.html when the
+// system prefers dark (assets/css/just-the-docs-spendbrake-dark.scss).
+$color-scheme: dark;
+$body-font-family:
+  system-ui,
+  -apple-system,
+  'Segoe UI',
+  sans-serif;
+$mono-font-family: ui-monospace, sfmono-regular, menlo, consolas, monospace;
+
+$body-background-color: #141413;
+$body-heading-color: #ececea;
+$body-text-color: #ececea;
+$link-color: #7aa2ff;
+$nav-child-link-color: #9b9b95;
+$sidebar-color: #1d1d1b;
+$base-button-color: #242421;
+$btn-primary-color: #1d4ed8;
+$code-background-color: #242421;
+$code-linenumber-color: #9b9b95;
+$feedback-color: #1d1d1b;
+$table-background-color: #1d1d1b;
+$search-background-color: #242421;
+$search-result-preview-color: #9b9b95;
+$border-color: #33332f;
+
+@import './vendor/OneDarkJekyll/syntax';

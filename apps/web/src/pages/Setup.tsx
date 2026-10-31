@@ -151,6 +151,10 @@ export function Setup() {
           </p>
         </Step>
       </ol>
+      <p className="muted">
+        More in the <a href="https://docs.spendbrake.dev/">documentation</a>: capping an AI agent,
+        alerts, telemetry, CSV export and the API.
+      </p>
     </section>
   );
 }
