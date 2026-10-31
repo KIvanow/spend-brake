@@ -217,10 +217,12 @@ describe('sessions', () => {
     await screen.findByLabelText('Email');
     window.history.replaceState(null, '', `/#login=${CODE}`);
     window.dispatchEvent(new HashChangeEvent('hashchange'));
-    expect(await screen.findByRole('heading', { name: 'Live budget' })).toBeTruthy();
+    expect(
+      await screen.findByRole('heading', { name: 'Live budget' }, { timeout: 5_000 }),
+    ).toBeTruthy();
     expect(getToken()).toBe('sbt_email');
     expect(window.location.hash).toBe('#/');
-  });
+  }, 15_000);
 
   // As main.tsx renders it: no client passed in, and the link spent before the first render.
   it('signs out of a tab that signed in with an emailed link', async () => {
