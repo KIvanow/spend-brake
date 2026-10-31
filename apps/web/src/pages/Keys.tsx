@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
-import { type AuthOptions, type Key, api } from '../api.js';
+import { type AuthOptions, type Key, api, localDate } from '../api.js';
 import { PROVIDERS, providerById } from '../providers.js';
 import { useRole } from '../role.js';
 import { CopyButton, Table } from '../ui.js';
@@ -419,7 +419,7 @@ export function Keys() {
                 .map((k) => k.name)
                 .join(', '),
           },
-          { label: 'Added', render: (c) => c.createdAt.slice(0, 10) },
+          { label: 'Added', render: (c) => localDate(c.createdAt) },
           ...(can('admin')
             ? [
                 {

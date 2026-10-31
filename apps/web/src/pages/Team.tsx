@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
-import { ApiError, api } from '../api.js';
+import { ApiError, api, localDate } from '../api.js';
 import { useRole } from '../role.js';
 import { Table } from '../ui.js';
 
@@ -108,7 +108,7 @@ export function Team() {
                 </select>
               ),
           },
-          { label: 'Added', render: (p) => p.createdAt.slice(0, 10) },
+          { label: 'Added', render: (p) => localDate(p.createdAt) },
           ...(owner
             ? [
                 {
