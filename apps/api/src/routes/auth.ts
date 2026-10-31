@@ -18,6 +18,8 @@ export interface PublicInfo {
   proxyUrl?: string;
   /** The proxy's outbound IPs: provider keys should be restricted to them. */
   egressIps?: string[];
+  /** Product analytics for the dashboard (PostHog); absent, the dashboard sends none. */
+  analytics?: { key: string; host: string };
 }
 
 const options = z.object({
@@ -25,6 +27,7 @@ const options = z.object({
   signup: z.boolean(),
   proxyUrl: z.string().nullable(),
   egressIps: z.array(z.string()),
+  analytics: z.object({ key: z.string(), host: z.string() }).nullable(),
 });
 const emailBody = z.object({ email: z.string().trim().pipe(z.email().max(320)) });
 const verifyBody = z.object({ code: z.string().max(100) });
@@ -60,6 +63,7 @@ export function authRoutes(
     signup: info.signup ?? false,
     proxyUrl: info.proxyUrl ?? null,
     egressIps: info.egressIps ?? [],
+    analytics: info.analytics ?? null,
   }));
 
   router.registry.registerPath({

@@ -1,5 +1,6 @@
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { useState } from 'react';
+import { track } from '../analytics.js';
 import { api, download, usd } from '../api.js';
 import { TIME_LABEL, Table, Time } from '../ui.js';
 import { useKeys } from './Keys.js';
@@ -74,6 +75,7 @@ export function Events() {
         `/v1/events.csv?source=${source}${range}`,
         `spend-brake-${source === 'usage' ? 'requests' : 'audit'}.csv`,
       );
+      track('csv_exported', { source });
       setExported({
         truncated: headers.get('x-brake-truncated') === 'true',
         ranged: !!range,

@@ -48,6 +48,26 @@ const envSchema = z.object({
   BRAKE_APP_DOMAIN: z.string().optional(),
   /** Hosted sign-up is open (the billing service serves it). */
   BRAKE_HOSTED_SIGNUP: z.stringbool().default(false),
+  /**
+   * Product analytics in the dashboard (a PostHog project key, public by design). Unset, the
+   * dashboard never loads PostHog and sends nothing.
+   */
+  BRAKE_POSTHOG_KEY: z
+    .string()
+    .default('')
+    .transform((v) => v.trim() || undefined)
+    .pipe(
+      z
+        .string()
+        .regex(/^phc_[A-Za-z0-9_-]+$/, 'a PostHog project key (phc_...)')
+        .optional(),
+    ),
+  /** Where the dashboard sends analytics (PostHog EU Cloud by default). */
+  BRAKE_POSTHOG_HOST: z
+    .string()
+    .default('')
+    .transform((v) => v.trim().replace(/\/+$/, '') || 'https://eu.i.posthog.com')
+    .pipe(z.url({ protocol: /^https$/ })),
 });
 
 export type ApiEnv = z.output<typeof envSchema>;

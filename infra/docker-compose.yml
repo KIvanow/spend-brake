@@ -67,6 +67,9 @@ services:
       BRAKE_PUBLIC_PROXY_URL: ${BRAKE_PUBLIC_PROXY_URL:-http://localhost:8080}
       # The proxy's outbound IPs: the dashboard tells people to restrict provider keys to them.
       BRAKE_PROXY_EGRESS_IPS: ${BRAKE_PROXY_EGRESS_IPS:-}
+      # Dashboard product analytics (PostHog): off unless a project key is set.
+      BRAKE_POSTHOG_KEY: ${BRAKE_POSTHOG_KEY:-}
+      BRAKE_POSTHOG_HOST: ${BRAKE_POSTHOG_HOST:-https://eu.i.posthog.com}
     ports: ['8081:8081']
     depends_on:
       valkey: { condition: service_healthy }

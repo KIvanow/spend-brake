@@ -40,6 +40,15 @@ openssl rand -hex 24      # passwords and the setup token: they go into URLs, ke
 With the HTTPS overlay, `BRAKE_PUBLIC_URL`, `BRAKE_DASHBOARD_URL` and `BRAKE_PUBLIC_PROXY_URL`
 are set from the two domain names below; you don't set them yourself.
 
+## Dashboard analytics
+
+Off unless you set a key: then the dashboard loads nothing from PostHog and sends nothing.
+
+| Variable             | Default                    | What                                                                                                                                                                                                                                                           |
+| -------------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BRAKE_POSTHOG_KEY`  |                            | A PostHog project key (`phc_...`). The API hands it to the dashboard, which then counts page views (the page name only) and a few product events, with people known by their internal user id. Nothing is stored in the browser; no autocapture or recordings. |
+| `BRAKE_POSTHOG_HOST` | `https://eu.i.posthog.com` | Where the dashboard sends them. Another host also needs adding to `connect-src` in `infra/nginx.conf`, the dashboard's Content Security Policy.                                                                                                                |
+
 ## HTTPS (`docker-compose.tls.yml`)
 
 | Variable             | Example             | What                                                       |

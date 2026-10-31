@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useEffect, useState } from 'react';
+import { track } from '../analytics.js';
 import { type Cap, api, toMicros, usd } from '../api.js';
 import { useRole } from '../role.js';
 import { Table } from '../ui.js';
@@ -13,6 +14,12 @@ const dollars = (micros: number | null): string => {
     .padStart(6, '0')
     .replace(/0+$/, '');
   return `${Math.floor(micros / 1_000_000)}${fraction ? `.${fraction}` : ''}`;
+};
+
+/** `org`, `key:<id>` → `org`, `key`: what kind of scope, for analytics. */
+const scopeType = (scope: string) => {
+  const kind = scope.split(':')[0]!;
+  return /^[a-z]{1,20}$/.test(kind) ? kind : 'other';
 };
 
 export function Caps() {
@@ -50,8 +57,10 @@ export function Caps() {
         method: 'PUT',
         body: { [v.kind === 'd' ? 'day' : 'month']: { hard: v.hard, soft: v.soft } },
       }),
-    onSuccess: (r) => {
+    onSuccess: (r, v) => {
       held(r);
+      // Set now, not waiting for an approval; the scope's kind only (org, key), never its id.
+      if (!r.pending?.length) track('cap_set', { scope: scopeType(v.scope) });
       void qc.invalidateQueries({ queryKey: ['caps'] });
       void qc.invalidateQueries({ queryKey: ['status'] });
     },

@@ -9,6 +9,7 @@ import {
   takeLoginCode,
   tokenChangedElsewhere,
 } from './api.js';
+import { identify, resetAnalytics } from './analytics.js';
 import { Approvals } from './pages/Approvals.js';
 import { useAuthOptions } from './pages/Keys.js';
 import { SignIn, Signup, Welcome, redeemLoginCode } from './pages/Auth.js';
@@ -24,6 +25,7 @@ import { Spend } from './pages/Spend.js';
 import { Team } from './pages/Team.js';
 import { Telemetry } from './pages/Telemetry.js';
 import { Webhooks } from './pages/Webhooks.js';
+import { useSession } from './role.js';
 import { Brand } from './ui.js';
 import './styles.css';
 
@@ -120,6 +122,15 @@ function Nav({ page, setPage }: { page: PageName; setPage: (p: PageName) => void
   );
 }
 
+/** Tells analytics (when they are on) who is signed in: the user id and org id, nothing else. */
+function Identify() {
+  const session = useSession().data;
+  useEffect(() => {
+    if (session) identify(session);
+  }, [session]);
+  return null;
+}
+
 const route = () => window.location.hash.replace(/^#\/?/, '').split(/[?/]/)[0] ?? '';
 
 // Pages live in the URL hash (#/caps), so links from alerts and bookmarks open the right page.
@@ -166,6 +177,7 @@ export function App({
       setPublicRoute(route());
     };
     const onSignedOut = () => {
+      resetAnalytics();
       client.clear();
       setSigningIn(null);
       setPending(false);
@@ -178,6 +190,7 @@ export function App({
     const onStorage = (e: StorageEvent) => {
       const change = tokenChangedElsewhere(e);
       if (!change) return;
+      resetAnalytics();
       client.clear();
       setSigningIn(null);
       setPending(false);
@@ -267,6 +280,7 @@ export function App({
   const Page = PAGES[page];
   return (
     <QueryClientProvider key={session} client={client}>
+      <Identify />
       {/* A hash link would change the page (routes live in the hash), so it moves focus itself. */}
       <a
         className="skip-link"
@@ -294,6 +308,7 @@ export function App({
             // out here never waits for it.
             void api('/v1/auth/session', { method: 'DELETE' }).catch(() => undefined);
             setToken(null);
+            resetAnalytics();
             client.clear();
             setSignedIn(false);
           }}

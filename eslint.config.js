@@ -38,5 +38,10 @@ export default tseslint.config(
     ...tseslint.configs.disableTypeChecked,
     languageOptions: { parserOptions: { projectService: false } },
   },
+  {
+    // The website's one script runs in the browser.
+    files: ['website/**/*.js'],
+    languageOptions: { globals: { ...globals.browser } },
+  },
   prettier,
 );

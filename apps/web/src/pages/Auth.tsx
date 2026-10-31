@@ -1,4 +1,5 @@
 import { type FormEvent, type ReactNode, useEffect, useState } from 'react';
+import { track } from '../analytics.js';
 import { ApiError, type AuthOptions, api, setToken } from '../api.js';
 import { Brand, PRIVACY_URL, TERMS_URL, TermsConsent } from '../ui.js';
 
@@ -244,6 +245,7 @@ export function Signup() {
           ...(paid ? { acceptTerms } : {}),
         },
       });
+      track('signed_up', { plan });
       if (r.checkoutUrl) window.location.assign(r.checkoutUrl);
       else setDone(email.trim());
     } catch (err) {

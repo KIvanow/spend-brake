@@ -49,6 +49,9 @@ export async function runApi(opts: RunApiOptions = {}): Promise<void> {
       signup: env.BRAKE_HOSTED_SIGNUP,
       egressIps: env.BRAKE_PROXY_EGRESS_IPS,
       ...(env.BRAKE_PUBLIC_PROXY_URL ? { proxyUrl: env.BRAKE_PUBLIC_PROXY_URL } : {}),
+      ...(env.BRAKE_POSTHOG_KEY
+        ? { analytics: { key: env.BRAKE_POSTHOG_KEY, host: env.BRAKE_POSTHOG_HOST } }
+        : {}),
     },
     extensions: (await opts.extensions?.(db, valkey)) ?? [],
   });

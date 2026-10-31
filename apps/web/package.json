@@ -13,6 +13,7 @@
   "dependencies": {
     "@spend-brake/shared": "workspace:^",
     "@tanstack/react-query": "^5.101.4",
+    "posthog-js": "1.438.12",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },

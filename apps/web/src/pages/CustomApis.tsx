@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
+import { track } from '../analytics.js';
 import { api } from '../api.js';
 import { type CustomApi, type CustomApiRoute, useCustomApis } from '../providers.js';
 import { useRole } from '../role.js';
@@ -139,6 +140,7 @@ function CustomApiForm({ editing, onDone }: { editing: CustomApi | null; onDone:
             body: { id: d.id.trim(), ...bodyOf(d) },
           }),
     onSuccess: () => {
+      if (!editing) track('custom_api_created', {});
       void qc.invalidateQueries({ queryKey: ['custom-apis'] });
       if (!editing) setD(emptyDraft());
       onDone();

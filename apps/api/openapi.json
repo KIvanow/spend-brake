@@ -4606,13 +4606,32 @@
                       "items": {
                         "type": "string"
                       }
+                    },
+                    "analytics": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "key": {
+                          "type": "string"
+                        },
+                        "host": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "host"
+                      ]
                     }
                   },
                   "required": [
                     "emailSignIn",
                     "signup",
                     "proxyUrl",
-                    "egressIps"
+                    "egressIps",
+                    "analytics"
                   ]
                 }
               }

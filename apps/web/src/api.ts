@@ -83,6 +83,8 @@ export interface AuthOptions {
   proxyUrl: string | null;
   /** The proxy's outbound IPs: provider keys should be restricted to them. */
   egressIps: string[];
+  /** Product analytics (PostHog), when the install turned them on. */
+  analytics?: { key: string; host: string } | null;
 }
 
 export class ApiError extends Error {

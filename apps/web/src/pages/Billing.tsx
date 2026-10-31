@@ -1,5 +1,6 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
+import { track } from '../analytics.js';
 import { type Cap, api, usd } from '../api.js';
 import { useRole } from '../role.js';
 import { Table, TermsConsent, Time } from '../ui.js';
@@ -63,7 +64,10 @@ export function Billing() {
             method: 'POST',
             body: { plan: to.checkout, acceptTerms },
           }),
-    onSuccess: (r) => window.location.assign(r.url),
+    onSuccess: (r, to) => {
+      if (to !== 'portal') track('checkout_started', { plan: to.checkout });
+      window.location.assign(r.url);
+    },
   });
   const download = useMutation({
     mutationFn: async () => {

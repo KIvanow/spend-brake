@@ -14,6 +14,13 @@
     <link rel="canonical" href="https://spendbrake.dev/privacy" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/site.css" />
+    <script
+      defer
+      src="https://cdn.jsdelivr.net/npm/posthog-js@1.438.12/dist/array.no-external.js"
+      integrity="sha384-+Lkmn19DYonVgUwLkn6wB27C9VRu21N4rIsR+Y5JGqhmp6JLZKAzUV0uUwgMMdiY"
+      crossorigin="anonymous"
+    ></script>
+    <script defer src="/analytics.js"></script>
   </head>
   <body>
     <header class="top">
@@ -65,11 +72,13 @@
               </li>
               <li>
                 Payments go through Stripe. Transactional email goes through Resend. The service
-                runs on DigitalOcean; this website is served by Vercel.
+                runs on DigitalOcean; this website is served by Vercel. Product analytics go to
+                PostHog, hosted in the EU.
               </li>
               <li>
-                I do not sell personal information and this website sets no cookies and runs no
-                analytics.
+                I do not sell personal information. Neither this website nor the dashboard sets
+                cookies or keeps anything in your browser for analytics; they count page views and
+                button clicks to see how Spend Brake is used.
               </li>
               <li>A self-hosted install sends nothing to me.</li>
             </ul>
@@ -99,8 +108,9 @@
             the following reach anything outside your install: price checks fetch public provider
             price pages; the optional signed catalog feed downloads price bundles from the feed URL
             you configure; and any alert, email, OpenTelemetry or webhook destinations you set up
-            receive what you send them. This policy therefore applies to self-hosted installs only
-            to the extent you contact me, buy a license, or use the website.
+            receive what you send them. Its dashboard sends product analytics only if you turn them
+            on with your own PostHog project. This policy therefore applies to self-hosted installs
+            only to the extent you contact me, buy a license, or use the website.
           </p>
 
           <h2>Personal Information I Collect</h2>
@@ -193,20 +203,50 @@
               switches are recorded with who made them and when, so your org can see what happened.
             </li>
             <li>
-              <strong>This website</strong> (spendbrake.dev) is static. It sets no cookies, loads no
-              third-party scripts and runs no analytics. Vercel, which serves it, keeps its own
-              request logs (including IP addresses) under
+              <strong>This website</strong> (spendbrake.dev) is static. It sets no cookies. Vercel,
+              which serves it, keeps its own request logs (including IP addresses) under
               <a
                 href="https://vercel.com/legal/privacy-policy"
                 target="_blank"
                 rel="noopener noreferrer"
                 >Vercel's Privacy Policy</a
-              >.
+              >. Its one third-party script, PostHog's analytics library, is loaded from the
+              jsDelivr content delivery network, which sees your IP address when it serves the file.
             </li>
             <li>
               <strong>The dashboard</strong> (app.spendbrake.dev) keeps your sign-in token in your
-              browser's local or session storage so you stay signed in. It uses no tracking cookies
-              and no analytics.
+              browser's local or session storage so you stay signed in. It uses no tracking cookies.
+            </li>
+            <li>
+              <strong>Product analytics.</strong> The website and the dashboard send usage events to
+              PostHog so I can see which pages and features are used and where people get stuck.
+              They record:
+              <ul>
+                <li>
+                  the pages you view (on the dashboard, the page name only, never the address bar's
+                  sign-in codes or tokens) and the site that referred you;
+                </li>
+                <li>
+                  on the website, clicks on the sign-up, sign-in, documentation, GitHub and email
+                  links (which plan, where on the page) and which sections you scroll to;
+                </li>
+                <li>
+                  on the dashboard, that you signed up (and the plan), added a provider key (which
+                  provider), created a Spend Brake key, set a cap (the kind of scope only, such as
+                  org or key), added a custom API, started a checkout (the plan) or exported a CSV;
+                </li>
+                <li>
+                  browser, operating system, device type and screen size, and a coarse location
+                  (country and city) that PostHog derives from your IP address. Spend Brake's
+                  PostHog project is set to discard IP addresses rather than store them.
+                </li>
+              </ul>
+              On the website you are not identified at all. On the dashboard, once you sign in,
+              events are linked to your internal user id and your org's id, never to your email
+              address or name. The events never contain key values, credentials, email addresses,
+              amounts or the content of your requests. Neither site sets cookies or uses local or
+              session storage for analytics, and there are no session recordings, surveys or
+              automatic capture of what you type or click.
             </li>
             <li>
               <strong>Email.</strong> Transactional emails (sign-in links, invitations, alerts,
@@ -305,6 +345,16 @@
                       <td>Hosting this website</td>
                       <td>Web request logs for spendbrake.dev</td>
                     </tr>
+                    <tr>
+                      <td>PostHog</td>
+                      <td>
+                        Product analytics (PostHog, Inc.; EU Cloud, hosted in Frankfurt, Germany)
+                      </td>
+                      <td>
+                        Pages viewed, button clicks and the product events above, browser and device
+                        details, coarse location; on the dashboard, your internal user and org ids
+                      </td>
+                    </tr>
                   </tbody>
                 </table>
               </div>
@@ -356,6 +406,11 @@
               tax and accounting law requires.
             </li>
             <li>
+              <strong>Analytics events</strong> are kept in PostHog only as long as they help me
+              understand how the Service is used, under the retention settings of my PostHog
+              project. On request I will delete the events linked to your account.
+            </li>
+            <li>
               <strong>Server logs</strong>: 14 days. <strong>Database backups</strong>: 14 days;
               deleted data may persist in backups until they rotate.
             </li>
@@ -378,10 +433,10 @@
           <h2>International Data Transfers</h2>
           <p>
             I am based in Bulgaria. The hosted service runs in DigitalOcean's Frankfurt, Germany
-            (FRA1) region. Stripe, Resend and Vercel are United States companies and may process
-            data in the United States and elsewhere. Your personal information may therefore be
-            transferred to countries whose privacy laws are not as protective as those where you
-            live.
+            (FRA1) region. Analytics are stored in PostHog's EU Cloud, also in Frankfurt. Stripe,
+            Resend, Vercel and PostHog are United States companies and may process data in the
+            United States and elsewhere. Your personal information may therefore be transferred to
+            countries whose privacy laws are not as protective as those where you live.
           </p>
           <p>
             If you are located in the European Economic Area, the United Kingdom or Switzerland, I
@@ -412,7 +467,10 @@
             <li>
               <strong>Legitimate interests</strong>: operating, securing and improving the Service,
               preventing abuse, and communicating with you, where those interests are not overridden
-              by your rights.
+              by your rights. Product analytics rely on my legitimate interest in understanding how
+              the website and the Service are used so I can improve them; they store nothing on your
+              device and do not identify you on the website. You can object by emailing me, or block
+              them with any content blocker without losing any function.
             </li>
             <li>
               <strong>Compliance with legal obligations</strong>: for example keeping payment
@@ -451,10 +509,12 @@
             list; if I start one, it will be opt-in with an unsubscribe link in every message.
           </p>
           <p>
-            <strong>Cookies and tracking.</strong> This website sets no cookies. The dashboard uses
-            your browser's local or session storage only to keep you signed in; clearing it signs
-            you out. There are no third-party trackers, so there is nothing to opt out of, and
-            &ldquo;Do Not Track&rdquo; signals change nothing because nothing is tracked.
+            <strong>Cookies and tracking.</strong> Neither this website nor the dashboard sets
+            cookies. The dashboard uses your browser's local or session storage only to keep you
+            signed in; clearing it signs you out. The PostHog analytics described above store
+            nothing in your browser, so there is no cookie banner. There are no advertising or
+            cross-site trackers. If you prefer not to be counted, a content blocker that blocks
+            PostHog stops it without breaking anything, or email me to object.
           </p>
           <p>
             <strong>Declining to provide information.</strong> I need certain information, such as

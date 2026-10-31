@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
+import { track } from '../analytics.js';
 import { type AuthOptions, type Key, api, localDate } from '../api.js';
 import { PROVIDERS, useCustomApis, useProviderInfo } from '../providers.js';
 import { useRole } from '../role.js';
@@ -58,6 +59,10 @@ export function AddProviderKey({
         body: { provider, name: info.name, secret: secret.trim() },
       }),
     onSuccess: (c) => {
+      // A built-in provider's id; a custom API's own id stays here.
+      track('provider_key_added', {
+        provider: PROVIDERS.some((p) => p.id === c.provider) ? c.provider : 'custom',
+      });
       setSecret('');
       setCheck(c.check ?? null);
       setRebound(c.reboundKeys?.length ?? 0);
@@ -223,6 +228,7 @@ export function CreateKey({
       }).then((k) => ({ token: k.token, providers: picked.map((c) => c.provider) }));
     },
     onSuccess: (created) => {
+      track('key_created', {});
       setName('');
       void qc.invalidateQueries({ queryKey: ['keys'] });
       onCreated?.(created);

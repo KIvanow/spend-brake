@@ -3,6 +3,7 @@ import { auditLog, eq } from '@spend-brake/db';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Authenticator } from '../src/auth.js';
+import { loadEnv } from '../src/config.js';
 import { createOrg } from '../src/bootstrap.js';
 import { type LoginMail, allowLinkTo } from '../src/login.js';
 import { buildApi } from '../src/server.js';
@@ -29,6 +30,7 @@ beforeAll(async () => {
       signup: true,
       proxyUrl: 'https://proxy.example.com',
       egressIps: ['203.0.113.7'],
+      analytics: { key: 'phc_test', host: 'https://eu.i.posthog.com' },
     },
   });
   await app.ready();
@@ -80,6 +82,7 @@ describe('sign-in options', () => {
       signup: true,
       proxyUrl: 'https://proxy.example.com',
       egressIps: ['203.0.113.7'],
+      analytics: { key: 'phc_test', host: 'https://eu.i.posthog.com' },
     });
     const off = await buildApi({ db: env.db, valkey: env.valkey, wrapper: null });
     expect((await off.inject('/v1/auth/options')).json()).toEqual({
@@ -87,12 +90,28 @@ describe('sign-in options', () => {
       signup: false,
       proxyUrl: null,
       egressIps: [],
+      analytics: null,
     });
     expect(
       (await off.inject({ method: 'POST', url: '/v1/auth/email', payload: { email: 'a@b.co' } }))
         .statusCode,
     ).toBe(404);
     await off.close();
+  });
+});
+
+describe('dashboard analytics settings', () => {
+  it('are off unless a PostHog key is set, and go to PostHog EU by default', () => {
+    expect(loadEnv({}).BRAKE_POSTHOG_KEY).toBeUndefined();
+    expect(loadEnv({ BRAKE_POSTHOG_KEY: ' ' }).BRAKE_POSTHOG_KEY).toBeUndefined();
+    const on = loadEnv({ BRAKE_POSTHOG_KEY: 'phc_abc123', BRAKE_POSTHOG_HOST: '' });
+    expect(on.BRAKE_POSTHOG_KEY).toBe('phc_abc123');
+    expect(on.BRAKE_POSTHOG_HOST).toBe('https://eu.i.posthog.com');
+    expect(loadEnv({ BRAKE_POSTHOG_HOST: 'https://ph.example.com/' }).BRAKE_POSTHOG_HOST).toBe(
+      'https://ph.example.com',
+    );
+    expect(() => loadEnv({ BRAKE_POSTHOG_KEY: 'not-a-key' })).toThrow();
+    expect(() => loadEnv({ BRAKE_POSTHOG_HOST: 'http://ph.example.com' })).toThrow();
   });
 });
 
