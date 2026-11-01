@@ -112,3 +112,6 @@ export const lookupKey = (plan: CheckoutPlan) => `spend_brake_${plan}_monthly`;
 export const PLAN_METADATA = 'spend_brake_plan';
 
 export const isPlan = (v: unknown): v is Plan => PLANS.includes(v as Plan);
+
+/** The Customer Portal configuration the seed script manages carries this metadata key ('1'). */
+export const PORTAL_METADATA = 'spend_brake_portal';

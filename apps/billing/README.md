@@ -49,24 +49,37 @@ sign-up), then a Stripe invoice with a line on the "Spend Brake Enterprise" prod
 `org_units` in the product metadata, or leave the default). Paying the invoice issues the
 license.
 
-## Setting up Stripe (test mode)
+## Setting up Stripe
 
 ```sh
 STRIPE_SECRET_KEY=sk_test_... pnpm --filter @spend-brake/billing seed
 ```
 
 creates the products, monthly prices (lookup keys `spend_brake_<plan>_monthly`) and the
-Customer Portal configuration; running it again changes nothing.
+Customer Portal configuration (metadata `spend_brake_portal=1`), and prints their ids. Running
+it again creates nothing: a price that no longer matches `src/plans.ts` is replaced (the new one
+takes over the lookup key, the old one is archived and keeps its subscribers), and the portal
+configuration is rewritten so it lists the current prices. Nothing from the output goes into
+`.env`: the service finds prices by lookup key and the portal configuration by its metadata,
+and names it on every portal session (a configuration created through the API is never the
+account's default).
 
-Live mode, once, by hand: create a restricted live key (`rk_live_`, write access to Products,
-Prices and Customer portal), then
+The portal lets customers switch between Indie, Team and Agents (prorated), cancel at the end of
+the period, update their card, name, email, address and tax ID, and see their invoices; it links
+the Privacy Policy and Terms (`https://spendbrake.dev/privacy`, `/terms`) and returns to
+`$BRAKE_DASHBOARD_URL/#/billing` (default `https://app.spendbrake.dev`).
+
+Live mode: the scripts refuse a live key unless `BRAKE_STRIPE_ALLOW_LIVE=1`. Use a restricted
+live key (`rk_live_`) with write access to Products, Prices and Customer portal:
 
 ```sh
-STRIPE_SECRET_KEY=rk_live_... BRAKE_STRIPE_ALLOW_LIVE=true pnpm --filter @spend-brake/billing seed
+read -rs STRIPE_SECRET_KEY && export STRIPE_SECRET_KEY   # paste rk_live_..., not echoed
+BRAKE_STRIPE_ALLOW_LIVE=1 pnpm --filter @spend-brake/billing seed
 ```
 
 The billing service takes a live key only with `BILLING_LIVE_MODE=true` (and then refuses a
-test key).
+test key). Its key needs write access to Customers, Checkout Sessions and Customer portal, and
+read access to Products and Prices.
 
 ## Local testing with the Stripe CLI
 

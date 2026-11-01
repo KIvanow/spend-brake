@@ -45,6 +45,7 @@ import {
   MONTHLY_CENTS,
   PLAN_NAMES,
   PLANS,
+  PORTAL_METADATA,
   lookupKey,
 } from './plans.js';
 import { type LicenseMail, applyEvent } from './webhooks.js';
@@ -149,6 +150,25 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
     ).data;
     if (!price) throw new ApiError(503, 'not_seeded', 'Plans are not set up in Stripe yet (seed).');
     return price.id;
+  };
+
+  // The seeded portal configuration (plan switches between the hosted plans): one created
+  // through the API is never the account's default, so each portal session names it. Without
+  // one (not seeded yet), Stripe's default configuration applies.
+  let portalConfig: string | null = null;
+  const portalConfiguration = async () => {
+    if (portalConfig) return portalConfig;
+    try {
+      const configs = await deps.stripe.billingPortal.configurations.list({
+        active: true,
+        limit: 100,
+      });
+      portalConfig = configs.data.find((c) => c.metadata?.[PORTAL_METADATA] === '1')?.id ?? null;
+    } catch (err) {
+      // A restricted key without read access to portal configurations: the default applies.
+      app.log.warn({ err: (err as Error).message }, 'portal configurations not readable');
+    }
+    return portalConfig;
   };
 
   async function customerFor(orgId: string, email: string | null) {
@@ -409,9 +429,11 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
     if (!current?.stripeCustomerId) {
       throw new ApiError(409, 'no_customer', 'Buy a plan first; the portal manages it afterwards.');
     }
+    const configuration = await portalConfiguration();
     const session = await deps.stripe.billingPortal.sessions.create({
       customer: current.stripeCustomerId,
       return_url: `${dashboard}/#/billing`,
+      ...(configuration ? { configuration } : {}),
     });
     return { url: session.url };
   });

@@ -22,7 +22,7 @@ export function assertStripeKeyMode(secretKey: string, liveMode: boolean): void 
 
 /**
  * A Stripe client, test mode unless the caller opts in to live keys (the billing service with
- * BILLING_LIVE_MODE=true, the seed script with BRAKE_STRIPE_ALLOW_LIVE=true).
+ * BILLING_LIVE_MODE=true, the setup scripts with BRAKE_STRIPE_ALLOW_LIVE=1).
  */
 export function stripeClient(secretKey: string, opts: { allowLive?: boolean } = {}): Stripe {
   const live = LIVE_KEY.test(secretKey);
@@ -31,5 +31,26 @@ export function stripeClient(secretKey: string, opts: { allowLive?: boolean } = 
   }
   return new Stripe(secretKey, { maxNetworkRetries: 2, timeout: 20_000 });
 }
+
+/**
+ * The setup scripts' client (seed, webhook-setup): STRIPE_SECRET_KEY from the environment, and a
+ * live key only with BRAKE_STRIPE_ALLOW_LIVE=1 (or true).
+ */
+export function stripeFromEnv(env: NodeJS.ProcessEnv = process.env): {
+  stripe: Stripe;
+  live: boolean;
+} {
+  const key = env.STRIPE_SECRET_KEY;
+  if (!key) throw new Error('Set STRIPE_SECRET_KEY (a test key, or a live key for live mode).');
+  const allowLive = ['1', 'true'].includes(env.BRAKE_STRIPE_ALLOW_LIVE ?? '');
+  if (LIVE_KEY.test(key) && !allowLive) {
+    throw new Error('STRIPE_SECRET_KEY is a live key: set BRAKE_STRIPE_ALLOW_LIVE=1 to use it.');
+  }
+  return { stripe: stripeClient(key, { allowLive }), live: LIVE_KEY.test(key) };
+}
+
+/** The dashboard the setup scripts point Stripe at (portal return URL, webhook endpoint). */
+export const dashboardFromEnv = (env: NodeJS.ProcessEnv = process.env) =>
+  (env.BRAKE_DASHBOARD_URL || 'https://app.spendbrake.dev').replace(/\/$/, '');
 
 export type { Stripe };

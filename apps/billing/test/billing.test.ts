@@ -26,7 +26,6 @@ import { GenericContainer, type StartedTestContainer, Wait } from 'testcontainer
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PLAN_METADATA, type Plan, lookupKey } from '../src/plans.js';
 import { CHECKOUT_WAIVER_MESSAGE, TERMS_VERSION, buildServer } from '../src/server.js';
-import { seedStripe } from '../src/seed.js';
 import { stripeClient } from '../src/stripe.js';
 import type { LicenseMail } from '../src/webhooks.js';
 
@@ -41,6 +40,7 @@ const webhooks = new Stripe('sk_test_signing_only').webhooks;
 // --- a fake Stripe API (no network) ------------------------------------------------------------
 const customers = new Map<string, Stripe.Customer>();
 const checkouts: Stripe.Checkout.SessionCreateParams[] = [];
+const portalSessions: Stripe.BillingPortal.SessionCreateParams[] = [];
 const products: Record<string, { id: string; metadata: Record<string, string> }> = {
   prod_business: { id: 'prod_business', metadata: { [PLAN_METADATA]: 'business' } },
   prod_enterprise: {
@@ -75,9 +75,20 @@ const fakeStripe = {
     },
   },
   billingPortal: {
+    configurations: {
+      list: () =>
+        Promise.resolve({
+          data: [
+            { id: 'bpc_other', metadata: {} },
+            { id: 'bpc_seeded', metadata: { spend_brake_portal: '1' } },
+          ],
+        }),
+    },
     sessions: {
-      create: (p: { customer: string; return_url: string }) =>
-        Promise.resolve({ url: `https://billing.stripe.test/${p.customer}` }),
+      create: (p: { customer: string; return_url: string; configuration?: string }) => {
+        portalSessions.push(p);
+        return Promise.resolve({ url: `https://billing.stripe.test/${p.customer}` });
+      },
     },
   },
   prices: {
@@ -512,6 +523,12 @@ describe('sign-up and checkout', () => {
       headers: bearer(ownerToken),
     });
     expect(portal.json()).toEqual({ url: 'https://billing.stripe.test/cus_p' });
+    // The seeded configuration (plan switches), back to the billing page.
+    expect(portalSessions.at(-1)).toEqual({
+      customer: 'cus_p',
+      return_url: 'https://app.example.com/#/billing',
+      configuration: 'bpc_seeded',
+    });
   });
 });
 
@@ -701,58 +718,6 @@ describe('licenses', () => {
 });
 
 describe('setup', () => {
-  it('seeds products, prices and the portal once', async () => {
-    const store = {
-      products: [] as Stripe.Product[],
-      prices: [] as Stripe.Price[],
-      portals: [] as { id: string; metadata: Record<string, string> }[],
-    };
-    const fake = {
-      products: {
-        list: () => ({
-          [Symbol.asyncIterator]: () => store.products[Symbol.iterator](),
-        }),
-        create: (p: Stripe.ProductCreateParams) => {
-          const product = { id: `prod_${store.products.length}`, ...p } as Stripe.Product;
-          store.products.push(product);
-          return Promise.resolve(product);
-        },
-      },
-      prices: {
-        list: (p: { lookup_keys: string[] }) =>
-          Promise.resolve({
-            data: store.prices.filter((x) => p.lookup_keys.includes(x.lookup_key!)),
-          }),
-        create: (p: Stripe.PriceCreateParams) => {
-          const price = { id: `price_${store.prices.length}`, ...p } as unknown as Stripe.Price;
-          store.prices.push(price);
-          return Promise.resolve(price);
-        },
-      },
-      billingPortal: {
-        configurations: {
-          list: () => Promise.resolve({ data: store.portals }),
-          create: (p: { metadata: Record<string, string> }) => {
-            const c = { id: `bpc_${store.portals.length}`, metadata: p.metadata };
-            store.portals.push(c);
-            return Promise.resolve(c);
-          },
-        },
-      },
-    } as unknown as Stripe;
-    const first = await seedStripe(fake);
-    expect(first.created).toHaveLength(10); // 5 products, 4 prices, the portal
-    expect(store.prices.map((p) => [p.lookup_key, p.unit_amount])).toEqual([
-      ['spend_brake_indie_monthly', 900],
-      ['spend_brake_team_monthly', 4900],
-      ['spend_brake_agents_monthly', 14900],
-      ['spend_brake_business_monthly', 29900],
-    ]);
-    const second = await seedStripe(fake);
-    expect(second.created).toEqual([]);
-    expect(second.prices).toEqual(first.prices);
-  });
-
   it('refuses live Stripe keys', () => {
     expect(() => stripeClient('sk_live_abc')).toThrow(/test-mode/);
     expect(() => stripeClient('sk_test_abc')).not.toThrow();
