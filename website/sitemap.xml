@@ -13,6 +13,9 @@
     <loc>https://spendbrake.dev/security</loc>
   </url>
   <url>
+    <loc>https://spendbrake.dev/status</loc>
+  </url>
+  <url>
     <loc>https://spendbrake.dev/dpa</loc>
   </url>
 </urlset>
