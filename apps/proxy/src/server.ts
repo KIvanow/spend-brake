@@ -238,7 +238,9 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
 
   const app = Fastify({
     logger: deps.logger ?? false,
-    trustProxy: deps.trustProxy ?? false,
+    // Only the private hops in front (Caddy): a client's own X-Forwarded-For must not choose
+    // the address a key's allowedIps is checked against.
+    trustProxy: deps.trustProxy ? 'loopback, linklocal, uniquelocal' : false,
     bodyLimit: 1024 * 1024,
     genReqId: () => randomUUID(),
   });

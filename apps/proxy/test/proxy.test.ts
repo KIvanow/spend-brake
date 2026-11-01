@@ -177,6 +177,30 @@ describe('error contract', () => {
     expect((await textSearch(ipOk.token)).statusCode).toBe(200);
   });
 
+  it('trusts X-Forwarded-For only from a private hop for allowedIps', async () => {
+    const side = await startProxy(valkeyUrl, mock, { trustProxy: true });
+    const org = newOrg();
+    const { token } = await newKey(side, org, { allowedIps: ['198.51.100.7'] });
+    const call = (remoteAddress: string) =>
+      side.proxy.inject({
+        method: 'POST',
+        url: '/google-places/v1/places:searchText',
+        remoteAddress,
+        headers: {
+          'x-brake-key': token,
+          'x-goog-fieldmask': 'places.displayName',
+          'x-forwarded-for': '198.51.100.7',
+        },
+        payload: '{}',
+      });
+    // A client on the internet cannot claim the allowed address itself...
+    expect((await call('203.0.113.9')).statusCode).toBe(401);
+    // ...but the address a private hop in front (Caddy) forwards is used.
+    expect((await call('10.0.0.2')).statusCode).toBe(200);
+    expect((await call('127.0.0.1')).statusCode).toBe(200);
+    await side.proxy.close();
+  });
+
   it('402 budget_exceeded names the scope and nothing reaches Google', async () => {
     const org = newOrg();
     const { token, id } = await newKey(h, org, { name: 'web app' });
