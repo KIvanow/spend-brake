@@ -171,6 +171,29 @@ Spend recorded after the backup was taken is not in it: after a restore, live co
 where they were at backup time, so caps can let that much through again. The backup contains
 encrypted credentials; it is useless without `BRAKE_MASTER_KEY`, which is not in it.
 
+### Testing your backups
+
+A backup you have never restored is a guess. Restore one into a scratch database and a
+throwaway Valkey now and then, and compare with the live install; nothing live is touched:
+
+```sh
+b=backups/20261030T120000Z
+C="docker compose --env-file infra/.env $COMPOSE_FILES"
+$C exec -T postgres createdb -U brake brake_drill
+$C exec -T postgres pg_restore -U brake -d brake_drill --exit-on-error --no-owner < $b/postgres.dump
+for d in brake brake_drill; do
+  $C exec -T postgres psql -U brake -d $d -tAc \
+    'select (select count(*) from orgs), (select count(*) from virtual_keys), (select count(*) from audit_log)'
+done
+$C exec -T postgres dropdb -U brake brake_drill
+
+d=$(mktemp -d) && cp $b/valkey.rdb $d/dump.rdb && chmod -R a+rwX $d
+docker run -d --name vk-drill -v $d:/data valkey/valkey:8 valkey-server --dbfilename dump.rdb --appendonly no
+sleep 3 && docker exec vk-drill valkey-cli dbsize && docker rm -f vk-drill && rm -rf $d
+```
+
+The counts should match the live install, less whatever changed since the backup was taken.
+
 ## 6. Upgrades
 
 1. Read the release notes in [CHANGELOG.md](https://github.com/KIvanow/spend-brake/blob/main/CHANGELOG.md).
