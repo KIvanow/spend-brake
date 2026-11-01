@@ -135,10 +135,10 @@
             >
           </div>
           <div>
-            <b>One request of overshoot</b>
+            <b>Bounded overshoot</b>
             <span
               >Worst-case cost is reserved first and settled after. Overshoot is bounded by a single
-              call's worst case.</span
+              call's worst case, unless a key opts into fail-open.</span
             >
           </div>
         </div>
@@ -178,7 +178,7 @@
             <li>
               <h3>Forward</h3>
               <p>
-                The real key is decrypted locally and never logged. Responses stream through;
+                The real key is decrypted locally and never logged. Responses are passed through;
                 nothing is cached.
               </p>
             </li>
@@ -537,7 +537,7 @@ HTTP 200 · cost <span class="ok">$0.0050</span> · remaining $4.99
                 <li>20 agent sessions/month</li>
                 <li>7 days of call history</li>
               </ul>
-              <a class="btn" href="https://app.spendbrake.dev/#/signup?plan=free">Create account</a>
+              <a class="btn" href="https://app.spendbrake.dev/#/signup?plan=free">Start free</a>
             </article>
             <article class="plan">
               <h3>Indie</h3>
@@ -677,8 +677,9 @@ Use it instead of the Google key, with the proxy as the base URL:
             <p>
               Restrict each provider key to the proxy's outbound IP addresses and the APIs you use;
               <code>brake init</code> prints the exact steps. Keep the provider's own budgets and
-              quotas on as a backstop. Overshoot is bounded by one request's worst case, and your
-              provider's bill remains the authoritative record of what you spent.
+              quotas on as a backstop. Overshoot is bounded by a single call's worst case unless a
+              key opts into fail-open, and your provider's bill remains the authoritative record of
+              what you spent.
             </p>
           </div>
         </div>
