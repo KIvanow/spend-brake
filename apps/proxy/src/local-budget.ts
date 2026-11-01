@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { readFileSync, readdirSync, renameSync } from 'node:fs';
-import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
+import { readFileSync, readdirSync, renameSync, statSync } from 'node:fs';
+import { mkdir, rename, rm, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Scope, ScopeShare } from '@spend-brake/budget';
 
@@ -80,19 +80,31 @@ export function parseJournal(text: string): FailOpenEntry[] {
 }
 
 const JOURNAL_FILE = /^fail-open-[\w-]+\.json$/;
+/** A file a proxy claimed for replay: the journal's name plus the claiming proxy's id. */
+const CLAIMED_FILE = /^(fail-open-[\w-]+\.json)\.replaying-[\w-]+$/;
+
+/**
+ * How long a claimed file may go untouched before a starting proxy takes it over: the
+ * containers' stop grace period. A live holder refreshes its claims on every replay tick, so an
+ * older claim belongs to a proxy that was killed before it recorded the file.
+ */
+export const STALE_CLAIM_MS = 35_000;
 
 /**
  * Fail-open spend kept on disk from a shutdown that could not reach Valkey to the next start.
  * Several proxies may share the directory (a scaled service on one volume): each writes its own
  * file, and a starting proxy claims a file by renaming it, so only one of them replays it. A file
  * stays until its entries are recorded or saved again: replaying twice overcounts, losing it
- * undercounts.
+ * undercounts. A claim left by a proxy killed mid-replay is taken over once it is stale.
  */
 export class JournalDir {
   private readonly id = randomUUID();
   private claimed: string[] = [];
 
-  constructor(private readonly dir: string) {}
+  constructor(
+    private readonly dir: string,
+    private readonly staleClaimMs = STALE_CLAIM_MS,
+  ) {}
 
   /** Claim and read every file earlier shutdowns left. Unreadable ones are set aside. */
   load(onBad: (file: string, err: Error) => void): FailOpenEntry[] {
@@ -104,8 +116,12 @@ export class JournalDir {
       throw err;
     }
     const entries: FailOpenEntry[] = [];
-    for (const name of names.filter((n) => JOURNAL_FILE.test(n))) {
-      const claim = join(this.dir, `${name}.replaying-${this.id}`);
+    for (const name of names) {
+      const base = JOURNAL_FILE.test(name) ? name : this.staleClaim(name);
+      if (base === null) continue;
+      // The rename is the claim, so of two proxies starting together only one wins a file. It
+      // also sets the file's ctime, which is what keeps a claim fresh.
+      const claim = join(this.dir, `${base}.replaying-${this.id}`);
       try {
         renameSync(join(this.dir, name), claim);
       } catch {
@@ -115,11 +131,29 @@ export class JournalDir {
         entries.push(...parseJournal(readFileSync(claim, 'utf8')));
         this.claimed.push(claim);
       } catch (err) {
-        renameSync(claim, join(this.dir, `${name}.bad`));
+        renameSync(claim, join(this.dir, `${base}.bad`));
         onBad(name, err as Error);
       }
     }
     return entries;
+  }
+
+  /** The journal name of a claimed file untouched for the grace period, else null. */
+  private staleClaim(name: string): string | null {
+    const m = CLAIMED_FILE.exec(name);
+    if (!m) return null;
+    try {
+      const { ctimeMs } = statSync(join(this.dir, name));
+      return Date.now() - ctimeMs >= this.staleClaimMs ? m[1]! : null;
+    } catch {
+      return null; // claimed or removed meanwhile
+    }
+  }
+
+  /** Touch this proxy's claims, so no starting proxy takes them over while it lives. */
+  async refresh(): Promise<void> {
+    const now = new Date();
+    await Promise.all(this.claimed.map((f) => utimes(f, now, now).catch(() => undefined)));
   }
 
   /** Whether claimed files are waiting to be recorded. */

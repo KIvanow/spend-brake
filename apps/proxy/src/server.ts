@@ -90,6 +90,11 @@ export interface ProxyDeps {
    * replayed after the next start. Without it, that spend is only logged.
    */
   failOpenJournalDir?: string;
+  /**
+   * How long a journal file another proxy claimed may go untouched before this one takes it over
+   * at start (that proxy was killed mid-replay). Defaults to the stop grace period.
+   */
+  failOpenStaleClaimMs?: number;
 }
 
 declare module 'fastify' {
@@ -256,7 +261,9 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
   });
 
   // Fail-open spend kept by earlier shutdowns that could not reach Valkey.
-  const journalDir = deps.failOpenJournalDir ? new JournalDir(deps.failOpenJournalDir) : null;
+  const journalDir = deps.failOpenJournalDir
+    ? new JournalDir(deps.failOpenJournalDir, deps.failOpenStaleClaimMs)
+    : null;
   if (journalDir) {
     local.journal.push(
       ...journalDir.load((file, err) =>
@@ -299,6 +306,7 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
     return n;
   }
   const replayTimer = setInterval(() => {
+    if (journalDir?.holding) track(journalDir.refresh());
     if (local.journal.length > 0) track(replayFailOpen());
   }, deps.replayIntervalMs ?? 5_000);
   replayTimer.unref();

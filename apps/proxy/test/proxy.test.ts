@@ -1,7 +1,7 @@
-import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdtemp, readFile, readdir, rename, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { BudgetEngine } from '@spend-brake/budget';
 import type { StartedTestContainer } from 'testcontainers';
@@ -855,6 +855,35 @@ describe('Valkey outage', () => {
     expect(replayed).toBe(1);
     expect(await h.valkey.get(`bk:{o:${org}}:spent:key:${open.id}:d:20261029`)).toBe('64000');
     // Recorded, so the file is gone and a further restart replays nothing.
+    expect(await readdir(dir)).toEqual([]);
+    await Promise.all([a.proxy.close(), b.proxy.close()]);
+    await rm(dirname(dir), { recursive: true });
+  });
+
+  it('replays a file a proxy killed mid-replay left claimed, once', async () => {
+    const dir = join(await mkdtemp(join(tmpdir(), 'brake-journal-')), 'state');
+    const { side, org, open } = await outage({ failOpenJournalDir: dir });
+    await side.proxy.close();
+    // A proxy claims the file at start and is killed before it records it: no close, no save.
+    const [file] = await readdir(dir);
+    const claim = join(dir, `${file}.replaying-${randomUUID()}`);
+    await rename(join(dir, file!), claim);
+
+    // A fresh claim may still belong to a live proxy: it is left alone.
+    const opts = { replayIntervalMs: 3_600_000, failOpenJournalDir: dir };
+    const early = await startProxy(valkeyUrl, mock, opts);
+    expect(await early.proxy.brakeReplayFailOpen()).toBe(0);
+    await early.proxy.close();
+    expect(await readdir(dir)).toEqual([basename(claim)]);
+
+    // Past the grace period it is taken over, by only one of two proxies starting together.
+    await new Promise((r) => setTimeout(r, 60));
+    const stale = { ...opts, failOpenStaleClaimMs: 50 };
+    const a = await startProxy(valkeyUrl, mock, stale);
+    const b = await startProxy(valkeyUrl, mock, stale);
+    const replayed = (await a.proxy.brakeReplayFailOpen()) + (await b.proxy.brakeReplayFailOpen());
+    expect(replayed).toBe(1);
+    expect(await h.valkey.get(`bk:{o:${org}}:spent:key:${open.id}:d:20261029`)).toBe('64000');
     expect(await readdir(dir)).toEqual([]);
     await Promise.all([a.proxy.close(), b.proxy.close()]);
     await rm(dirname(dir), { recursive: true });
