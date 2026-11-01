@@ -192,8 +192,11 @@
           </ol>
           <p class="flow">
             <code>app / agent → proxy → provider</code>, then
-            <code>Valkey → worker → Postgres ledger → alerts → webhooks / email</code>. Valkey down
-            means fail closed (<code>503</code>) unless a key opts into a small fail-open allowance.
+            <code>Valkey → worker → Postgres ledger → alerts → webhooks / email</code>.
+          </p>
+          <p class="failnote">
+            Valkey down means fail closed (<code>503</code>) unless a key opts into a small
+            fail-open allowance.
           </p>
         </div>
       </section>

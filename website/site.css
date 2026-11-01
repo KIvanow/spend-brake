@@ -15,7 +15,7 @@
   --ok: #15803d;
   --code-bg: #1d1d1b;
   --code-text: #ececea;
-  --code-muted: #8f8f88;
+  --code-muted: #9a9a93;
   --code-ok: #4ade80;
   --code-brake: #ff7a6e;
   --code-key: #9ab8ff;
@@ -327,7 +327,7 @@ h2 {
   font-size: clamp(26px, 3.6vw, 38px);
   font-weight: 650;
   margin-bottom: 14px;
-  max-width: 24ch;
+  max-width: 36ch;
 }
 
 /* Hero */
@@ -364,13 +364,13 @@ h2 {
     padding: 96px 0 72px;
   }
   .hero .wrap {
-    grid-template-columns: 1.05fr 1fr;
+    grid-template-columns: 1.25fr 1fr;
     align-items: center;
     gap: 56px;
   }
 }
 .hero h1 {
-  font-size: clamp(34px, 4.8vw, 54px);
+  font-size: clamp(34px, 4.4vw, 48px);
   font-weight: 700;
   letter-spacing: -0.03em;
   margin: 0 0 18px;
@@ -538,12 +538,17 @@ h2 {
   font-size: 14px;
 }
 .flow {
-  margin-top: 18px;
+  margin: 18px 0 0;
   color: var(--muted);
   font-size: 14px;
 }
 .flow code {
   color: var(--text);
+}
+.failnote {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 14px;
 }
 
 /* Feature grid */
