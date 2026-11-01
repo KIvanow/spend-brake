@@ -4,6 +4,12 @@
   "trailingSlash": false,
   "redirects": [
     {
+      "source": "/",
+      "has": [{ "type": "host", "value": "status.spendbrake.dev" }],
+      "destination": "https://spendbrake.dev/status",
+      "permanent": false
+    },
+    {
       "source": "/:path*",
       "has": [{ "type": "host", "value": "status.spendbrake.dev" }],
       "destination": "https://spendbrake.dev/status",
