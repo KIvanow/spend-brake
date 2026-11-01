@@ -887,6 +887,9 @@ footer p {
   margin: 0;
   max-width: 52ch;
 }
+footer p + p {
+  margin-top: 8px;
+}
 
 /* Legal pages */
 .legal {
@@ -996,5 +999,60 @@ footer p {
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
+  }
+}
+
+/* Print, which is also how /dpa.pdf is made: the light palette, no header, footer or menu, and
+   the note that names the page's address. */
+.legal .print-note {
+  display: none;
+}
+@media print {
+  :root,
+  :root:not([data-theme='light']),
+  :root[data-theme='dark'] {
+    --bg: #ffffff;
+    --surface: #ffffff;
+    --surface-2: #f2f2ef;
+    --text: #1b1b19;
+    --muted: #55554f;
+    --border: #d6d6d0;
+    --accent: #1d4ed8;
+    --brake: #c92a1f;
+    --shadow: none;
+    color-scheme: light;
+  }
+  .top,
+  footer,
+  .pdf-link {
+    display: none;
+  }
+  .legal {
+    padding: 0;
+  }
+  .legal .print-note {
+    display: block;
+    color: var(--muted);
+    font-size: 14px;
+    margin-bottom: 24px;
+  }
+  .legal .wrap {
+    max-width: none;
+    padding: 0;
+  }
+  h2,
+  h3 {
+    break-after: avoid;
+  }
+  li,
+  tr,
+  .legal .summary {
+    break-inside: avoid;
+  }
+  .legal .table-wrap {
+    overflow: visible;
+  }
+  .legal .table-wrap table {
+    min-width: 0;
   }
 }
