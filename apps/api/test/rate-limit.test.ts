@@ -36,4 +36,31 @@ describe('rate limits', () => {
     expect(codes[7]).toBe(429);
     await app.close();
   });
+
+  it('behind the reverse proxy, takes X-Forwarded-For only from private hops', async () => {
+    // 4 per IP per minute.
+    const app = await buildApi({
+      db: env.db,
+      valkey: env.valkey,
+      wrapper: null,
+      rateLimitPerMinute: 1,
+      trustProxy: true,
+    });
+    const attempt = (forwardedFor: string, remoteAddress = '172.18.0.5') =>
+      app.inject({
+        url: '/v1/keys',
+        remoteAddress,
+        headers: { 'x-forwarded-for': forwardedFor },
+      });
+    for (let i = 0; i < 4; i++) expect((await attempt('203.0.113.7')).statusCode).toBe(401);
+    expect((await attempt('203.0.113.7')).statusCode).toBe(429);
+    // Another client (Caddy -> nginx hops are private) has its own bucket.
+    expect((await attempt('198.51.100.9, 172.18.0.2')).statusCode).toBe(401);
+    // A public peer's own X-Forwarded-For is not trusted: it can't pick a bucket, or an address.
+    const codes: number[] = [];
+    for (let i = 0; i < 5; i++)
+      codes.push((await attempt(`192.0.2.${i}`, '203.0.113.7')).statusCode);
+    expect(codes).toEqual([429, 429, 429, 429, 429]);
+    await app.close();
+  });
 });

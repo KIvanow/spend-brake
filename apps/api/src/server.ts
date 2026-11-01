@@ -86,7 +86,9 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   const now = deps.now ?? (() => new Date());
   const app = Fastify({
     logger: deps.logger ?? false,
-    trustProxy: deps.trustProxy ?? false,
+    // Only the private hops in front (Caddy, the dashboard's nginx): a client's own
+    // X-Forwarded-For must not choose its rate-limit bucket or its address.
+    trustProxy: deps.trustProxy ? 'loopback, linklocal, uniquelocal' : false,
     bodyLimit: 256 * 1024,
   });
   const ctx = apiContext({ ...deps, now });
