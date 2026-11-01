@@ -251,29 +251,39 @@ return {'SETTLED'}
  * Record spend that was never reserved: fail-open requests made while Valkey was unreachable,
  * replayed once it answers. Adds to `spent` on every pair, counts units and appends the event.
  *
- * KEYS: events, then spent per pair, then one units key per SKU
- * ARGV: nPairs, nUnits, unitsTtlSec, pairAmount..., pairTtlSec..., unitIncrements..., maxLen, then
- *       event field/value pairs
+ * KEYS: events, then spent per pair, then one units key per SKU, then (optional) the entry's
+ *       recorded marker
+ * ARGV: nPairs, nUnits, unitsTtlSec, recordedTtlSec, pairAmount..., pairTtlSec...,
+ *       unitIncrements..., maxLen, then event field/value pairs
+ *
+ * With a recorded marker, the spend is added only if the marker is not set yet (SET NX, kept
+ * for recordedTtlSec): a retry after a lost reply, or a second replay of the same entry, changes
+ * nothing.
+ * Returns 'OK' | 'DUPLICATE'
  */
 export const RECORD_LUA = `
 local nPairs = tonumber(ARGV[1])
 local nUnits = tonumber(ARGV[2])
+local recorded = KEYS[2 + nPairs + nUnits]
+if recorded and not redis.call('SET', recorded, '1', 'NX', 'EX', ARGV[4]) then
+  return 'DUPLICATE'
+end
 for i = 1, nPairs do
-  redis.call('INCRBY', KEYS[1 + i], ARGV[3 + i])
-  redis.call('EXPIRE', KEYS[1 + i], ARGV[3 + nPairs + i], 'NX')
+  redis.call('INCRBY', KEYS[1 + i], ARGV[4 + i])
+  redis.call('EXPIRE', KEYS[1 + i], ARGV[4 + nPairs + i], 'NX')
 end
 for i = 1, nUnits do
   local key = KEYS[1 + nPairs + i]
-  redis.call('INCRBY', key, ARGV[3 + 2 * nPairs + i])
+  redis.call('INCRBY', key, ARGV[4 + 2 * nPairs + i])
   redis.call('EXPIRE', key, ARGV[3], 'NX')
 end
-local first = 5 + 2 * nPairs + nUnits
+local first = 6 + 2 * nPairs + nUnits
 local fields = {}
 for i = first, #ARGV do
   fields[#fields + 1] = ARGV[i]
 end
 if #fields > 0 then
-  redis.call('XADD', KEYS[1], 'MAXLEN', '~', ARGV[4 + 2 * nPairs + nUnits], '*', unpack(fields))
+  redis.call('XADD', KEYS[1], 'MAXLEN', '~', ARGV[5 + 2 * nPairs + nUnits], '*', unpack(fields))
 end
 return 'OK'
 `;

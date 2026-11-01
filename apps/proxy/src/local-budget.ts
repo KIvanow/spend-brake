@@ -6,6 +6,8 @@ import type { Scope, ScopeShare } from '@spend-brake/budget';
 
 /** A fail-open request to record in Valkey once it is reachable again. */
 export interface FailOpenEntry {
+  /** Stable across retries and restarts, so recording an entry twice adds it once. */
+  id: string;
   orgId: string;
   scopes: Scope[];
   /** SKU scopes charged their own part (multi-SKU requests). */
@@ -58,10 +60,14 @@ export function serializeJournal(entries: readonly FailOpenEntry[]): string {
   );
 }
 
+const ENTRY_ID = /^[\w.-]{1,128}$/;
+
 export function parseJournal(text: string): FailOpenEntry[] {
   const raw = JSON.parse(text) as unknown;
   if (!Array.isArray(raw)) throw new Error('fail-open journal is not a list');
   return raw.map((e: Record<string, unknown>) => ({
+    // Files written before entries had ids still replay; they get one from here on.
+    id: typeof e.id === 'string' && ENTRY_ID.test(e.id) ? e.id : randomUUID(),
     orgId: String(e.orgId),
     scopes: e.scopes as Scope[],
     scopeShares: ((e.scopeShares ?? []) as { scope: Scope; amount: string }[]).map((s) => ({

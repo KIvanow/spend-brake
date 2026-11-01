@@ -365,6 +365,25 @@ describe('scope shares', () => {
     expect((await used(org, dataScope)).spent).toBe(3n);
     expect((await used(org, { kind: 'org' })).spent).toBe(40n);
   });
+
+  it('records spend with an id once, however often it is replayed', async () => {
+    const org = newOrg();
+    const r = {
+      orgId: org,
+      id: 'e1',
+      amount: 40n,
+      scopes: [{ kind: 'org' } as const],
+      timeZone: TZ,
+      at: NOW,
+      units: [{ sku: 'places.text_search.pro', units: 1n }],
+      event: { failOpen: '1' },
+    };
+    expect(await engine.recordSpend(r)).toBe(true);
+    expect(await engine.recordSpend(r)).toBe(false);
+    expect(await engine.recordSpend({ ...r, id: 'e2' })).toBe(true);
+    expect((await used(org, { kind: 'org' })).spent).toBe(80n);
+    expect(await valkey.client.xlen(`bk:{o:${org}}:events`)).toBe(2);
+  });
 });
 
 describe('sweeper', () => {

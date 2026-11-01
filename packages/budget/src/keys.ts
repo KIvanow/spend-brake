@@ -85,6 +85,8 @@ export function keys(orgId: string) {
     billingSession: (provider: string, tokenHash: string) =>
       `${p}:bsess:${part(provider, 'provider')}:${part(tokenHash, 'hash')}`,
     events: () => `${p}:events`,
+    /** Set once a replayed fail-open entry is recorded, so replaying it again is a no-op. */
+    recorded: (entryId: string) => `${p}:recorded:${part(entryId, 'entry id')}`,
     /** A send whose final provider price is fetched later (Twilio), and the queue of them. */
     pending: (reqId: string) => `${p}:pending:${reqId}`,
     pendingQueue: () => `${p}:pendingq`,

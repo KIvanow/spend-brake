@@ -273,13 +273,30 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
   }
 
   // Fail-open spend is recorded once Valkey answers again, so the ledger, alerts and the next
-  // windows see it.
+  // windows see it. One run at a time: two would both record journal[0]. Each entry is recorded
+  // under its id, so a retry after a lost reply (or a replay of a file already recorded) is a
+  // no-op.
+  let replaying: Promise<number> | null = null;
   async function replayFailOpen(): Promise<number> {
+    if (replaying) {
+      await replaying;
+      return 0;
+    }
+    replaying = replayJournal();
+    try {
+      return await replaying;
+    } finally {
+      replaying = null;
+    }
+  }
+  async function replayJournal(): Promise<number> {
     let n = 0;
     while (local.journal.length > 0) {
       const e = local.journal[0]!;
+      let recorded: boolean;
       try {
-        await engine.recordSpend({
+        recorded = await engine.recordSpend({
+          id: e.id,
           orgId: e.orgId,
           amount: e.amount,
           scopes: e.scopes,
@@ -293,6 +310,7 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
         break;
       }
       local.journal.shift();
+      if (!recorded) continue; // an earlier attempt got through
       metrics.failOpenReplayed.inc();
       n++;
     }
@@ -307,7 +325,7 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
   }
   const replayTimer = setInterval(() => {
     if (journalDir?.holding) track(journalDir.refresh());
-    if (local.journal.length > 0) track(replayFailOpen());
+    if (local.journal.length > 0 && !replaying) track(replayFailOpen());
   }, deps.replayIntervalMs ?? 5_000);
   replayTimer.unref();
 
@@ -953,6 +971,7 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
         local.settle(key.id, failOpenDay, priced.worst, actual);
         if (billed || actual > 0n) {
           local.journal.push({
+            id: randomUUID(),
             orgId: org.id,
             scopes,
             scopeShares: scopeShares.map((s) => ({

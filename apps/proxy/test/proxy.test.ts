@@ -832,6 +832,21 @@ describe('Valkey outage', () => {
     return { side, org, open };
   }
 
+  it('records fail-open spend once when replays overlap on a slow Valkey', async () => {
+    const { side, org, open } = await outage({ replayIntervalMs: 10 });
+    await side.valkey.connect();
+    // Every script call takes longer than several timer ticks.
+    const evalsha = side.valkey.evalsha.bind(side.valkey);
+    side.valkey.evalsha = ((...args: Parameters<typeof evalsha>) =>
+      new Promise((r) => setTimeout(r, 80)).then(() => evalsha(...args))) as typeof evalsha;
+    await new Promise((r) => setTimeout(r, 300));
+    // Two explicit replays of the same entry at once (a timer tick racing a shutdown).
+    await Promise.all([side.proxy.brakeReplayFailOpen(), side.proxy.brakeReplayFailOpen()]);
+    await side.proxy.close();
+    expect(await h.valkey.get(`bk:{o:${org}}:spent:key:${open.id}:d:20261029`)).toBe('64000');
+    expect((await events(org)).filter((e) => e.failOpen === '1')).toHaveLength(1);
+  });
+
   it('records fail-open spend on shutdown once Valkey is back', async () => {
     const { side, org, open } = await outage({});
     await side.valkey.connect();

@@ -111,8 +111,16 @@ export const SESSION_WINDOW_TTL_SEC = 2 * 24 * 3600;
 const windowTtl = (label: string, ttl: number) =>
   label.startsWith('sess:') ? Math.min(ttl, SESSION_WINDOW_TTL_SEC) : ttl;
 
+/**
+ * How long a recorded entry id is remembered. Replays of one entry happen within seconds (a retry
+ * after a lost reply, an overlapping run) or after a restart; 40 days covers any outage.
+ */
+export const RECORDED_TTL_SEC = 40 * 24 * 3600;
+
 export interface RecordSpendRequest {
   orgId: string;
+  /** Makes the record idempotent: spend with an id already recorded is not added again. */
+  id?: string;
   amount: bigint;
   scopes: Scope[];
   timeZone: string;
@@ -437,7 +445,8 @@ export class BudgetEngine {
   }
 
   /** Add spend that was never reserved (fail-open requests replayed after an outage). */
-  async recordSpend(r: RecordSpendRequest): Promise<void> {
+  /** Returns false when spend with the same id was already recorded (nothing changed). */
+  async recordSpend(r: RecordSpendRequest): Promise<boolean> {
     assertMicros(r.amount, 'amount');
     return this.writeSpend(r, r.amount);
   }
@@ -451,10 +460,10 @@ export class BudgetEngine {
   ): Promise<void> {
     const abs = r.delta < 0n ? -r.delta : r.delta;
     assertMicros(abs, 'delta');
-    return this.writeSpend({ ...r, amount: 0n }, r.delta);
+    await this.writeSpend({ ...r, amount: 0n }, r.delta);
   }
 
-  private async writeSpend(r: RecordSpendRequest, amount: bigint): Promise<void> {
+  private async writeSpend(r: RecordSpendRequest, amount: bigint): Promise<boolean> {
     const k = orgKeys(r.orgId);
     const windows = windowsFor(r.at, r.timeZone);
     const shares = new Map((r.scopeShares ?? []).map((s) => [scopeLabel(s.scope), s.amount]));
@@ -468,14 +477,20 @@ export class BudgetEngine {
     );
     const units = [...(r.units ?? [])].filter((u) => u.units > 0n);
     const month = windows[1];
-    await runScript(
+    const reply = await runScript(
       this.client,
       scripts.record,
-      [k.events(), ...pairs.map((p) => p.key), ...units.map((u) => k.units(u.sku, month.id))],
+      [
+        k.events(),
+        ...pairs.map((p) => p.key),
+        ...units.map((u) => k.units(u.sku, month.id)),
+        ...(r.id === undefined ? [] : [k.recorded(r.id)]),
+      ],
       [
         pairs.length,
         units.length,
         month.ttlSec,
+        RECORDED_TTL_SEC,
         ...pairs.map((p) => p.amount.toString()),
         ...pairs.map((p) => p.ttl),
         ...units.map((u) => u.units.toString()),
@@ -483,6 +498,7 @@ export class BudgetEngine {
         ...Object.entries(r.event ?? {}).flat(),
       ],
     );
+    return reply === 'OK';
   }
 
   /** Commit at the reserved worst case (upstream timeout, expired reservation). */
