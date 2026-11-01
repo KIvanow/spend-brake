@@ -115,6 +115,7 @@ them.
 | `BRAKE_GENERIC_PROVIDERS`             | proxy                 |                | JSON array of generic adapter configs: price any other API for every org (see below)                                    |
 | `BRAKE_CUSTOM_API_MAX_RESPONSE_BYTES` | proxy                 | `10485760`     | Largest custom API response passed on; a longer one is cut and recorded as an error                                     |
 | `BRAKE_CATALOG_DIR`                   | proxy                 |                | Updated catalog data (`current/`), checked every 30 s                                                                   |
+| `BRAKE_FAIL_OPEN_DIR`                 | proxy                 | set by compose | Where fail-open spend Valkey could not take by shutdown is kept and replayed after the next start (keep it on a volume) |
 | `METRICS_PORT`                        | proxy, worker         | `9465`, `9464` | Prometheus metrics port                                                                                                 |
 | `BRAKE_ACTION_TTL_SEC`                | notifier              | `900`          | How long alert action links work                                                                                        |
 | `BRAKE_MAX_CUSTOM_RAISE_USD`          | notifier              | `500`          | The largest custom raise an alert link offers                                                                           |

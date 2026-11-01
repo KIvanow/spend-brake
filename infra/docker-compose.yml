@@ -93,6 +93,12 @@ services:
       PORT: '8080'
       BRAKE_MASTER_KEY: ${BRAKE_MASTER_KEY}
       ALLOW_PRIVATE_CUSTOM_APIS: ${ALLOW_PRIVATE_CUSTOM_APIS:-false}
+      # Fail-open spend Valkey could not take by shutdown; replayed on the next start. The volume
+      # is mounted on the service user's home so a fresh one is writable by it.
+      BRAKE_FAIL_OPEN_DIR: ${BRAKE_FAIL_OPEN_DIR:-/home/node/fail-open}
+    volumes: ['proxystate:/home/node']
+    # In-flight requests get the upstream timeout (30 s) to finish before the container is killed.
+    stop_grace_period: 35s
     ports: ['8080:8080']
     depends_on:
       valkey: { condition: service_healthy }
@@ -170,3 +176,4 @@ services:
 volumes:
   pgdata:
   valkeydata:
+  proxystate:

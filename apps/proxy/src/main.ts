@@ -13,7 +13,7 @@ import {
   withCatalogDir,
 } from '@spend-brake/catalog';
 import { Registry, connectValkey } from '@spend-brake/budget';
-import { guardedAgent, keyWrapperFromEnv } from '@spend-brake/shared';
+import { guardedAgent, keyWrapperFromEnv, onShutdownSignal } from '@spend-brake/shared';
 import { loadEnv } from './config.js';
 import { ProxyMetrics } from './metrics.js';
 import { CachingSecretStore, EnvelopeSecretStore, StaticSecretStore } from './secrets.js';
@@ -77,6 +77,7 @@ const app = buildServer({
   customMaxResponseBytes: env.BRAKE_CUSTOM_API_MAX_RESPONSE_BYTES,
   trustProxy: env.TRUST_PROXY,
   logger: loggerOptions(env.LOG_LEVEL),
+  ...(env.BRAKE_FAIL_OPEN_DIR ? { failOpenJournalDir: env.BRAKE_FAIL_OPEN_DIR } : {}),
   ...(env.BRAKE_UPSTREAM_OVERRIDES ? { upstreamOverrides: env.BRAKE_UPSTREAM_OVERRIDES } : {}),
 });
 
@@ -99,15 +100,19 @@ const catalogTimer = setInterval(() => {
 }, 30_000);
 catalogTimer.unref();
 
-for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-  process.once(signal, () => {
+// In-flight requests get the upstream timeout to finish, then fail-open spend is recorded or
+// written out; the compose files give the container 35 s before it is killed.
+onShutdownSignal(
+  async () => {
     clearInterval(catalogTimer);
     metricsServer.close();
-    void app
-      .close()
-      .then(() => valkey.quit())
-      .then(() => process.exit(0));
-  });
-}
+    await app.close();
+    await valkey.quit();
+  },
+  {
+    timeoutMs: env.UPSTREAM_TIMEOUT_MS + 3_000,
+    onError: (err, msg) => app.log.error({ err: (err as Error).message }, msg),
+  },
+);
 
 await app.listen({ port: env.PORT, host: env.HOST });

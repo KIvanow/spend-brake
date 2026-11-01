@@ -1,10 +1,13 @@
 import { connectValkey } from '@spend-brake/budget';
 import { type Db, createDb, migrate } from '@spend-brake/db';
-import { keyWrapperFromEnv } from '@spend-brake/shared';
+import { keyWrapperFromEnv, onShutdownSignal } from '@spend-brake/shared';
 import pino from 'pino';
 import { loadEnv } from './config.js';
 import { Metrics } from './metrics.js';
 import { Worker, type WorkerJob } from './worker.js';
+
+// Docker stops a container 10 s after SIGTERM; exit on our own before that.
+const SHUTDOWN_TIMEOUT_MS = 9_000;
 
 export interface RunWorkerOptions {
   /** Runs after the core migrations (e.g. more migrations). */
@@ -45,13 +48,15 @@ export async function runWorker(opts: RunWorkerOptions = {}): Promise<void> {
   });
   await worker.start();
 
-  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-    process.once(signal, () => {
-      void worker
-        .stop()
-        .then(() => Promise.all([valkey.quit(), queueConnection.quit(), pool.end()]))
-        .then(() => server.close())
-        .then(() => process.exit(0));
-    });
-  }
+  onShutdownSignal(
+    async () => {
+      await worker.stop();
+      await Promise.all([valkey.quit(), queueConnection.quit(), pool.end()]);
+      server.close();
+    },
+    {
+      timeoutMs: SHUTDOWN_TIMEOUT_MS,
+      onError: (err, msg) => log.error({ err: (err as Error).message }, msg),
+    },
+  );
 }

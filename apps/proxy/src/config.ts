@@ -39,6 +39,11 @@ const envSchema = z.object({
    */
   ALLOW_PRIVATE_CUSTOM_APIS: z.stringbool().default(false),
   /** Largest custom API response passed on; a longer one is cut and recorded as an error. */
+  /**
+   * Directory for fail-open spend that could not be recorded in Valkey by shutdown; replayed after
+   * the next start. Put it on a volume. Unset, that spend is only logged.
+   */
+  BRAKE_FAIL_OPEN_DIR: z.string().min(1).optional(),
   BRAKE_CUSTOM_API_MAX_RESPONSE_BYTES: z.coerce
     .number()
     .int()

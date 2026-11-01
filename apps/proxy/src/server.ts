@@ -53,7 +53,7 @@ import {
   responseHeaders,
   upstreamUrl,
 } from './forward.js';
-import { LocalBudget } from './local-budget.js';
+import { JournalDir, LocalBudget, serializeJournal } from './local-budget.js';
 import type { SecretStore } from './secrets.js';
 
 export interface ProxyDeps {
@@ -81,6 +81,11 @@ export interface ProxyDeps {
   metrics?: ProxyMetrics;
   /** How often fail-open spend is retried into Valkey. */
   replayIntervalMs?: number;
+  /**
+   * Directory where fail-open spend that could not reach Valkey by shutdown is kept, to be
+   * replayed after the next start. Without it, that spend is only logged.
+   */
+  failOpenJournalDir?: string;
 }
 
 declare module 'fastify' {
@@ -246,6 +251,16 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
     done();
   });
 
+  // Fail-open spend kept by earlier shutdowns that could not reach Valkey.
+  const journalDir = deps.failOpenJournalDir ? new JournalDir(deps.failOpenJournalDir) : null;
+  if (journalDir) {
+    local.journal.push(
+      ...journalDir.load((file, err) =>
+        app.log.error({ err: err.message, file }, 'unreadable fail-open journal set aside'),
+      ),
+    );
+  }
+
   // Fail-open spend is recorded once Valkey answers again, so the ledger, alerts and the next
   // windows see it.
   async function replayFailOpen(): Promise<number> {
@@ -269,6 +284,13 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
       metrics.failOpenReplayed.inc();
       n++;
     }
+    if (local.journal.length === 0 && journalDir?.holding) {
+      try {
+        await journalDir.release();
+      } catch (err) {
+        app.log.error({ err: (err as Error).message }, 'could not remove a replayed journal');
+      }
+    }
     return n;
   }
   const replayTimer = setInterval(() => {
@@ -276,9 +298,30 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
   }, deps.replayIntervalMs ?? 5_000);
   replayTimer.unref();
 
+  // Fail-open spend lives only in memory: record it before exiting, or keep it on disk.
   app.addHook('onClose', async () => {
     clearInterval(replayTimer);
     await Promise.allSettled([...pending]);
+    if (local.journal.length === 0) return;
+    await replayFailOpen();
+    if (local.journal.length === 0) return;
+    try {
+      if (journalDir) {
+        const file = await journalDir.save(local.journal);
+        app.log.warn(
+          { entries: local.journal.length, file },
+          'fail-open spend kept for the next start',
+        );
+        return;
+      }
+    } catch (err) {
+      app.log.error({ err: (err as Error).message }, 'could not keep fail-open spend');
+    }
+    // Last resort: the operator can still record it by hand.
+    app.log.error(
+      { entries: JSON.parse(serializeJournal(local.journal)) as unknown },
+      'fail-open spend not recorded',
+    );
   });
 
   app.decorate('brakeReplayFailOpen', replayFailOpen);

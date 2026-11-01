@@ -1,11 +1,19 @@
 import { type ValkeyClient, connectValkey } from '@spend-brake/budget';
 import { type Db, createDb, migrate } from '@spend-brake/db';
-import { guardedAgent, keyWrapperFromEnv, redactingLoggerOptions } from '@spend-brake/shared';
+import {
+  guardedAgent,
+  keyWrapperFromEnv,
+  onShutdownSignal,
+  redactingLoggerOptions,
+} from '@spend-brake/shared';
 import { loadEnv, ownHosts } from './config.js';
 import { checkGoogleKey } from './google-check.js';
 import { queueLoginMailer } from './login.js';
 import { resyncValkey } from './resync.js';
 import { type ApiExtension, apiContext, buildApi } from './server.js';
+
+// Docker stops a container 10 s after SIGTERM; exit on our own before that.
+const SHUTDOWN_TIMEOUT_MS = 9_000;
 
 export interface RunApiOptions {
   /** Runs after the core migrations, before the server is built (e.g. more migrations). */
@@ -56,15 +64,17 @@ export async function runApi(opts: RunApiOptions = {}): Promise<void> {
     extensions: (await opts.extensions?.(db, valkey)) ?? [],
   });
 
-  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-    process.once(signal, () => {
-      void app
-        .close()
-        .then(() => mailer?.queue.close())
-        .then(() => Promise.all([valkey.quit(), pool.end()]))
-        .then(() => process.exit(0));
-    });
-  }
+  onShutdownSignal(
+    async () => {
+      await app.close();
+      await mailer?.queue.close();
+      await Promise.all([valkey.quit(), pool.end()]);
+    },
+    {
+      timeoutMs: SHUTDOWN_TIMEOUT_MS,
+      onError: (err, msg) => app.log.error({ err: (err as Error).message }, msg),
+    },
+  );
 
   app.log.info(synced, 'valkey resynced from postgres');
   await app.listen({ port: env.PORT, host: env.HOST });

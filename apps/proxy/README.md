@@ -28,7 +28,9 @@ The request path. Every proxied call goes through these steps:
 - **Request bodies** are parsed as JSON whatever the content type says; a body-priced route whose
   body cannot be read (a matrix of unknown size) is unpriced and denied.
 - **Fail-open** spend is kept in a local journal and recorded in Valkey (spend, units, usage
-  event) as soon as it answers again.
+  event) as soon as it answers again. On shutdown the proxy records what is left; if Valkey is
+  still down it writes it to `BRAKE_FAIL_OPEN_DIR` and records it after the next start (without
+  that directory it is only logged).
 
 ## Routes
 
@@ -105,6 +107,7 @@ Metrics (`:9465/metrics`): `brake_requests_total{provider,sku,outcome}`,
 | `BRAKE_GENERIC_PROVIDERS`             |                           | JSON array of generic adapter configs                  |
 | `ALLOW_PRIVATE_CUSTOM_APIS`           | `false`                   | Let custom APIs reach private and loopback addresses   |
 | `BRAKE_CUSTOM_API_MAX_RESPONSE_BYTES` | `10485760`                | Largest custom API response passed on                  |
+| `BRAKE_FAIL_OPEN_DIR`                 |                           | Keeps fail-open spend across a restart (on a volume)   |
 
 Provider credentials come from `BRAKE_DEV_SECRETS` until Phase 4 adds encrypted storage. Keys and
 orgs are created with `pnpm --filter @spend-brake/proxy seed` until the admin API exists.

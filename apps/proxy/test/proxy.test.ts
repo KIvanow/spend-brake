@@ -1,4 +1,7 @@
 import { createHash } from 'node:crypto';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { BudgetEngine } from '@spend-brake/budget';
 import type { StartedTestContainer } from 'testcontainers';
@@ -12,6 +15,7 @@ import {
   startProxy,
   startValkey,
 } from './harness.js';
+import type { ProxyDeps } from '../src/server.js';
 
 let container: StartedTestContainer;
 let valkeyUrl: string;
@@ -740,6 +744,60 @@ describe('Valkey outage', () => {
     const evs = await events(org);
     expect(evs.filter((e) => e.failOpen === '1')).toHaveLength(1);
     await side.proxy.close();
+  });
+
+  /** A proxy with fail-open spend in its journal and Valkey cut off. */
+  async function outage(extra: Partial<ProxyDeps>) {
+    const side = await startProxy(valkeyUrl, mock, {
+      configTtlMs: 1,
+      replayIntervalMs: 3_600_000,
+      ...extra,
+    });
+    const org = newOrg();
+    const open = await newKey(side, org, { failOpenMicros: '40000' });
+    mock.respond = (_req, reply) => reply.send({ places: [] });
+    const call = () =>
+      side.proxy.inject({
+        method: 'POST',
+        url: '/google-places/v1/places:searchText',
+        headers: { 'x-brake-key': open.token, 'x-goog-fieldmask': 'places.displayName' },
+        payload: '{}',
+      });
+    expect((await call()).statusCode).toBe(200);
+    await side.proxy.brakeDrain();
+    const ended = new Promise<void>((r) => side.valkey.once('end', () => r()));
+    side.valkey.disconnect();
+    await ended;
+    expect((await call()).headers['x-brake-fail-open']).toBe('1');
+    return { side, org, open };
+  }
+
+  it('records fail-open spend on shutdown once Valkey is back', async () => {
+    const { side, org, open } = await outage({});
+    await side.valkey.connect();
+    await side.proxy.close();
+    expect(await h.valkey.get(`bk:{o:${org}}:spent:key:${open.id}:d:20261029`)).toBe('64000');
+  });
+
+  it('keeps fail-open spend in a file across a restart while Valkey is down', async () => {
+    const dir = join(await mkdtemp(join(tmpdir(), 'brake-journal-')), 'state');
+    const { side, org, open } = await outage({ failOpenJournalDir: dir });
+    await side.proxy.close();
+    const files = await readdir(dir);
+    expect(files).toEqual([expect.stringMatching(/^fail-open-.+\.json$/)]);
+    expect(JSON.parse(await readFile(join(dir, files[0]!), 'utf8'))).toHaveLength(1);
+
+    // Two proxies start on the same directory: only one claims the file.
+    const opts = { replayIntervalMs: 3_600_000, failOpenJournalDir: dir };
+    const a = await startProxy(valkeyUrl, mock, opts);
+    const b = await startProxy(valkeyUrl, mock, opts);
+    const replayed = (await a.proxy.brakeReplayFailOpen()) + (await b.proxy.brakeReplayFailOpen());
+    expect(replayed).toBe(1);
+    expect(await h.valkey.get(`bk:{o:${org}}:spent:key:${open.id}:d:20261029`)).toBe('64000');
+    // Recorded, so the file is gone and a further restart replays nothing.
+    expect(await readdir(dir)).toEqual([]);
+    await Promise.all([a.proxy.close(), b.proxy.close()]);
+    await rm(dirname(dir), { recursive: true });
   });
 });
 

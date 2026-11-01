@@ -1,12 +1,15 @@
 import { connectValkey } from '@spend-brake/budget';
 import { createDb } from '@spend-brake/db';
-import { keyWrapperFromEnv } from '@spend-brake/shared';
+import { keyWrapperFromEnv, onShutdownSignal } from '@spend-brake/shared';
 import { createTransport } from 'nodemailer';
 import pino from 'pino';
 import { loadEnv } from './config.js';
 import { guardedAgent } from './deliver.js';
 import { notifierQueues } from './notifier.js';
 import { buildServer, notifierLoggerOptions } from './server.js';
+
+// Docker stops a container 10 s after SIGTERM; exit on our own before that.
+const SHUTDOWN_TIMEOUT_MS = 9_000;
 
 const env = loadEnv();
 const log = pino({ level: env.LOG_LEVEL });
@@ -49,14 +52,16 @@ const app = buildServer({
   logger: notifierLoggerOptions(env.LOG_LEVEL),
 });
 
-for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-  process.once(signal, () => {
-    void app
-      .close()
-      .then(() => queues.close())
-      .then(() => Promise.all([valkey.quit(), queueConnection.quit(), pool.end()]))
-      .then(() => process.exit(0));
-  });
-}
+onShutdownSignal(
+  async () => {
+    await app.close();
+    await queues.close();
+    await Promise.all([valkey.quit(), queueConnection.quit(), pool.end()]);
+  },
+  {
+    timeoutMs: SHUTDOWN_TIMEOUT_MS,
+    onError: (err, msg) => app.log.error({ err: (err as Error).message }, msg),
+  },
+);
 
 await app.listen({ port: env.PORT, host: env.HOST });
