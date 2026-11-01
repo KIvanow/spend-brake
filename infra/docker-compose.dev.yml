@@ -3,7 +3,7 @@ name: spend-brake-dev
 
 services:
   valkey:
-    image: valkey/valkey:8
+    image: valkey/valkey:8@sha256:8f836008e0986c36adf50da714c7060cf689dbb335f61fe077939d90fa650809
     command: ['valkey-server', '--appendonly', 'yes', '--maxmemory-policy', 'noeviction']
     ports:
       - '127.0.0.1:${BRAKE_VALKEY_PORT:-16379}:6379'
@@ -16,7 +16,7 @@ services:
       retries: 30
 
   postgres:
-    image: postgres:16
+    image: postgres:16@sha256:1beaa3084eee2676f20a9cd9928f0bf2c5bf674f8e49f81017912183d377c61c
     environment:
       POSTGRES_USER: brake
       POSTGRES_PASSWORD: brake

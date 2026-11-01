@@ -28,6 +28,9 @@ services:
       BRAKE_LICENSE_SIGNING_KEY_FILE: ${BRAKE_LICENSE_SIGNING_KEY_FILE:-}
     volumes:
       - ${BRAKE_LICENSE_SIGNING_KEY_DIR:-./license-key}:/run/secrets/license:ro
+    deploy:
+      resources:
+        limits: { memory: '${BRAKE_BILLING_MEMORY:-192M}', cpus: '${BRAKE_BILLING_CPUS:-0.5}' }
     depends_on:
       api: { condition: service_healthy }
     healthcheck:

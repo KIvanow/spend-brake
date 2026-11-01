@@ -30,7 +30,8 @@ docker compose -f infra/docker-compose.yml up -d --build --wait
 ```
 
 That starts the proxy (`:8080`), admin API (`:8081`), notifier (`:8082`), dashboard (`:3000`),
-worker, Valkey and Postgres. Valkey and Postgres are only reachable from the other containers.
+worker, Valkey and Postgres. Those ports listen on 127.0.0.1 only (set `BRAKE_BIND_ADDRESS` to
+publish them elsewhere); Valkey and Postgres are only reachable from the other containers.
 Then set up your org, store the Google key and get a virtual key:
 
 ```sh
@@ -74,6 +75,11 @@ F="-f infra/docker-compose.yml -f infra/docker-compose.tls.yml"
 docker compose --env-file infra/.env $F build
 docker compose --env-file infra/.env $F up -d --wait
 ```
+
+Every container has memory and CPU limits that fit a 4 GB host, and Valkey has a memory
+ceiling (`VALKEY_MAXMEMORY`, default 256 MB) at which it refuses writes rather than forget
+spend: raise both on a bigger host or with many keys (see
+[Configuration: ports and resources](../configuration/#ports-and-resources)).
 
 Published images are coming; until then there is nothing to pull, and
 `infra/docker-compose.release.yml` is for when they are. Business / Enterprise: add

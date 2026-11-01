@@ -61,6 +61,20 @@ Off unless you set a key: then the dashboard loads nothing from PostHog and send
 
 See [Self-hosting: HTTPS](../self-hosting/#2-https).
 
+## Ports and resources
+
+| Variable                                         | Default     | What                                                                                                                                                                                      |
+| ------------------------------------------------ | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BRAKE_BIND_ADDRESS`                             | `127.0.0.1` | Where the proxy, API, notifier and dashboard ports listen without the HTTPS overlay. `0.0.0.0` publishes them on every interface (plain HTTP: only on a network you trust).               |
+| `VALKEY_MAXMEMORY`                               | `256mb`     | Valkey's memory ceiling. It never evicts (counters and reservations must survive), so at the ceiling writes fail and the proxy refuses requests: size it for your keys and keep headroom. |
+| `BRAKE_<SERVICE>_MEMORY`, `BRAKE_<SERVICE>_CPUS` | see below   | Each container's memory and CPU limit. `<SERVICE>` is `VALKEY`, `POSTGRES`, `API`, `PROXY`, `WORKER`, `NOTIFIER`, `WEB`, `CADDY` (HTTPS overlay) or `BILLING` (hosted).                   |
+
+The default limits fit a 4 GB host with room to spare: Valkey 512M / 1 CPU, Postgres 512M / 1,
+API 384M / 1, proxy 512M / 1, worker 256M / 0.5, notifier 192M / 0.5, dashboard 64M / 0.5,
+Caddy 128M / 0.5, billing 192M / 0.5. Keep Valkey's limit at about twice `VALKEY_MAXMEMORY`: an
+append-only-file rewrite forks the process. A CPU limit above the host's CPU count is refused,
+so on a 1-CPU host keep every `_CPUS` at 1 or below.
+
 ## Email, telemetry and price drift
 
 | Variable                      | Default                          | What                                                                                                                                                                                            |

@@ -25,7 +25,7 @@ compose exec -T postgres pg_restore -U brake -d brake --no-owner --exit-on-error
 # AOF off, turn AOF on (Valkey rewrites it from memory) and shut down cleanly.
 compose stop valkey
 volume="$(compose ps -a -q valkey | xargs docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')"
-docker run --rm -v "$volume:/data" -v "$(cd "$dir" && pwd):/backup:ro" valkey/valkey:8 sh -ec '
+docker run --rm -v "$volume:/data" -v "$(cd "$dir" && pwd):/backup:ro" valkey/valkey:8@sha256:8f836008e0986c36adf50da714c7060cf689dbb335f61fe077939d90fa650809 sh -ec '
   rm -rf /data/appendonlydir /data/appendonly.aof /data/dump.rdb
   cp /backup/valkey.rdb /data/dump.rdb
   valkey-server --dir /data --appendonly no --save "" --port 6399 --daemonize yes

@@ -5,7 +5,10 @@
 # ports; the services are reachable through it alone. Scale the proxy with --scale proxy=3.
 services:
   caddy:
-    image: caddy:2.8.4
+    image: caddy:2.8.4@sha256:226d1f059b75399fe19182893c7184591c07b97afc8dfcf44eeb80c9a77a530f
+    deploy:
+      resources:
+        limits: { memory: '${BRAKE_CADDY_MEMORY:-128M}', cpus: '${BRAKE_CADDY_CPUS:-0.5}' }
     restart: unless-stopped
     ports:
       - '${BRAKE_HTTP_PORT:-80}:80'

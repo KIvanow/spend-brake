@@ -37,7 +37,7 @@ docker compose -f infra/docker-compose.yml up -d --build --wait
 ```
 
 That starts the proxy (`:8080`), admin API (`:8081`), notifier (`:8082`), dashboard (`:3000`),
-worker, Valkey and Postgres. Then set up your org, store the Google key and get a virtual key:
+worker, Valkey and Postgres, listening on 127.0.0.1 only. Then set up your org, store the Google key and get a virtual key:
 
 ```sh
 pnpm install && pnpm --filter @spend-brake/cli build

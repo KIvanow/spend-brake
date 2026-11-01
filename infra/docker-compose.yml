@@ -1,6 +1,9 @@
 # Full stack: docker compose -f infra/docker-compose.yml up -d --build --wait
 # Needs infra/.env (copy infra/.env.example). Valkey and Postgres are not published to the host:
-# only the services reach them. For local development use docker-compose.dev.yml.
+# only the services reach them. The others listen on 127.0.0.1 unless BRAKE_BIND_ADDRESS says
+# otherwise (docker-compose.tls.yml publishes HTTPS instead). Every service has memory and CPU
+# limits sized for a 4 GB host (BRAKE_<SERVICE>_MEMORY / _CPUS). For local development use
+# docker-compose.dev.yml.
 name: spend-brake
 
 x-health: &health
@@ -15,14 +18,18 @@ x-stores: &stores
 
 services:
   valkey:
-    image: valkey/valkey:8
+    image: valkey/valkey:8@sha256:8f836008e0986c36adf50da714c7060cf689dbb335f61fe077939d90fa650809
     restart: unless-stopped
     # Caps live here: never evict (an evicted spent counter would reset a cap), persist across
     # restarts, require a password. The API also rebuilds config records from Postgres on start.
+    # At maxmemory writes fail instead (requests are refused, nothing is forgotten): keep it well
+    # below the container's memory limit, which also covers forks for AOF rewrites.
     command:
       - valkey-server
       - --appendonly
       - 'yes'
+      - --maxmemory
+      - ${VALKEY_MAXMEMORY:-256mb}
       - --maxmemory-policy
       - noeviction
       - --requirepass
@@ -34,9 +41,12 @@ services:
     healthcheck:
       test: ['CMD', 'valkey-cli', 'ping']
       <<: *health
+    deploy:
+      resources:
+        limits: { memory: '${BRAKE_VALKEY_MEMORY:-512M}', cpus: '${BRAKE_VALKEY_CPUS:-1}' }
 
   postgres:
-    image: postgres:16
+    image: postgres:16@sha256:1beaa3084eee2676f20a9cd9928f0bf2c5bf674f8e49f81017912183d377c61c
     restart: unless-stopped
     environment:
       POSTGRES_USER: brake
@@ -47,6 +57,9 @@ services:
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U brake -d brake']
       <<: *health
+    deploy:
+      resources:
+        limits: { memory: '${BRAKE_POSTGRES_MEMORY:-512M}', cpus: '${BRAKE_POSTGRES_CPUS:-1}' }
 
   # Each service gets only the secrets it uses.
   api:
@@ -70,7 +83,10 @@ services:
       # Dashboard product analytics (PostHog): off unless a project key is set.
       BRAKE_POSTHOG_KEY: ${BRAKE_POSTHOG_KEY:-}
       BRAKE_POSTHOG_HOST: ${BRAKE_POSTHOG_HOST:-https://eu.i.posthog.com}
-    ports: ['8081:8081']
+    ports: ['${BRAKE_BIND_ADDRESS:-127.0.0.1}:8081:8081']
+    deploy:
+      resources:
+        limits: { memory: '${BRAKE_API_MEMORY:-384M}', cpus: '${BRAKE_API_CPUS:-1}' }
     depends_on:
       valkey: { condition: service_healthy }
       postgres: { condition: service_healthy }
@@ -99,7 +115,10 @@ services:
     volumes: ['proxystate:/home/node']
     # In-flight requests get the upstream timeout (30 s) to finish before the container is killed.
     stop_grace_period: 35s
-    ports: ['8080:8080']
+    ports: ['${BRAKE_BIND_ADDRESS:-127.0.0.1}:8080:8080']
+    deploy:
+      resources:
+        limits: { memory: '${BRAKE_PROXY_MEMORY:-512M}', cpus: '${BRAKE_PROXY_CPUS:-1}' }
     depends_on:
       valkey: { condition: service_healthy }
       api: { condition: service_healthy }
@@ -123,6 +142,9 @@ services:
       ALLOW_PRIVATE_COLLECTORS: ${ALLOW_PRIVATE_COLLECTORS:-false}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       GITHUB_REPO: ${GITHUB_REPO:-}
+    deploy:
+      resources:
+        limits: { memory: '${BRAKE_WORKER_MEMORY:-256M}', cpus: '${BRAKE_WORKER_CPUS:-0.5}' }
     # The API runs migrations first.
     depends_on:
       api: { condition: service_healthy }
@@ -150,7 +172,10 @@ services:
       SMTP_URL: ${SMTP_URL:-}
       BRAKE_EMAIL_FROM: ${BRAKE_EMAIL_FROM:-Spend Brake <alerts@localhost>}
       OPERATOR_EMAIL: ${OPERATOR_EMAIL:-}
-    ports: ['8082:8082']
+    ports: ['${BRAKE_BIND_ADDRESS:-127.0.0.1}:8082:8082']
+    deploy:
+      resources:
+        limits: { memory: '${BRAKE_NOTIFIER_MEMORY:-192M}', cpus: '${BRAKE_NOTIFIER_CPUS:-0.5}' }
     depends_on:
       api: { condition: service_healthy }
     healthcheck:
@@ -166,7 +191,10 @@ services:
   web:
     build: { context: .., dockerfile: infra/web.Dockerfile }
     restart: unless-stopped
-    ports: ['3000:80']
+    ports: ['${BRAKE_BIND_ADDRESS:-127.0.0.1}:3000:80']
+    deploy:
+      resources:
+        limits: { memory: '${BRAKE_WEB_MEMORY:-64M}', cpus: '${BRAKE_WEB_CPUS:-0.5}' }
     depends_on:
       api: { condition: service_healthy }
     healthcheck:

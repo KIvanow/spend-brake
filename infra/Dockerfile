@@ -1,7 +1,7 @@
 # One image per service: docker build -f infra/Dockerfile --build-arg APP=proxy .
 # APP is one of proxy, api, worker, notifier, billing, or ee (with START=start:api or start:worker for
 # the API and worker with the commercial features; see infra/docker-compose.ee.yml).
-FROM node:22-slim AS build
+FROM node:22-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da AS build
 ARG APP
 RUN corepack enable
 WORKDIR /repo
@@ -14,7 +14,7 @@ RUN pnpm turbo run build --filter=@spend-brake/${APP}...
 # A self-contained production copy of the app and its workspace packages.
 RUN pnpm --filter @spend-brake/${APP} deploy --prod --legacy /out
 
-FROM node:22-slim
+FROM node:22-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da
 ARG START=start
 ENV NODE_ENV=production BRAKE_START=${START}
 WORKDIR /app
