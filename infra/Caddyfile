@@ -18,8 +18,9 @@
 		}
 		lb_policy round_robin
 		lb_try_duration 2s
-		# Ready means Valkey answers too; a replica that cannot reach it gets no traffic.
-		health_uri /readyz
+		# Liveness, not /readyz: while Valkey is down the proxy still serves fail-open keys, and
+		# taking every replica out would turn that outage into a full one.
+		health_uri /healthz
 		health_interval 5s
 	}
 }

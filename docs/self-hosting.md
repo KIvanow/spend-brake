@@ -219,12 +219,12 @@ command.)
 
 ## 8. Monitoring
 
-| What                   | Where                                                                                                                                                                                                        |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Health                 | `GET /healthz` (liveness) on the proxy, API and notifier; `GET /readyz` (readiness: the proxy reaches Valkey, the API Valkey and Postgres) on the proxy and API, used by Caddy and the compose health checks |
-| Metrics (Prometheus)   | proxy `:9465/metrics`, worker `:9464/metrics` (inside the network)                                                                                                                                           |
-| Traces (OpenTelemetry) | set `OTEL_EXPORTER_OTLP_ENDPOINT` on each service                                                                                                                                                            |
-| Alerts worth paging on | `brake_reservations_expired_total` rising, `brake_ledger_lag_events` growing, `brake_worker_last_loop_timestamp_seconds` stale, `upstream_key_error` and `reconcile_drift` alerts                            |
+| What                   | Where                                                                                                                                                                                                                                                                                        |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Health                 | `GET /healthz` (liveness) on the proxy, API and notifier; `GET /readyz` (readiness: the proxy reaches Valkey, the API Valkey and Postgres) on the proxy and API, used by the compose health checks. Caddy checks the proxy's `/healthz`, so fail-open keys keep working while Valkey is down |
+| Metrics (Prometheus)   | proxy `:9465/metrics`, worker `:9464/metrics` (inside the network)                                                                                                                                                                                                                           |
+| Traces (OpenTelemetry) | set `OTEL_EXPORTER_OTLP_ENDPOINT` on each service                                                                                                                                                                                                                                            |
+| Alerts worth paging on | `brake_reservations_expired_total` rising, `brake_ledger_lag_events` growing, `brake_worker_last_loop_timestamp_seconds` stale, `upstream_key_error` and `reconcile_drift` alerts                                                                                                            |
 
 ### Each org's own telemetry
 
