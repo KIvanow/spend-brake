@@ -2,7 +2,15 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, readdir, rename, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import { gunzipSync, gzipSync } from 'node:zlib';
+import * as zlib from 'node:zlib';
+import {
+  brotliCompressSync,
+  brotliDecompressSync,
+  deflateSync,
+  gunzipSync,
+  gzipSync,
+  inflateSync,
+} from 'node:zlib';
 import { BudgetEngine } from '@spend-brake/budget';
 import type { StartedTestContainer } from 'testcontainers';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -16,6 +24,9 @@ import {
   startValkey,
 } from './harness.js';
 import type { ProxyDeps } from '../src/server.js';
+
+// zlib's zstd arrived in Node 22.15 / 23.8.
+const ZSTD = typeof zlib.zstdDecompress === 'function';
 
 let container: StartedTestContainer;
 let valkeyUrl: string;
@@ -494,6 +505,66 @@ describe('upstream behaviour', () => {
     await small.proxy.brakeDrain();
     expect(await spent(org)).toBe(5_000n);
     await small.proxy.close();
+  });
+
+  const codecs = [
+    { name: 'deflate', encode: deflateSync, decode: inflateSync, run: true },
+    { name: 'br', encode: brotliCompressSync, decode: brotliDecompressSync, run: true },
+    { name: 'zstd', encode: zlib.zstdCompressSync, decode: zlib.zstdDecompressSync, run: ZSTD },
+  ];
+  for (const { name, encode, decode, run } of codecs) {
+    it.runIf(run)(`prices from a ${name} body and refuses a ${name} bomb`, async () => {
+      const small = await startProxy(valkeyUrl, mock, { maxBufferedBytes: 4096 });
+      const org = newOrg();
+      const { token } = await newKey(small, org);
+      let body = encode(Buffer.from(JSON.stringify({ results: [], status: 'REQUEST_DENIED' })));
+      mock.respond = (_req, reply) =>
+        reply
+          .header('content-encoding', name)
+          .header('content-type', 'application/json')
+          .send(body);
+      const geocode = () =>
+        small.proxy.inject({
+          method: 'GET',
+          url: `/google-maps/maps/api/geocode/json?address=x&key=${token}`,
+          headers: { 'accept-encoding': name },
+        });
+      const res = await geocode();
+      expect(res.statusCode).toBe(200);
+      expect(res.headers['content-encoding']).toBe(name);
+      expect(JSON.parse(decode(res.rawPayload).toString())).toMatchObject({
+        status: 'REQUEST_DENIED',
+      });
+      expect(res.headers['x-brake-cost-micros']).toBe('0');
+      expect(mock.last().headers['accept-encoding']).toBe(name);
+
+      body = encode(Buffer.from(JSON.stringify({ status: 'OK', pad: ' '.repeat(1 << 20) })));
+      const bomb = await geocode();
+      expect(bomb.statusCode).toBe(502);
+      expect(bomb.headers['x-brake-cost-micros']).toBe('5000');
+      await small.proxy.brakeDrain();
+      expect(await spent(org)).toBe(5_000n);
+      await small.proxy.close();
+    });
+  }
+
+  it('asks the provider for no zstd when this Node cannot decode it', async () => {
+    const side = await startProxy(valkeyUrl, mock, { zstd: false });
+    const org = newOrg();
+    const { token } = await newKey(side, org);
+    mock.respond = (_req, reply) => reply.send({ results: [{}], status: 'OK' });
+    const geocode = (acceptEncoding: string) =>
+      side.proxy.inject({
+        method: 'GET',
+        url: `/google-maps/maps/api/geocode/json?address=x&key=${token}`,
+        headers: { 'accept-encoding': acceptEncoding },
+      });
+    expect((await geocode('zstd, br;q=0.9, gzip')).statusCode).toBe(200);
+    expect(mock.last().headers['accept-encoding']).toBe('br;q=0.9, gzip');
+    // Nothing left that the provider may use but identity.
+    expect((await geocode('ZSTD')).statusCode).toBe(200);
+    expect(mock.last().headers['accept-encoding']).toBe('identity');
+    await side.proxy.close();
   });
 
   it('streams chunked bodies to the client', async () => {

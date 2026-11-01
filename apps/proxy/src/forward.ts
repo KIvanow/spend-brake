@@ -1,9 +1,14 @@
 import { promisify } from 'node:util';
-import { brotliDecompress, gunzip, inflate } from 'node:zlib';
+import * as zlib from 'node:zlib';
 
-const gunzipAsync = promisify(gunzip);
-const inflateAsync = promisify(inflate);
-const brotliAsync = promisify(brotliDecompress);
+const gunzipAsync = promisify(zlib.gunzip);
+const inflateAsync = promisify(zlib.inflate);
+const brotliAsync = promisify(zlib.brotliDecompress);
+// zlib decodes zstd from Node 22.15 / 23.8 on. A named import would fail to load on older ones.
+const zstdAsync = typeof zlib.zstdDecompress === 'function' ? promisify(zlib.zstdDecompress) : null;
+
+/** Whether this Node can decode zstd response bodies. */
+export const ZSTD_SUPPORTED = zstdAsync !== null;
 
 // Hop-by-hop headers (RFC 9110 7.6.1) plus ones the proxy owns or replaces.
 const HOP_BY_HOP = new Set([
@@ -30,14 +35,26 @@ const DROP_REQUEST = new Set([
   'x-subscription-token',
 ]);
 
+/**
+ * The client's request headers as sent upstream. Without zstd support, zstd is taken out of
+ * Accept-Encoding: a body the proxy cannot decode cannot be priced from.
+ */
 export function outgoingHeaders(
   incoming: Record<string, string | string[] | undefined>,
+  zstd = ZSTD_SUPPORTED,
 ): Record<string, string | undefined> {
   const out: Record<string, string | undefined> = {};
   for (const [name, value] of Object.entries(incoming)) {
     const n = name.toLowerCase();
     if (value === undefined || DROP_REQUEST.has(n) || n.startsWith('x-brake-')) continue;
     out[n] = Array.isArray(value) ? value.join(', ') : value;
+  }
+  if (!zstd && out['accept-encoding'] !== undefined) {
+    const kept = out['accept-encoding']
+      .split(',')
+      .map((t) => t.trim())
+      .filter((t) => t !== '' && t.split(';')[0]!.trim().toLowerCase() !== 'zstd');
+    out['accept-encoding'] = kept.length > 0 ? kept.join(', ') : 'identity';
   }
   return out;
 }
@@ -83,6 +100,7 @@ export async function decodeBody(
   raw: Buffer,
   encoding: string | undefined,
   maxOutput: number,
+  zstd = ZSTD_SUPPORTED,
 ): Promise<Buffer> {
   const opts = { maxOutputLength: maxOutput };
   try {
@@ -97,6 +115,9 @@ export async function decodeBody(
         return await inflateAsync(raw, opts);
       case 'br':
         return await brotliAsync(raw, opts);
+      case 'zstd':
+        if (zstd && zstdAsync) return await zstdAsync(raw, opts);
+        throw new Error('zstd is not supported by this Node');
       default:
         throw new Error(`unsupported content-encoding ${encoding}`);
     }

@@ -50,6 +50,7 @@ import { outcomes, sendError } from './errors.js';
 import { ProxyMetrics } from './metrics.js';
 import {
   DecodedTooLarge,
+  ZSTD_SUPPORTED,
   decodeBody,
   outgoingHeaders,
   parseBody,
@@ -95,6 +96,8 @@ export interface ProxyDeps {
    * at start (that proxy was killed mid-replay). Defaults to the stop grace period.
    */
   failOpenStaleClaimMs?: number;
+  /** Decode zstd responses (and let clients ask for them). Defaults to whether Node can. */
+  zstd?: boolean;
 }
 
 declare module 'fastify' {
@@ -227,6 +230,7 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
   const maxBuffered = deps.maxBufferedBytes ?? 32 * 1024 * 1024;
   const customEgress = deps.customEgress ?? guardedAgent(false, 'custom API');
   const customMax = deps.customMaxResponseBytes ?? 10 * 1024 * 1024;
+  const zstd = deps.zstd ?? ZSTD_SUPPORTED;
   // Org custom API definitions, reloaded like keys: the admin API rewrites them in Valkey and
   // this cache picks the change up within the config TTL.
   const customCache = new TtlCache<CustomApis>(configTtl, CONFIG_STALE_MS);
@@ -1071,7 +1075,7 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
         `The ${adapter.id} provider key that Spend Brake ${keyLabel(key)} uses was deleted or cannot be read; nothing was sent. Point the key at another provider key in the dashboard (Keys).`,
       );
     }
-    const headers = outgoingHeaders(request.headers);
+    const headers = outgoingHeaders(request.headers, zstd);
     const outgoing = { origin: upstream.origin, headers, query };
     adapter.injectCredential(outgoing, secret);
     const base = deps.upstreamOverrides?.[upstream.origin] ?? upstream.origin;
@@ -1195,7 +1199,9 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
       resBytes = raw.length;
       let body: unknown;
       try {
-        body = parseJson(await decodeBody(raw, resHeaders['content-encoding'], 2 * maxBuffered));
+        body = parseJson(
+          await decodeBody(raw, resHeaders['content-encoding'], 2 * maxBuffered, zstd),
+        );
       } catch (err) {
         if (err instanceof DecodedTooLarge) {
           // Unreadable, so nothing in it may lower the price: charge the worst case.
