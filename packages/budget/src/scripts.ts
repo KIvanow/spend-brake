@@ -11,7 +11,7 @@ export type ValkeyClient = Redis | Cluster;
  *       (scope, window) pair
  * ARGV: amount, reqId, expiresAtMs, loopEnabled, identicalMax, loopWindowSec, perMinuteMax,
  *       cooldownSec, nKill, killTargets..., then
- *       (scopeLabel, windowId, windowTtlSec, defaultHard) per pair
+ *       (scopeLabel, windowId, windowTtlSec, defaultHard, share) per pair
  *
  * Returns {'KILLED', target} | {'LOOP', retryAfterSec, tripped, circuit} | {'DUPLICATE'}
  *       | {'DENY', scope, window, hard, used, firstDeny}
@@ -23,6 +23,8 @@ export type ValkeyClient = Redis | Cluster;
  * circuit is the circuit's value, which tells who opened it. minRemaining is the smallest (hard - used) after this reservation, -1 if uncapped.
  *
  * defaultHard (may be '') creates the scope's hard cap on first use, e.g. a session budget.
+ * share (may be '') is what this pair holds instead of the whole amount: a secondary SKU's scope
+ * holds only its own line items. The res record keeps each pair's amount as a1, a2, ...
  *
  * A deny changes no counter. It does set the scope's '100' alert mark (once per window), since a
  * request that does not fit means the cap has been reached for practical purposes; firstDeny is 1
@@ -70,9 +72,16 @@ local n = (#KEYS - 6) / 4
 local base = 9 + nKill
 local used = {}
 local caps = {}
+-- Amounts go to Valkey as the strings they came in: a Lua number is written with 14 digits.
+local amts = {}
+local amtArgs = {}
 for i = 0, n - 1 do
   local k = first + i * 4
-  local a = base + i * 4
+  local a = base + i * 5
+  amtArgs[i] = ARGV[1]
+  if ARGV[a + 5] ~= '' then amtArgs[i] = ARGV[a + 5] end
+  local amt = tonumber(amtArgs[i])
+  amts[i] = amt
   local u = tonumber(redis.call('GET', KEYS[k]) or '0') + tonumber(redis.call('GET', KEYS[k + 1]) or '0')
   local cap = redis.call('HMGET', KEYS[k + 2], 'hard', 'soft')
   if not cap[1] and ARGV[a + 4] ~= '' then
@@ -83,7 +92,7 @@ for i = 0, n - 1 do
   end
   local hard = tonumber(cap[1] or '-1')
   -- A free request still needs room: at or over the cap, nothing more goes through.
-  if hard >= 0 and (u + amount > hard or (amount == 0 and u >= hard)) then
+  if hard >= 0 and (u + amt > hard or (amt == 0 and u >= hard)) then
     local firstDeny = 0
     if hard > 0 and redis.call('HSETNX', KEYS[k + 3], '100', '1') == 1 then
       redis.call('EXPIRE', KEYS[k + 3], ARGV[a + 3], 'NX')
@@ -103,7 +112,7 @@ end
 local crossings = {}
 local function cross(i, k, a, label, threshold)
   local before = used[i]
-  if before < threshold and before + amount >= threshold then
+  if before < threshold and before + amts[i] >= threshold then
     if redis.call('HSETNX', KEYS[k + 3], label, '1') == 1 then
       redis.call('EXPIRE', KEYS[k + 3], ARGV[a + 3], 'NX')
       table.insert(crossings, {ARGV[a + 1], ARGV[a + 2], label})
@@ -115,15 +124,15 @@ local minRemaining = -1
 redis.call('HSET', KEYS[3], 'amount', ARGV[1], 'n', n)
 for i = 0, n - 1 do
   local k = first + i * 4
-  local a = base + i * 4
+  local a = base + i * 5
   local ttl = ARGV[a + 3]
-  redis.call('INCRBY', KEYS[k], ARGV[1])
+  redis.call('INCRBY', KEYS[k], amtArgs[i])
   redis.call('EXPIRE', KEYS[k], ttl, 'NX')
   redis.call('SET', KEYS[k + 1], '0', 'NX', 'EX', ttl)
-  redis.call('HSET', KEYS[3], 'h' .. (i + 1), KEYS[k], 's' .. (i + 1), KEYS[k + 1])
+  redis.call('HSET', KEYS[3], 'h' .. (i + 1), KEYS[k], 's' .. (i + 1), KEYS[k + 1], 'a' .. (i + 1), amtArgs[i])
   local hard, soft = caps[i][1], caps[i][2]
   if hard >= 0 then
-    local left = hard - used[i] - amount
+    local left = hard - used[i] - amts[i]
     if minRemaining < 0 or left < minRemaining then
       minRemaining = left
     end
@@ -143,7 +152,10 @@ return {'OK', crossings, minRemaining}
 
 /**
  * KEYS: resexp, res, then (held, spent) per pair, read from the res record
- * ARGV: reqId, actual (-1 = commit at the reserved worst case)
+ * ARGV: reqId, then the actual cost per pair (-1 = commit at what the pair reserved)
+ *
+ * A pair releases what it reserved (its a<i>, or the whole amount for records written before
+ * pairs had their own).
  *
  * Returns {'SETTLED'} when the reservation is already gone, else {'OK', reservedAmount}.
  */
@@ -153,12 +165,14 @@ if redis.call('EXISTS', KEYS[2]) == 0 then
   return {'SETTLED'}
 end
 local amount = redis.call('HGET', KEYS[2], 'amount')
-local actual = ARGV[2]
-if actual == '-1' then
-  actual = amount
-end
 for i = 3, #KEYS, 2 do
-  redis.call('DECRBY', KEYS[i], amount)
+  local p = (i - 1) / 2
+  local held = redis.call('HGET', KEYS[2], 'a' .. p) or amount
+  local actual = ARGV[1 + p]
+  if actual == '-1' then
+    actual = held
+  end
+  redis.call('DECRBY', KEYS[i], held)
   redis.call('INCRBY', KEYS[i + 1], actual)
 end
 redis.call('DEL', KEYS[2])
@@ -171,8 +185,11 @@ return {'OK', amount}
  * usage event. The proxy passes the (held, spent) keys it reserved, so no record read is needed.
  *
  * KEYS: resexp, res, events, then (held, spent) per pair, then one units key per SKU
- * ARGV: reqId, actual, nPairs, nUnits, unitsTtlSec, unitIncrements..., maxLen, then event
- *       field/value pairs
+ * ARGV: reqId, actual, nPairs, nUnits, unitsTtlSec, unitIncrements..., pairActuals..., maxLen,
+ *       then event field/value pairs
+ *
+ * actual is the request's cost (-1 = the reserved worst case); pairActuals is each pair's part of
+ * it (-1 = what the pair reserved), as in COMMIT_LUA.
  *
  * The caller passes units only when the provider billed the request (even at a price of zero,
  * e.g. inside a trusted free allowance), so the counter always advances; they are counted even if
@@ -190,8 +207,13 @@ if redis.call('EXISTS', KEYS[2]) == 1 then
     actual = amount
   end
   for i = 0, nPairs - 1 do
-    redis.call('DECRBY', KEYS[4 + i * 2], amount)
-    redis.call('INCRBY', KEYS[5 + i * 2], actual)
+    local held = redis.call('HGET', KEYS[2], 'a' .. (i + 1)) or amount
+    local part = ARGV[6 + nUnits + i]
+    if part == '-1' then
+      part = held
+    end
+    redis.call('DECRBY', KEYS[4 + i * 2], held)
+    redis.call('INCRBY', KEYS[5 + i * 2], part)
   end
   redis.call('DEL', KEYS[2])
 end
@@ -203,7 +225,7 @@ for i = 1, nUnits do
   redis.call('EXPIRE', key, ARGV[5], 'NX')
 end
 
-local first = 7 + nUnits
+local first = 7 + nUnits + nPairs
 local fields = {}
 for i = first, #ARGV do
   fields[#fields + 1] = ARGV[i]
@@ -217,7 +239,7 @@ if not amount then
   fields[#fields + 1] = '1'
 end
 if #fields > 0 then
-  redis.call('XADD', KEYS[3], 'MAXLEN', '~', ARGV[6 + nUnits], '*', unpack(fields))
+  redis.call('XADD', KEYS[3], 'MAXLEN', '~', ARGV[6 + nUnits + nPairs], '*', unpack(fields))
 end
 if amount then
   return {'OK', amount}
@@ -230,28 +252,28 @@ return {'SETTLED'}
  * replayed once it answers. Adds to `spent` on every pair, counts units and appends the event.
  *
  * KEYS: events, then spent per pair, then one units key per SKU
- * ARGV: amount, nPairs, nUnits, unitsTtlSec, pairTtlSec..., unitIncrements..., maxLen, then event
- *       field/value pairs
+ * ARGV: nPairs, nUnits, unitsTtlSec, pairAmount..., pairTtlSec..., unitIncrements..., maxLen, then
+ *       event field/value pairs
  */
 export const RECORD_LUA = `
-local nPairs = tonumber(ARGV[2])
-local nUnits = tonumber(ARGV[3])
+local nPairs = tonumber(ARGV[1])
+local nUnits = tonumber(ARGV[2])
 for i = 1, nPairs do
-  redis.call('INCRBY', KEYS[1 + i], ARGV[1])
-  redis.call('EXPIRE', KEYS[1 + i], ARGV[4 + i], 'NX')
+  redis.call('INCRBY', KEYS[1 + i], ARGV[3 + i])
+  redis.call('EXPIRE', KEYS[1 + i], ARGV[3 + nPairs + i], 'NX')
 end
 for i = 1, nUnits do
   local key = KEYS[1 + nPairs + i]
-  redis.call('INCRBY', key, ARGV[4 + nPairs + i])
-  redis.call('EXPIRE', key, ARGV[4], 'NX')
+  redis.call('INCRBY', key, ARGV[3 + 2 * nPairs + i])
+  redis.call('EXPIRE', key, ARGV[3], 'NX')
 end
-local first = 6 + nPairs + nUnits
+local first = 5 + 2 * nPairs + nUnits
 local fields = {}
 for i = first, #ARGV do
   fields[#fields + 1] = ARGV[i]
 end
 if #fields > 0 then
-  redis.call('XADD', KEYS[1], 'MAXLEN', '~', ARGV[5 + nPairs + nUnits], '*', unpack(fields))
+  redis.call('XADD', KEYS[1], 'MAXLEN', '~', ARGV[4 + 2 * nPairs + nUnits], '*', unpack(fields))
 end
 return 'OK'
 `;

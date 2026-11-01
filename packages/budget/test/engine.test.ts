@@ -313,6 +313,60 @@ describe('commit and refund', () => {
   });
 });
 
+describe('scope shares', () => {
+  const dataScope: Scope = { kind: 'sku', provider: 'google-maps', sku: 'contact_data' };
+  const shared = (orgId: string, amount: bigint, share: bigint) =>
+    req(orgId, amount, { scopeShares: [{ scope: dataScope, amount: share }] });
+
+  it('holds and caps a share scope by its own amount', async () => {
+    const org = newOrg();
+    await engine.setCap(org, dataScope, 'd', { hard: 5n, soft: null });
+    const r = shared(org, 40n, 3n);
+    expect((await engine.reserve(r)).outcome).toBe('ok');
+    expect((await used(org, dataScope)).held).toBe(3n);
+    expect((await used(org, { kind: 'org' })).held).toBe(40n);
+    expect(await engine.reserve(shared(org, 40n, 3n))).toMatchObject({
+      outcome: 'budget_exceeded',
+      scope: 'sku:google-maps:contact_data',
+      used: 3n,
+    });
+  });
+
+  it('settles a share at its part of the actual cost', async () => {
+    const org = newOrg();
+    const r = shared(org, 40n, 10n);
+    const res = await engine.reserve(r);
+    if (res.outcome !== 'ok') throw new Error(res.outcome);
+    await engine.settle(org, r.reqId, 20n, res.handle, { billed: true, timeZone: TZ, now: NOW });
+    expect(await used(org, dataScope)).toMatchObject({ held: 0n, spent: 5n });
+    expect(await used(org, { kind: 'org' })).toMatchObject({ held: 0n, spent: 20n });
+
+    // Commit by record and the sweeper's worst case do the same.
+    const c = shared(org, 40n, 10n);
+    await engine.reserve(c);
+    await engine.commit(org, c.reqId, 4n);
+    const w = shared(org, 40n, 10n);
+    await engine.reserve(w);
+    await engine.commitWorstCase(org, w.reqId);
+    expect(await used(org, dataScope)).toMatchObject({ held: 0n, spent: 5n + 1n + 10n });
+    expect(await used(org, { kind: 'org' })).toMatchObject({ held: 0n, spent: 20n + 4n + 40n });
+  });
+
+  it('records unreserved spend with shares', async () => {
+    const org = newOrg();
+    await engine.recordSpend({
+      orgId: org,
+      amount: 40n,
+      scopes: [{ kind: 'org' }],
+      scopeShares: [{ scope: dataScope, amount: 3n }],
+      timeZone: TZ,
+      at: NOW,
+    });
+    expect((await used(org, dataScope)).spent).toBe(3n);
+    expect((await used(org, { kind: 'org' })).spent).toBe(40n);
+  });
+});
+
 describe('sweeper', () => {
   it('commits expired reservations at worst case and leaves live ones alone', async () => {
     const org = newOrg();

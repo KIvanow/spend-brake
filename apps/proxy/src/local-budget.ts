@@ -2,12 +2,14 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync, readdirSync, renameSync } from 'node:fs';
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { Scope } from '@spend-brake/budget';
+import type { Scope, ScopeShare } from '@spend-brake/budget';
 
 /** A fail-open request to record in Valkey once it is reachable again. */
 export interface FailOpenEntry {
   orgId: string;
   scopes: Scope[];
+  /** SKU scopes charged their own part (multi-SKU requests). */
+  scopeShares: ScopeShare[];
   amount: bigint;
   timeZone: string;
   at: Date;
@@ -48,6 +50,7 @@ export function serializeJournal(entries: readonly FailOpenEntry[]): string {
   return JSON.stringify(
     entries.map((e) => ({
       ...e,
+      scopeShares: e.scopeShares.map((s) => ({ scope: s.scope, amount: s.amount.toString() })),
       amount: e.amount.toString(),
       at: e.at.toISOString(),
       units: e.units.map((u) => ({ sku: u.sku, units: u.units.toString() })),
@@ -61,6 +64,10 @@ export function parseJournal(text: string): FailOpenEntry[] {
   return raw.map((e: Record<string, unknown>) => ({
     orgId: String(e.orgId),
     scopes: e.scopes as Scope[],
+    scopeShares: ((e.scopeShares ?? []) as { scope: Scope; amount: string }[]).map((s) => ({
+      scope: s.scope,
+      amount: BigInt(s.amount),
+    })),
     amount: BigInt(e.amount as string),
     timeZone: String(e.timeZone),
     at: new Date(e.at as string),

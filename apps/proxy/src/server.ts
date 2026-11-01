@@ -11,10 +11,12 @@ import {
   type PauseReason,
   Registry,
   type ReservationHandle,
+  type ScopeShare,
   type Scope,
   type ValkeyClient,
   isVirtualKey,
   scopeLabel,
+  shareOf,
   windowsFor,
 } from '@spend-brake/budget';
 import { Transform, type TransformCallback, pipeline } from 'node:stream';
@@ -273,6 +275,7 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
           orgId: e.orgId,
           amount: e.amount,
           scopes: e.scopes,
+          scopeShares: e.scopeShares,
           timeZone: e.timeZone,
           at: e.at,
           units: e.units,
@@ -724,12 +727,25 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
 
     // 3-4. Loop check and reserve, in one atomic script.
     const sessionScope: Scope | null = session ? { kind: 'sess', id: session } : null;
-    const scopes: Scope[] = [
-      { kind: 'org' },
-      { kind: 'key', id: key.id },
-      // Multi-SKU requests count against their primary SKU's scope.
-      { kind: 'sku', provider: adapter.id, sku: priced.items[0]!.sku },
-    ];
+    const scopes: Scope[] = [{ kind: 'org' }, { kind: 'key', id: key.id }];
+    // Every SKU a request bills counts against its own SKU's scope: alone, with the whole
+    // amount; next to others, with just its own line items.
+    const skus = [...new Set(priced.items.map((i) => i.sku))];
+    const scopeShares: ScopeShare[] = [];
+    if (skus.length === 1) {
+      scopes.push({ kind: 'sku', provider: adapter.id, sku: skus[0]! });
+    } else {
+      for (const sku of skus) {
+        const own = priced.items.filter((i) => i.sku === sku);
+        const amount = priced.classified
+          ? adapter.worstCase({ ...priced.classified, items: own }, ctx)
+          : priced.worst;
+        scopeShares.push({
+          scope: { kind: 'sku', provider: adapter.id, sku },
+          amount: amount < priced.worst ? amount : priced.worst,
+        });
+      }
+    }
     // Session keys spend from their parent's budget too, and die with it.
     if (key.parentKeyId) scopes.push({ kind: 'key', id: key.parentKeyId });
     if (key.env) scopes.push({ kind: 'env', name: key.env });
@@ -766,6 +782,7 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
         reqId,
         amount: priced.worst,
         scopes,
+        scopeShares,
         killTargets,
         timeZone: org.timeZone,
         now: at,
@@ -923,6 +940,10 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
           local.journal.push({
             orgId: org.id,
             scopes,
+            scopeShares: scopeShares.map((s) => ({
+              scope: s.scope,
+              amount: shareOf(actual, priced.worst, s.amount),
+            })),
             amount: actual,
             timeZone: org.timeZone,
             at,

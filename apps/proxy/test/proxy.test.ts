@@ -566,6 +566,31 @@ describe('upstream behaviour', () => {
 });
 
 describe('budgets', () => {
+  it('counts every SKU of a request against its own SKU cap', async () => {
+    const org = newOrg();
+    const { token } = await newKey(h, org);
+    const atmosphere = {
+      kind: 'sku',
+      provider: 'google-maps',
+      sku: 'legacy.places.atmosphere_data',
+    } as const;
+    // Text Search (Legacy) bills its base SKU plus Contact (3,000) and Atmosphere (5,000) Data.
+    await engine.setCap(org, atmosphere, 'd', { hard: 7_000n, soft: null });
+    mock.respond = (_req, reply) => reply.send({ results: [], status: 'OK' });
+    const search = () =>
+      h.proxy.inject(`/google-maps/maps/api/place/textsearch/json?query=pizza&key=${token}`);
+    const first = await search();
+    expect(first.statusCode).toBe(200);
+    expect(first.headers['x-brake-cost-micros']).toBe('40000');
+    expect(await spent(org, 'sku:google-maps:legacy.places.atmosphere_data')).toBe(5_000n);
+    expect(await spent(org, 'sku:google-maps:legacy.places.contact_data')).toBe(3_000n);
+    expect(await spent(org, 'sku:google-maps:legacy.places.text_search')).toBe(32_000n);
+    expect(await spent(org)).toBe(40_000n);
+    const second = await search();
+    expect(second.statusCode).toBe(402);
+    expect(second.json()).toMatchObject({ scope: 'sku:google-maps:legacy.places.atmosphere_data' });
+  });
+
   it('creates a session budget from the key template and enforces it', async () => {
     const org = newOrg();
     const { token } = await newKey(h, org, { sessionCapMicros: '70000' });

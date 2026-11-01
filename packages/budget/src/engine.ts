@@ -29,6 +29,12 @@ export interface ReserveRequest {
   /** Worst-case cost in micros. */
   amount: bigint;
   scopes: Scope[];
+  /**
+   * Scopes that hold only their share of `amount` rather than all of it, e.g. a secondary SKU's
+   * scope holding just that SKU's line items. Settling charges them the same share of the actual
+   * cost. A scope listed here need not be in `scopes`.
+   */
+  scopeShares?: ScopeShare[];
   killTargets: KillTarget[];
   /** The org's time zone; day and month windows are cut in it. */
   timeZone: string;
@@ -55,6 +61,11 @@ export interface LoopCheck extends LoopPolicy {
   rateScope?: Scope;
 }
 
+export interface ScopeShare {
+  scope: Scope;
+  amount: bigint;
+}
+
 export interface CapTemplate {
   scope: Scope;
   kind: WindowKind;
@@ -64,6 +75,10 @@ export interface CapTemplate {
 export interface ReservationHandle {
   /** (held, spent) key pairs the reservation touched. */
   pairs: string[];
+  /** The reserved amount. */
+  amount?: bigint;
+  /** What each pair holds when it is a share (see `scopeShares`), else null. */
+  shares?: (bigint | null)[];
 }
 
 export interface SettleOptions {
@@ -105,6 +120,8 @@ export interface RecordSpendRequest {
   at: Date;
   units?: readonly { sku: string; units: bigint }[];
   event?: Record<string, string>;
+  /** Scopes charged their own share instead of `amount` (see `ReserveRequest.scopeShares`). */
+  scopeShares?: ScopeShare[];
 }
 
 export interface PendingSettlement {
@@ -224,6 +241,16 @@ function toBig(v: unknown): bigint {
   throw new TypeError(`unexpected reply value: ${String(v)}`);
 }
 
+/**
+ * A share's part of an actual cost: the share's fraction of the reserved amount, rounded up so a
+ * capped scope never sees less than its part.
+ */
+export function shareOf(actual: bigint, reserved: bigint, share: bigint): bigint {
+  if (share === reserved) return actual;
+  if (reserved === 0n) return 0n;
+  return (actual * share + reserved - 1n) / reserved;
+}
+
 function optBig(v: string | null | undefined): bigint | null {
   return v === null || v === undefined ? null : BigInt(v);
 }
@@ -243,7 +270,12 @@ export class BudgetEngine {
     const k = orgKeys(req.orgId);
     const amount = assertMicros(req.amount, 'amount');
     const reqId = assertReqId(req.reqId);
-    const labels = [...new Set(req.scopes.map(scopeLabel))];
+    const shares = new Map<string, bigint>();
+    for (const s of req.scopeShares ?? []) {
+      assertMicros(s.amount, 'share');
+      shares.set(scopeLabel(s.scope), s.amount);
+    }
+    const labels = [...new Set([...req.scopes.map(scopeLabel), ...shares.keys()])];
     const kill = [...new Set(req.killTargets.map(killLabel))];
     const windows = windowsFor(now, req.timeZone);
     const expiresAt = new Date(now.getTime() + this.reservationTtlMs);
@@ -266,9 +298,12 @@ export class BudgetEngine {
     ];
     const pairArgs: (string | number)[] = [];
     const pairs: string[] = [];
+    const pairShares: (bigint | null)[] = [];
     for (const label of labels) {
+      const share = shares.get(label) ?? null;
       for (const w of windows) {
         pairs.push(k.held(label, w.id), k.spent(label, w.id));
+        pairShares.push(share);
         keyList.push(
           k.held(label, w.id),
           k.spent(label, w.id),
@@ -280,6 +315,7 @@ export class BudgetEngine {
           w.id,
           windowTtl(label, w.ttlSec),
           templates.get(`${label}|${w.kind}`) ?? '',
+          share === null ? '' : share.toString(),
         );
       }
     }
@@ -311,7 +347,7 @@ export class BudgetEngine {
             mark: mark as Mark,
           })),
           remaining: reply[2] === -1 ? null : toBig(reply[2]),
-          handle: { pairs },
+          handle: { pairs, amount: req.amount, shares: pairShares },
         };
       case 'KILLED':
         return { outcome: 'killed', target: reply[1] as string };
@@ -373,13 +409,21 @@ export class BudgetEngine {
       ...handle.pairs,
       ...units.map((u) => k.units(u.sku, month.id)),
     ];
+    const nPairs = handle.pairs.length / 2;
+    const parts = Array.from({ length: nPairs }, (_, i) => {
+      const share = handle.shares?.[i] ?? null;
+      return share === null || handle.amount === undefined
+        ? actualArg
+        : shareOf(actual, handle.amount, share).toString();
+    });
     const args: (string | number)[] = [
       reqId,
       actualArg,
-      handle.pairs.length / 2,
+      nPairs,
       units.length,
       month.ttlSec,
       ...units.map((u) => u.units.toString()),
+      ...parts,
       opts.eventMaxLen ?? EVENT_STREAM_MAX_LEN,
       ...Object.entries(opts.event ?? {}).flat(),
     ];
@@ -413,9 +457,14 @@ export class BudgetEngine {
   private async writeSpend(r: RecordSpendRequest, amount: bigint): Promise<void> {
     const k = orgKeys(r.orgId);
     const windows = windowsFor(r.at, r.timeZone);
-    const labels = [...new Set(r.scopes.map(scopeLabel))];
+    const shares = new Map((r.scopeShares ?? []).map((s) => [scopeLabel(s.scope), s.amount]));
+    const labels = [...new Set([...r.scopes.map(scopeLabel), ...shares.keys()])];
     const pairs = labels.flatMap((l) =>
-      windows.map((w) => ({ key: k.spent(l, w.id), ttl: windowTtl(l, w.ttlSec) })),
+      windows.map((w) => ({
+        key: k.spent(l, w.id),
+        ttl: windowTtl(l, w.ttlSec),
+        amount: shares.get(l) ?? amount,
+      })),
     );
     const units = [...(r.units ?? [])].filter((u) => u.units > 0n);
     const month = windows[1];
@@ -424,10 +473,10 @@ export class BudgetEngine {
       scripts.record,
       [k.events(), ...pairs.map((p) => p.key), ...units.map((u) => k.units(u.sku, month.id))],
       [
-        amount.toString(),
         pairs.length,
         units.length,
         month.ttlSec,
+        ...pairs.map((p) => p.amount.toString()),
         ...pairs.map((p) => p.ttl),
         ...units.map((u) => u.units.toString()),
         EVENT_STREAM_MAX_LEN,
@@ -448,10 +497,19 @@ export class BudgetEngine {
     // script re-checks that it still exists before touching any counter.
     const record = await this.client.hgetall(resKey);
     const keyList = [k.resexp(), resKey];
+    const parts: string[] = [];
     const n = Number(record.n ?? 0);
-    for (let i = 1; i <= n; i++) keyList.push(record[`h${i}`]!, record[`s${i}`]!);
+    for (let i = 1; i <= n; i++) {
+      keyList.push(record[`h${i}`]!, record[`s${i}`]!);
+      const share = record[`a${i}`];
+      parts.push(
+        actual === '-1' || share === undefined || record.amount === undefined
+          ? actual
+          : shareOf(BigInt(actual), BigInt(record.amount), BigInt(share)).toString(),
+      );
+    }
 
-    const reply = (await runScript(this.client, scripts.commit, keyList, [reqId, actual])) as [
+    const reply = (await runScript(this.client, scripts.commit, keyList, [reqId, ...parts])) as [
       string,
       string?,
     ];
