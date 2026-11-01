@@ -4,7 +4,15 @@ import { guardedAgent } from '@spend-brake/shared';
 import type { StartedTestContainer } from 'testcontainers';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { StaticSecretStore } from '../src/secrets.js';
-import { type Harness, MockGoogle, newKey, newOrg, startProxy, startValkey } from './harness.js';
+import {
+  type Harness,
+  MockGoogle,
+  newKey,
+  newOrg,
+  startProxy,
+  startValkey,
+  disconnectClients,
+} from './harness.js';
 
 let container: StartedTestContainer;
 let valkeyUrl: string;
@@ -56,6 +64,7 @@ afterAll(async () => {
   await h.proxy.close();
   await h.valkey.quit();
   await mock.app.close();
+  disconnectClients();
   await container.stop();
 });
 

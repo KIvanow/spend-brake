@@ -22,6 +22,7 @@ import {
   newOrg,
   startProxy,
   startValkey,
+  disconnectClients,
 } from './harness.js';
 import type { ProxyDeps } from '../src/server.js';
 
@@ -45,6 +46,7 @@ afterAll(async () => {
   await h.proxy.close();
   await h.valkey.quit();
   await mock.app.close();
+  disconnectClients();
   await container.stop();
 });
 

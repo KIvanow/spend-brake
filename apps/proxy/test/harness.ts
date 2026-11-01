@@ -79,6 +79,16 @@ export interface Harness {
   logs: LogSink;
 }
 
+const clients: Redis[] = [];
+
+/**
+ * Disconnect every client startProxy opened. Run before the container stops: a client left open
+ * keeps reconnecting and logging after the tests end, which fails the run.
+ */
+export function disconnectClients(): void {
+  for (const c of clients.splice(0)) c.disconnect();
+}
+
 export async function startProxy(
   valkeyUrl: string,
   mock: MockGoogle,
@@ -89,6 +99,7 @@ export async function startProxy(
     maxRetriesPerRequest: 1,
     enableAutoPipelining: true,
   });
+  clients.push(valkey);
   await new Promise<void>((resolve) => valkey.once('ready', () => resolve()));
   const logs = new LogSink();
   const level = loggerOptions('info') as Record<string, unknown>;

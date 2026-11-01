@@ -6,7 +6,7 @@ import { GenericContainer, type StartedTestContainer, Wait } from 'testcontainer
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { StaticSecretStore } from '../src/secrets.js';
 import { buildServer } from '../src/server.js';
-import { MockGoogle, NOW, REAL_KEY, newOrg } from './harness.js';
+import { MockGoogle, NOW, REAL_KEY, newOrg, disconnectClients } from './harness.js';
 
 // Three primaries in one container, announced as 127.0.0.1 and mapped to published ports.
 const PORTS = [7000, 7001, 7002];
@@ -58,6 +58,7 @@ afterAll(async () => {
   await proxy.close();
   await mock.app.close();
   await cluster.quit();
+  disconnectClients();
   await container.stop();
 });
 

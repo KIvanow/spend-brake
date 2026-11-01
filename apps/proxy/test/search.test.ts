@@ -8,7 +8,15 @@ import {
 import type { StartedTestContainer } from 'testcontainers';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { StaticSecretStore } from '../src/secrets.js';
-import { type Harness, MockGoogle, newKey, newOrg, startProxy, startValkey } from './harness.js';
+import {
+  type Harness,
+  MockGoogle,
+  newKey,
+  newOrg,
+  startProxy,
+  startValkey,
+  disconnectClients,
+} from './harness.js';
 
 // Trimmed real response shapes.
 const TAVILY = { query: 'x', results: [{ url: 'https://a', content: 'a' }], usage: { credits: 1 } };
@@ -61,6 +69,7 @@ afterAll(async () => {
   await h.proxy.close();
   await h.valkey.quit();
   await mock.app.close();
+  disconnectClients();
   await container.stop();
 });
 

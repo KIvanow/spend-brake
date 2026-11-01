@@ -4,7 +4,15 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { request as httpRequest } from 'node:http';
 import { unsafePath } from '../src/server.js';
 import { StaticSecretStore } from '../src/secrets.js';
-import { type Harness, MockGoogle, newKey, newOrg, startProxy, startValkey } from './harness.js';
+import {
+  type Harness,
+  MockGoogle,
+  newKey,
+  newOrg,
+  startProxy,
+  startValkey,
+  disconnectClients,
+} from './harness.js';
 
 // Trimmed real response shapes.
 const GEOCODE_V6 = {
@@ -48,6 +56,7 @@ afterAll(async () => {
   await h.proxy.close();
   await h.valkey.quit();
   await mock.app.close();
+  disconnectClients();
   await container.stop();
 });
 

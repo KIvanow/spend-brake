@@ -3,7 +3,15 @@ import { GoogleMapsAdapter, TwilioAdapter } from '@spend-brake/catalog';
 import type { StartedTestContainer } from 'testcontainers';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { StaticSecretStore } from '../src/secrets.js';
-import { type Harness, MockGoogle, newKey, newOrg, startProxy, startValkey } from './harness.js';
+import {
+  type Harness,
+  MockGoogle,
+  newKey,
+  newOrg,
+  startProxy,
+  startValkey,
+  disconnectClients,
+} from './harness.js';
 
 const AC = `AC${'a'.repeat(32)}`;
 let container: StartedTestContainer;
@@ -34,6 +42,7 @@ afterAll(async () => {
   await h.proxy.close();
   await h.valkey.quit();
   await mock.app.close();
+  disconnectClients();
   await container.stop();
 });
 
