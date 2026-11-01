@@ -17,9 +17,22 @@ test('release runs the same checks as CI', () => {
 });
 
 test('images and the npm package need the checks', () => {
-  assert.ok(needs(release.jobs.images).includes('check'));
-  assert.ok(needs(release.jobs.images).includes('stack'));
-  assert.ok(needs(release.jobs.npm).includes('check'));
+  for (const job of ['images', 'npm']) {
+    for (const check of ['check', 'stack', 'licensing']) {
+      assert.ok(needs(release.jobs[job]).includes(check), `${job} needs ${check}`);
+    }
+  }
+});
+
+test('release runs the licensing checks before anything is published', () => {
+  const steps = runs(release.jobs.licensing);
+  assert.match(steps.join('\n'), /scripts\/check-signoff\.sh "\$previous\.\.\$GITHUB_SHA"/);
+  assert.ok(steps.includes('node scripts/check-ee-imports.mjs'));
+  assert.ok(runs(ci.jobs.licensing).includes('node scripts/check-ee-imports.mjs'));
+  assert.equal(release.jobs.licensing.steps[0].with?.['fetch-depth'], 0, 'needs the tag history');
+  for (const job of ['images', 'npm', 'latest', 'release']) {
+    assert.ok(needs(release.jobs[job]).includes('licensing'), `${job} needs licensing`);
+  }
 });
 
 test('latest is tagged only after every image is pushed', () => {

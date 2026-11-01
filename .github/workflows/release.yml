@@ -55,8 +55,26 @@ jobs:
       - uses: actions/checkout@v4
       - run: scripts/smoke-stack.sh
 
+  # ci.yml's licensing checks, over the commits this release adds since the previous tag.
+  licensing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Every commit is signed off (DCO)
+        run: |
+          # The first release has no previous tag: check everything reachable from the tag.
+          if previous="$(git describe --tags --abbrev=0 --match 'v*.*.*' "$GITHUB_SHA^" 2>/dev/null)"; then
+            scripts/check-signoff.sh "$previous..$GITHUB_SHA"
+          else
+            scripts/check-signoff.sh "$GITHUB_SHA"
+          fi
+      - name: Nothing outside ee/ imports from ee/
+        run: node scripts/check-ee-imports.mjs
+
   images:
-    needs: [version, check, stack]
+    needs: [version, check, stack, licensing]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -99,7 +117,7 @@ jobs:
 
   # Move :latest only once every image of this version is pushed (a failed one skips this job).
   latest:
-    needs: [version, images]
+    needs: [version, licensing, images]
     runs-on: ubuntu-latest
     steps:
       - uses: docker/setup-buildx-action@v3
@@ -118,7 +136,7 @@ jobs:
           done
 
   npm:
-    needs: [version, check]
+    needs: [version, check, stack, licensing]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -141,7 +159,7 @@ jobs:
           cd apps/cli && npm publish --provenance --access public
 
   release:
-    needs: [version, images, latest, npm]
+    needs: [version, licensing, images, latest, npm]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
