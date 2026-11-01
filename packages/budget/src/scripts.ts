@@ -313,6 +313,26 @@ end
 return {'OK'}
 `;
 
+/**
+ * Count a billed request in a provider billing session, unless the session is kept closed.
+ *
+ * KEYS: session
+ * ARGV: ttlSec, sliding (1 resets the TTL on every call, 0 keeps the first call's), closedValue
+ * Returns 1 when counted, 0 when the session is closed
+ */
+export const SESSION_CALL_LUA = `
+if redis.call('GET', KEYS[1]) == ARGV[3] then
+  return 0
+end
+redis.call('INCR', KEYS[1])
+if ARGV[2] == '1' then
+  redis.call('EXPIRE', KEYS[1], ARGV[1])
+else
+  redis.call('EXPIRE', KEYS[1], ARGV[1], 'NX')
+end
+return 1
+`;
+
 interface Script {
   source: string;
   sha: string;
@@ -328,6 +348,7 @@ export const scripts = {
   settle: script(SETTLE_LUA),
   record: script(RECORD_LUA),
   pump: script(PUMP_LUA),
+  sessionCall: script(SESSION_CALL_LUA),
 };
 
 /** EVALSHA, falling back to EVAL when the script cache is cold (restart, failover, new node). */

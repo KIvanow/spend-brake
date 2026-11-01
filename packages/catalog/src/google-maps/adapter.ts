@@ -236,6 +236,8 @@ export class GoogleMapsAdapter implements ProviderAdapter {
       switch (place) {
         case 'autocomplete': {
           if (!q.has('sessiontoken')) return base('legacy.places.autocomplete');
+          // Google bills a token reused after Place Details closed its session as no token.
+          if (opts.billingSessionClosed) return base('legacy.places.autocomplete');
           // Billed once per session: the first request carries the session price, the rest are
           // free. A session closed by Place Details is free here too, but we cannot know that up
           // front, so the first request keeps the abandoned-session price. A session that runs
@@ -289,9 +291,11 @@ export class GoogleMapsAdapter implements ProviderAdapter {
     if (req.path.startsWith('/maps/api/place/autocomplete/')) {
       return { token, ttlSec: SESSION_TTL_SEC };
     }
-    // Place Details with the token closes the session; reusing the token after that starts over.
+    // Place Details with the token closes the session. The token stays marked closed for longer
+    // than the session window: an autocomplete still in flight cannot reopen it, and reusing the
+    // token is billed per request.
     if (req.path.startsWith('/maps/api/place/details/')) {
-      return { token, ttlSec: SESSION_TTL_SEC, ends: true };
+      return { token, ttlSec: SESSION_TTL_SEC, ends: true, closedTtlSec: SESSION_TTL_SEC };
     }
     return null;
   }

@@ -430,6 +430,26 @@ describe('billing session calls', () => {
     expect(await valkey.client.ttl(key)).toBeGreaterThan(500);
   });
 
+  it('keeps a closed session closed against a call recorded late', async () => {
+    const org = newOrg();
+    await engine.recordBillingSessionCall(org, 'google-maps', 'h3', 600);
+    await engine.recordBillingSessionCall(org, 'google-maps', 'h3', 600, {
+      end: true,
+      closedTtlSec: 600,
+    });
+    // A request in flight when the session closed records after the close.
+    await engine.recordBillingSessionCall(org, 'google-maps', 'h3', 600);
+    expect(await engine.billingSessionState(org, 'google-maps', 'h3')).toEqual({
+      calls: 0,
+      ttlLeftSec: 0,
+      closed: true,
+    });
+    expect(await engine.billingSessionCalls(org, 'google-maps', 'h3')).toBe(0);
+    expect(await engine.isBillingSessionStarted(org, 'google-maps', 'h3')).toBe(false);
+    const key = orgKeys(org).billingSession('google-maps', 'h3');
+    expect(await valkey.client.ttl(key)).toBeGreaterThan(590);
+  });
+
   it("reports a session's calls with the time left on it", async () => {
     const org = newOrg();
     expect(await engine.billingSessionState(org, 'google-maps', 'h1')).toEqual({

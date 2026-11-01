@@ -115,6 +115,9 @@ const windowTtl = (label: string, ttl: number) =>
  * How long a recorded entry id is remembered. Replays of one entry happen within seconds (a retry
  * after a lost reply, an overlapping run) or after a restart; 40 days covers any outage.
  */
+/** The value of a billing session key kept closed after the session ended. */
+const BILLING_SESSION_CLOSED = 'closed';
+
 export const RECORDED_TTL_SEC = 40 * 24 * 3600;
 
 export interface RecordSpendRequest {
@@ -778,49 +781,59 @@ export class BudgetEngine {
     return res === 'OK';
   }
 
-  /** Billed requests seen in a provider billing session (0 when none or expired). */
+  /** Billed requests seen in a provider billing session (0 when none, expired or closed). */
   async billingSessionCalls(orgId: string, provider: string, tokenHash: string): Promise<number> {
     const v = await this.client.get(orgKeys(orgId).billingSession(provider, tokenHash));
-    return v === null ? 0 : Number(v);
+    return v === null || v === BILLING_SESSION_CLOSED ? 0 : Number(v);
   }
 
   /**
    * Billed requests seen in a provider billing session with the seconds left before it expires
-   * (both 0 when none or expired), so a caller can tell how old a fixed-TTL session is.
+   * (both 0 when none or expired), so a caller can tell how old a fixed-TTL session is. A session
+   * kept closed (see `recordBillingSessionCall`) reports `closed: true` and no calls.
    */
   async billingSessionState(
     orgId: string,
     provider: string,
     tokenHash: string,
-  ): Promise<{ calls: number; ttlLeftSec: number }> {
+  ): Promise<{ calls: number; ttlLeftSec: number; closed?: true }> {
     const key = orgKeys(orgId).billingSession(provider, tokenHash);
     const res = await this.client.multi().get(key).ttl(key).exec();
     const v = res?.[0]?.[1] as string | null | undefined;
     const ttl = Number(res?.[1]?.[1] ?? 0);
     if (v === null || v === undefined) return { calls: 0, ttlLeftSec: 0 };
+    if (v === BILLING_SESSION_CLOSED) return { calls: 0, ttlLeftSec: 0, closed: true };
     return { calls: Number(v), ttlLeftSec: Math.max(0, ttl) };
   }
 
   /**
    * Count a billed request in a billing session. The TTL runs from the first request, or from
    * the latest one when `sliding`; `end` closes the session so the next request opens a new one.
+   * With `closedTtlSec`, `end` instead keeps the session marked closed for that long: a call
+   * recorded late (a request in flight when the session closed) cannot open it again.
    */
   async recordBillingSessionCall(
     orgId: string,
     provider: string,
     tokenHash: string,
     ttlSec: number,
-    opts: { sliding?: boolean; end?: boolean } = {},
+    opts: { sliding?: boolean; end?: boolean; closedTtlSec?: number | undefined } = {},
   ): Promise<void> {
     const key = orgKeys(orgId).billingSession(provider, tokenHash);
     if (opts.end) {
-      await this.client.del(key);
+      if (opts.closedTtlSec) {
+        await this.client.set(key, BILLING_SESSION_CLOSED, 'EX', opts.closedTtlSec);
+      } else {
+        await this.client.del(key);
+      }
       return;
     }
-    const tx = this.client.multi().incr(key);
-    if (opts.sliding) tx.expire(key, ttlSec);
-    else tx.expire(key, ttlSec, 'NX');
-    await tx.exec();
+    await runScript(
+      this.client,
+      scripts.sessionCall,
+      [key],
+      [ttlSec, opts.sliding ? 1 : 0, BILLING_SESSION_CLOSED],
+    );
   }
 
   async isBillingSessionStarted(
@@ -828,7 +841,7 @@ export class BudgetEngine {
     provider: string,
     tokenHash: string,
   ): Promise<boolean> {
-    return (await this.client.exists(orgKeys(orgId).billingSession(provider, tokenHash))) === 1;
+    return (await this.billingSessionCalls(orgId, provider, tokenHash)) > 0;
   }
 
   /** Append a usage event to the org's stream for the worker (ledger, alerts). */

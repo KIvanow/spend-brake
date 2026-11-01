@@ -169,6 +169,9 @@ describe('google-maps adapter', () => {
     // The 13th request and anything past Google's session window are billed on their own.
     expect(price({ billingSessionCalls: 12, billingSessionAgeSec: 60 })).toBe(2_830n);
     expect(price({ billingSessionCalls: 2, billingSessionAgeSec: 181 })).toBe(2_830n);
+    // A token reused after Place Details closed its session is billed as no token.
+    const c = adapter.classify(r, { billingSessionClosed: true });
+    expect(c.priced && adapter.worstCase(c, ctx())).toBe(2_830n);
   });
 
   it('closes a legacy autocomplete session with Place Details', () => {
@@ -176,7 +179,12 @@ describe('google-maps adapter', () => {
       'GET',
       'https://maps.googleapis.com/maps/api/place/details/json?place_id=x&fields=name&sessiontoken=abc',
     );
-    expect(adapter.billingSession(details)).toEqual({ token: 'abc', ttlSec: 600, ends: true });
+    expect(adapter.billingSession(details)).toEqual({
+      token: 'abc',
+      ttlSec: 600,
+      ends: true,
+      closedTtlSec: 600,
+    });
     const plain = req(
       'GET',
       'https://maps.googleapis.com/maps/api/place/details/json?place_id=x&fields=name',

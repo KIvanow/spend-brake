@@ -72,6 +72,8 @@ export interface ClassifyOptions {
   billingSessionCalls?: number;
   /** Seconds since that session's first billed request (unknown counts as just started). */
   billingSessionAgeSec?: number;
+  /** The session was closed (see `BillingSession.closedTtlSec`) and the token is being reused. */
+  billingSessionClosed?: boolean;
 }
 
 /** A provider-side billing session, such as a legacy Places autocomplete session token. */
@@ -82,6 +84,12 @@ export interface BillingSession {
   sliding?: boolean;
   /** This request closes the session (the next one with the same token opens a new one). */
   ends?: boolean;
+  /**
+   * With `ends`: keep the token marked closed for this long instead of forgetting it, so a request
+   * still in flight when the session closed cannot open it again, and requests reusing the token
+   * see `billingSessionClosed`.
+   */
+  closedTtlSec?: number;
 }
 
 export interface Upstream {

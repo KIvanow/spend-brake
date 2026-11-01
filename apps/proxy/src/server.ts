@@ -632,6 +632,7 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
       const c = adapter.classify(incoming, {
         billingSessionStarted: calls > 0,
         billingSessionCalls: calls,
+        billingSessionClosed: session.closed === true,
         // A fixed TTL runs from the session's first request, so what is gone of it is its age.
         billingSessionAgeSec:
           calls > 0 && billingSession && !billingSession.sliding
@@ -1033,7 +1034,11 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
                 adapter.id,
                 billingSessionHash,
                 billingSession.ttlSec,
-                { sliding: billingSession.sliding ?? false, end: billingSession.ends ?? false },
+                {
+                  sliding: billingSession.sliding ?? false,
+                  end: billingSession.ends ?? false,
+                  closedTtlSec: billingSession.closedTtlSec,
+                },
               );
             }
           } catch (err) {

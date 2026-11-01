@@ -565,12 +565,12 @@ describe('upstream behaviour', () => {
     const org = newOrg();
     const { token } = await newKey(h, org);
     mock.respond = (_req, reply) => reply.send({ predictions: [], result: {}, status: 'OK' });
-    const ac = (input: string) =>
+    const ac = (input: string, session = 'tok-2') =>
       h.proxy.inject(
-        `/google-maps/maps/api/place/autocomplete/json?input=${input}&sessiontoken=tok-2&key=${token}`,
+        `/google-maps/maps/api/place/autocomplete/json?input=${input}&sessiontoken=${session}&key=${token}`,
       );
-    const cost = async (input: string) => {
-      const res = await ac(input);
+    const cost = async (input: string, session?: string) => {
+      const res = await ac(input, session);
       await h.proxy.brakeDrain();
       return res.headers['x-brake-cost-micros'];
     };
@@ -580,12 +580,39 @@ describe('upstream behaviour', () => {
       `/google-maps/maps/api/place/details/json?place_id=x&fields=place_id&sessiontoken=tok-2&key=${token}`,
     );
     await h.proxy.brakeDrain();
-    // Closed: the token opens a new session.
-    expect(await cost('piz')).toBe('17000');
+    // Closed: Google bills a reused token per request, as if it had none.
+    expect(await cost('piz')).toBe('2830');
     // A session older than Google's window bills each request on its own.
-    const hash = createHash('sha256').update('tok-2').digest('hex').slice(0, 32);
+    expect(await cost('p', 'tok-3')).toBe('17000');
+    const hash = createHash('sha256').update('tok-3').digest('hex').slice(0, 32);
     await h.valkey.expire(`bk:{o:${org}}:bsess:google-maps:${hash}`, 400);
-    expect(await cost('pizz')).toBe('2830');
+    expect(await cost('pi', 'tok-3')).toBe('2830');
+  });
+
+  it('keeps a session closed when an autocomplete in flight records after Place Details', async () => {
+    const org = newOrg();
+    const { token } = await newKey(h, org);
+    mock.respond = async (req, reply) => {
+      if (req.url.includes('input=slow')) await new Promise((r) => setTimeout(r, 200));
+      return reply.send({ predictions: [], result: {}, status: 'OK' });
+    };
+    const ac = (input: string) =>
+      h.proxy.inject(
+        `/google-maps/maps/api/place/autocomplete/json?input=${input}&sessiontoken=tok-4&key=${token}`,
+      );
+    expect((await ac('p')).headers['x-brake-cost-micros']).toBe('17000');
+    await h.proxy.brakeDrain();
+    const slow = ac('slow');
+    await new Promise((r) => setTimeout(r, 50));
+    await h.proxy.inject(
+      `/google-maps/maps/api/place/details/json?place_id=x&fields=place_id&sessiontoken=tok-4&key=${token}`,
+    );
+    await h.proxy.brakeDrain();
+    // The slow request settles after the close and must not start the session over.
+    expect((await slow).headers['x-brake-cost-micros']).toBe('0');
+    await h.proxy.brakeDrain();
+    const next = await ac('pizza');
+    expect(next.headers['x-brake-cost-micros']).toBe('2830');
   });
 });
 
