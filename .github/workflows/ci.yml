@@ -41,3 +41,14 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
+
+  # Every image builds, the stack starts with its healthchecks passing and each service answers.
+  stack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/smoke-stack.sh
+      - name: The images Compose does not build (billing, ee)
+        run: |
+          docker build -f infra/Dockerfile --build-arg APP=billing .
+          docker build -f infra/Dockerfile --build-arg APP=ee .
