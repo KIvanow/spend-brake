@@ -429,8 +429,9 @@ h2 {
 .term pre {
   margin: 0;
   padding: 16px;
-  overflow-x: auto;
-  white-space: pre;
+  /* Long URLs and JSON wrap inside the card; nothing scrolls sideways at any width. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   tab-size: 2;
 }
 .term .c {
