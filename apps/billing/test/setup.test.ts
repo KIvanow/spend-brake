@@ -92,6 +92,8 @@ describe('seed', () => {
       ['spend_brake_agents_monthly', 14900, 'usd', 'month'],
       ['spend_brake_business_monthly', 29900, 'usd', 'month'],
     ]);
+    // Prices are shown without VAT: Stripe Tax adds it on top.
+    expect(store.prices.every((p) => p.tax_behavior === 'exclusive')).toBe(true);
     expect(store.portals).toHaveLength(1);
     expect(store.portals[0]).toMatchObject({
       metadata: { spend_brake_portal: '1' },
@@ -138,6 +140,26 @@ describe('seed', () => {
     // The portal now offers the new price.
     expect(JSON.stringify(store.portals[0])).toContain(again.prices.team);
     expect(JSON.stringify(store.portals[0])).not.toContain(`"${first.prices.team}"`);
+  });
+});
+
+describe('seed and tax behavior', () => {
+  it('sets an unspecified tax behavior in place and replaces an inclusive price', async () => {
+    const { store, stripe } = fakeStripe();
+    const first = await seedStripe(stripe, opts);
+    // Prices from before tax behavior was set, and one set the other way (it cannot change).
+    store.prices[0]!.tax_behavior = 'unspecified';
+    store.prices[2]!.tax_behavior = 'inclusive';
+    const again = await seedStripe(stripe, opts);
+    expect(again.prices.indie).toBe(first.prices.indie);
+    expect(store.prices[0]!.tax_behavior).toBe('exclusive');
+    expect(again.updated).toContain('price spend_brake_indie_monthly: tax_behavior exclusive');
+    expect(again.created).toEqual(['price spend_brake_agents_monthly']);
+    expect(store.prices[2]).toMatchObject({ active: false, tax_behavior: 'inclusive' });
+    expect(store.prices.at(-1)).toMatchObject({
+      lookup_key: 'spend_brake_agents_monthly',
+      tax_behavior: 'exclusive',
+    });
   });
 });
 

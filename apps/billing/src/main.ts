@@ -21,6 +21,7 @@ const app = await buildServer({
   stripe: stripeClient(env.STRIPE_SECRET_KEY, { allowLive: env.BILLING_LIVE_MODE }),
   webhookSecret: env.STRIPE_WEBHOOK_SECRET,
   dashboardUrl: env.BRAKE_DASHBOARD_URL,
+  automaticTax: env.automaticTax,
   licenseKey: env.licenseKey,
   sendLicense: mailer.send,
   signup: env.BRAKE_HOSTED_SIGNUP,

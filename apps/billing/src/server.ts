@@ -60,6 +60,11 @@ export interface BillingDeps {
   webhookSecret: string;
   /** Where Checkout and the Customer Portal send people back to. */
   dashboardUrl: string;
+  /**
+   * Stripe Tax on Checkout: VAT on top of the tax-exclusive prices, from the billing address the
+   * buyer gives. Needs Stripe Tax set up in the account (BILLING_AUTOMATIC_TAX).
+   */
+  automaticTax?: boolean;
   licenseKey: string | null;
   sendLicense: (mail: LicenseMail) => Promise<void>;
   /** Public sign-up (hosted service only). */
@@ -232,6 +237,13 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
         metadata: { orgId, terms_version: TERMS_VERSION, withdrawal_waiver: 'true' },
       },
       custom_text: { submit: { message: CHECKOUT_WAIVER_MESSAGE } },
+      // Invoices carry the buyer's address and VAT number (a business buyer's VAT ID can make the
+      // sale reverse charge). With an existing customer, Stripe needs customer_update to save
+      // the address and name it collects onto the customer.
+      billing_address_collection: 'required',
+      tax_id_collection: { enabled: true },
+      customer_update: { address: 'auto', name: 'auto' },
+      ...(deps.automaticTax ? { automatic_tax: { enabled: true } } : {}),
       // From sign-up the buyer is not signed in yet: the welcome page says to check their email.
       success_url:
         from === 'signup' ? `${dashboard}/#/welcome` : `${dashboard}/#/billing?checkout=done`,

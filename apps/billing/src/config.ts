@@ -14,6 +14,11 @@ const envSchema = z.object({
   STRIPE_SECRET_KEY: z.string().min(1),
   /** Take real payments: STRIPE_SECRET_KEY must then be a live key, and a test key is refused. */
   BILLING_LIVE_MODE: z.stringbool().default(false),
+  /**
+   * Stripe Tax on Checkout (VAT added to the tax-exclusive prices). Needs Stripe Tax set up in the
+   * account (origin address, registrations); unset, it follows BILLING_LIVE_MODE.
+   */
+  BILLING_AUTOMATIC_TAX: z.stringbool().optional(),
   /** The webhook endpoint's signing secret (whsec_...), from Stripe or `stripe listen`. */
   STRIPE_WEBHOOK_SECRET: z.string().startsWith('whsec_'),
   BRAKE_DASHBOARD_URL: z.url().default('http://localhost:3000'),
@@ -23,7 +28,10 @@ const envSchema = z.object({
   BRAKE_HOSTED_SIGNUP: z.stringbool().default(false),
 });
 
-export type BillingEnv = z.output<typeof envSchema> & { licenseKey: string | null };
+export type BillingEnv = z.output<typeof envSchema> & {
+  licenseKey: string | null;
+  automaticTax: boolean;
+};
 
 export function loadEnv(env: NodeJS.ProcessEnv = process.env): BillingEnv {
   const parsed = envSchema.parse(
@@ -35,5 +43,9 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): BillingEnv {
     (parsed.BRAKE_LICENSE_SIGNING_KEY_FILE
       ? readFileSync(parsed.BRAKE_LICENSE_SIGNING_KEY_FILE, 'utf8')
       : null);
-  return { ...parsed, licenseKey };
+  return {
+    ...parsed,
+    licenseKey,
+    automaticTax: parsed.BILLING_AUTOMATIC_TAX ?? parsed.BILLING_LIVE_MODE,
+  };
 }

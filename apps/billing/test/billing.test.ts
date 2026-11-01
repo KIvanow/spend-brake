@@ -328,12 +328,57 @@ describe('sign-up and checkout', () => {
         metadata: { orgId, terms_version: TERMS_VERSION, withdrawal_waiver: 'true' },
       },
       custom_text: { submit: { message: CHECKOUT_WAIVER_MESSAGE } },
+      billing_address_collection: 'required',
+      tax_id_collection: { enabled: true },
+      customer_update: { address: 'auto', name: 'auto' },
     });
+    // Stripe Tax is off unless asked for (test mode without tax registrations).
+    expect(checkouts.at(-1)).not.toHaveProperty('automatic_tax');
     const customer = (await plan(orgId)).stripeCustomerId!;
     expect(customers.get(customer)?.metadata).toEqual({ orgId });
 
     const paid = await signup('team');
     expect(paid.checkoutUrl).toMatch(/^https:\/\/checkout\.stripe\.test\//);
+  });
+
+  it('adds VAT through Stripe Tax when automatic tax is on', async () => {
+    const taxed = await buildServer({
+      db,
+      valkey,
+      stripe: fakeStripe,
+      webhookSecret: SECRET,
+      dashboardUrl: 'https://app.example.com',
+      licenseKey: null,
+      sendLicense: () => Promise.resolve(),
+      signup: true,
+      automaticTax: true,
+      now: () => NOW,
+    });
+    try {
+      const orgId = `org_tax_${randomBytes(2).toString('hex')}`;
+      const res = await taxed.inject({
+        method: 'POST',
+        url: '/v1/billing/signup',
+        remoteAddress: '10.0.0.78',
+        payload: {
+          orgId,
+          name: orgId,
+          email: `${orgId}@example.com`,
+          plan: 'agents',
+          acceptTerms: true,
+        },
+      });
+      expect(res.statusCode, res.body).toBe(201);
+      expect(checkouts.at(-1)).toMatchObject({
+        client_reference_id: orgId,
+        automatic_tax: { enabled: true },
+        billing_address_collection: 'required',
+        tax_id_collection: { enabled: true },
+        customer_update: { address: 'auto', name: 'auto' },
+      });
+    } finally {
+      await taxed.close();
+    }
   });
 
   it('offers only the hosted plans to a hosted org without a license', async () => {

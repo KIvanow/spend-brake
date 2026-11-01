@@ -318,6 +318,9 @@ export function Signup() {
               </span>
             </label>
           ))}
+          {plans?.some((p) => p.monthlyUsd) && (
+            <p className="muted">Prices exclude VAT where applicable.</p>
+          )}
         </fieldset>
         {paid ? (
           <TermsConsent checked={acceptTerms} onChange={setAcceptTerms} />

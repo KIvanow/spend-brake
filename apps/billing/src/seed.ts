@@ -42,10 +42,13 @@ async function findProduct(stripe: Stripe, plan: string): Promise<Stripe.Product
 const idOf = (v: string | { id: string }) => (typeof v === 'string' ? v : v.id);
 
 /**
- * The plan's monthly price. A price's amount, currency and interval never change, so one that
- * differs from src/plans.ts is replaced: a new price takes over the lookup key (which Checkout
- * and the portal use) and the old one is archived. Subscriptions already on the old price keep
- * it until the customer changes plan.
+ * The plan's monthly price: prices are shown without VAT, so tax_behavior is 'exclusive' (Stripe
+ * Tax adds VAT on top where it applies). A price's amount, currency and interval never change,
+ * and its tax_behavior can be set only once, from 'unspecified'. So an existing price that
+ * matches but has no tax behavior gets 'exclusive'; one that differs in any other way (an
+ * 'inclusive' one too) is replaced: a new price takes over the lookup key (which Checkout and the
+ * portal use) and the old one is archived. Subscriptions already on the old price keep it until
+ * the customer changes plan.
  */
 async function ensurePrice(
   stripe: Stripe,
@@ -63,12 +66,19 @@ async function ensurePrice(
     existing.unit_amount === MONTHLY_CENTS[plan] &&
     existing.recurring?.interval === 'month' &&
     (existing.recurring.interval_count ?? 1) === 1;
-  if (existing && same) return existing.id;
+  const tax = existing?.tax_behavior ?? 'unspecified';
+  if (existing && same && tax === 'exclusive') return existing.id;
+  if (existing && same && tax === 'unspecified') {
+    await stripe.prices.update(existing.id, { tax_behavior: 'exclusive' });
+    result.updated.push(`price ${key}: tax_behavior exclusive`);
+    return existing.id;
+  }
   const price = await stripe.prices.create({
     product,
     currency: 'usd',
     unit_amount: MONTHLY_CENTS[plan],
     recurring: { interval: 'month' },
+    tax_behavior: 'exclusive',
     lookup_key: key,
     transfer_lookup_key: Boolean(existing),
     metadata: { [PLAN_METADATA]: plan },
@@ -161,7 +171,7 @@ export function seedReport(r: SeedResult, live: boolean): string {
     '',
     'Products:',
     ...Object.entries(r.products).map(([plan, id]) => `  ${plan.padEnd(10)} ${id}`),
-    'Prices (monthly, USD):',
+    'Prices (monthly, USD, VAT exclusive):',
     ...Object.entries(r.prices).map(
       ([plan, id]) => `  ${lookupKey(plan as CheckoutPlan).padEnd(30)} ${id}`,
     ),

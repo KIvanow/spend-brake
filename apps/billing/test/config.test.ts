@@ -24,6 +24,17 @@ describe('Stripe live mode', () => {
     expect(() => loadEnv({ ...live, STRIPE_SECRET_KEY: 'sk_org_live_dummy' })).toThrow(/live key/);
   });
 
+  it('turns Stripe Tax on with live mode unless BILLING_AUTOMATIC_TAX says otherwise', () => {
+    const test = { ...base, STRIPE_SECRET_KEY: 'sk_test_dummy' };
+    const live = { ...base, STRIPE_SECRET_KEY: 'sk_live_dummy', BILLING_LIVE_MODE: 'true' };
+    expect(loadEnv(test).automaticTax).toBe(false);
+    expect(loadEnv({ ...test, BILLING_AUTOMATIC_TAX: '' }).automaticTax).toBe(false);
+    expect(loadEnv({ ...test, BILLING_AUTOMATIC_TAX: 'true' }).automaticTax).toBe(true);
+    expect(loadEnv(live).automaticTax).toBe(true);
+    expect(loadEnv({ ...live, BILLING_AUTOMATIC_TAX: '' }).automaticTax).toBe(true);
+    expect(loadEnv({ ...live, BILLING_AUTOMATIC_TAX: 'false' }).automaticTax).toBe(false);
+  });
+
   it('builds a client for whichever mode the key matches', () => {
     expect(() => stripeClient('sk_test_dummy', { allowLive: false })).not.toThrow();
     expect(() => stripeClient('sk_live_dummy', { allowLive: true })).not.toThrow();

@@ -22,6 +22,8 @@ services:
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:?set STRIPE_SECRET_KEY (sk_test_..., or sk_live_... with BILLING_LIVE_MODE=true) in infra/.env}
       # true takes real payments, and then STRIPE_SECRET_KEY must be a live key (and vice versa).
       BILLING_LIVE_MODE: ${BILLING_LIVE_MODE:-false}
+      # Stripe Tax on Checkout; empty follows BILLING_LIVE_MODE (needs Stripe Tax set up in Stripe).
+      BILLING_AUTOMATIC_TAX: ${BILLING_AUTOMATIC_TAX:-}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:?set STRIPE_WEBHOOK_SECRET (whsec_...) in infra/.env}
       BRAKE_DASHBOARD_URL: ${BRAKE_DASHBOARD_URL:-http://localhost:3000}
       BRAKE_HOSTED_SIGNUP: ${BRAKE_HOSTED_SIGNUP:-false}

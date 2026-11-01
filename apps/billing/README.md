@@ -49,6 +49,22 @@ sign-up), then a Stripe invoice with a line on the "Spend Brake Enterprise" prod
 `org_units` in the product metadata, or leave the default). Paying the invoice issues the
 license.
 
+## Tax
+
+Prices exclude VAT (`tax_behavior: exclusive` on every price; the sign-up page says so). Checkout
+always asks for the billing address and offers a VAT ID field, saving both on the customer
+(`customer_update: { address: 'auto', name: 'auto' }`, which Stripe requires with an existing
+customer). With `BILLING_AUTOMATIC_TAX=true`, the default in live mode, it also turns on Stripe
+Tax (`automatic_tax`), which adds VAT on top where it applies (a valid business VAT ID in another
+EU country makes it reverse charge); the subscription keeps automatic tax, so portal plan
+changes and renewals are taxed the same way. Stripe Tax needs the account's origin address and
+registrations set up first, so test mode leaves it off unless asked for.
+
+A price's tax behavior can be set only once. The seed gives `exclusive` to an existing price
+that has none (`unspecified`), and replaces one that is `inclusive`: the new price takes over
+the lookup key, the old one is archived and its subscriptions keep it until the customer changes
+plan. Billing looks prices up by lookup key, so nothing else changes.
+
 ## Setting up Stripe
 
 ```sh

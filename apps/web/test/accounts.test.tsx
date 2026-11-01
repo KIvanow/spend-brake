@@ -682,6 +682,7 @@ describe('sign-up', () => {
     expect(await screen.findByText('Team')).toBeTruthy();
     // Enterprise is arranged with us, not bought here.
     expect(screen.queryByText('Enterprise')).toBeNull();
+    expect(screen.getByText('Prices exclude VAT where applicable.')).toBeTruthy();
     await user.type(screen.getByLabelText('Work email'), 'ana@acme.test');
     await user.type(screen.getByLabelText('Team or project name'), 'Acme');
     // Free: a plain line about the terms, no checkbox.
