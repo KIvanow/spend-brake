@@ -117,6 +117,14 @@ describe('reserve', () => {
     expect((await engine.reserve(req(org, 1n))).outcome).toBe('budget_exceeded');
   });
 
+  it('refuses a free request once the hard cap is used up', async () => {
+    const org = newOrg();
+    await engine.setCap(org, keyScope, 'd', { hard: 1n * USD, soft: null });
+    expect((await engine.reserve(req(org, 0n))).outcome).toBe('ok');
+    expect((await engine.reserve(req(org, 1n * USD))).outcome).toBe('ok');
+    expect((await engine.reserve(req(org, 0n))).outcome).toBe('budget_exceeded');
+  });
+
   it('applies cap changes on the next request', async () => {
     const org = newOrg();
     const v1 = await engine.setCap(org, keyScope, 'd', { hard: 1n * USD, soft: null });

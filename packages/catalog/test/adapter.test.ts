@@ -152,6 +152,38 @@ describe('google-maps adapter', () => {
     expect(c.priced && adapter.worstCase(c, ctx())).toBe(2_830n);
   });
 
+  it('prices a legacy autocomplete session per request once it is too long or too old', () => {
+    const r = req(
+      'GET',
+      'https://maps.googleapis.com/maps/api/place/autocomplete/json?input=pi&sessiontoken=abc',
+    );
+    const price = (opts: { billingSessionCalls: number; billingSessionAgeSec?: number }) => {
+      const c = adapter.classify(r, {
+        billingSessionStarted: opts.billingSessionCalls > 0,
+        ...opts,
+      });
+      if (!c.priced) throw new Error(c.reason);
+      return adapter.worstCase(c, ctx());
+    };
+    expect(price({ billingSessionCalls: 11, billingSessionAgeSec: 60 })).toBe(0n);
+    // The 13th request and anything past Google's session window are billed on their own.
+    expect(price({ billingSessionCalls: 12, billingSessionAgeSec: 60 })).toBe(2_830n);
+    expect(price({ billingSessionCalls: 2, billingSessionAgeSec: 181 })).toBe(2_830n);
+  });
+
+  it('closes a legacy autocomplete session with Place Details', () => {
+    const details = req(
+      'GET',
+      'https://maps.googleapis.com/maps/api/place/details/json?place_id=x&fields=name&sessiontoken=abc',
+    );
+    expect(adapter.billingSession(details)).toEqual({ token: 'abc', ttlSec: 600, ends: true });
+    const plain = req(
+      'GET',
+      'https://maps.googleapis.com/maps/api/place/details/json?place_id=x&fields=name',
+    );
+    expect(adapter.billingSession(plain)).toBeNull();
+  });
+
   it('asks for the response body only where the price depends on it', () => {
     const needs = (method: string, url: string, body?: unknown) => {
       const c = adapter.classify(req(method, url, { body, headers: { 'X-Goog-FieldMask': 'id' } }));

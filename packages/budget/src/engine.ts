@@ -711,6 +711,23 @@ export class BudgetEngine {
   }
 
   /**
+   * Billed requests seen in a provider billing session with the seconds left before it expires
+   * (both 0 when none or expired), so a caller can tell how old a fixed-TTL session is.
+   */
+  async billingSessionState(
+    orgId: string,
+    provider: string,
+    tokenHash: string,
+  ): Promise<{ calls: number; ttlLeftSec: number }> {
+    const key = orgKeys(orgId).billingSession(provider, tokenHash);
+    const res = await this.client.multi().get(key).ttl(key).exec();
+    const v = res?.[0]?.[1] as string | null | undefined;
+    const ttl = Number(res?.[1]?.[1] ?? 0);
+    if (v === null || v === undefined) return { calls: 0, ttlLeftSec: 0 };
+    return { calls: Number(v), ttlLeftSec: Math.max(0, ttl) };
+  }
+
+  /**
    * Count a billed request in a billing session. The TTL runs from the first request, or from
    * the latest one when `sliding`; `end` closes the session so the next request opens a new one.
    */

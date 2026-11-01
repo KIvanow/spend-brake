@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { BudgetEngine } from '@spend-brake/budget';
 import type { StartedTestContainer } from 'testcontainers';
@@ -508,6 +509,33 @@ describe('upstream behaviour', () => {
     await h.proxy.brakeDrain();
     expect((await ac('pi')).headers['x-brake-cost-micros']).toBe('0');
     expect((await ac('piz')).headers['x-brake-cost-micros']).toBe('0');
+  });
+
+  it('ends a legacy autocomplete session on Place Details and past its window', async () => {
+    const org = newOrg();
+    const { token } = await newKey(h, org);
+    mock.respond = (_req, reply) => reply.send({ predictions: [], result: {}, status: 'OK' });
+    const ac = (input: string) =>
+      h.proxy.inject(
+        `/google-maps/maps/api/place/autocomplete/json?input=${input}&sessiontoken=tok-2&key=${token}`,
+      );
+    const cost = async (input: string) => {
+      const res = await ac(input);
+      await h.proxy.brakeDrain();
+      return res.headers['x-brake-cost-micros'];
+    };
+    expect(await cost('p')).toBe('17000');
+    expect(await cost('pi')).toBe('0');
+    await h.proxy.inject(
+      `/google-maps/maps/api/place/details/json?place_id=x&fields=place_id&sessiontoken=tok-2&key=${token}`,
+    );
+    await h.proxy.brakeDrain();
+    // Closed: the token opens a new session.
+    expect(await cost('piz')).toBe('17000');
+    // A session older than Google's window bills each request on its own.
+    const hash = createHash('sha256').update('tok-2').digest('hex').slice(0, 32);
+    await h.valkey.expire(`bk:{o:${org}}:bsess:google-maps:${hash}`, 400);
+    expect(await cost('pizz')).toBe('2830');
   });
 });
 

@@ -117,7 +117,10 @@ describe('budget invariant under concurrency', () => {
                 now: NOW,
               });
               if (r.outcome === 'budget_exceeded') {
-                if (r.used + amount <= r.cap) violations.push(`bad deny ${r.used}+${amount}`);
+                // A free request is refused once the cap is used up, even though it would fit.
+                const full = amount === 0n && r.used >= r.cap;
+                if (r.used + amount <= r.cap && !full)
+                  violations.push(`bad deny ${r.used}+${amount}`);
                 return;
               }
               if (r.outcome !== 'ok') throw new Error(r.outcome);

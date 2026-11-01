@@ -41,9 +41,14 @@ export const GOOGLE_MAPS_UPSTREAMS = [
   { prefix: '/google-routes', origin: ROUTES },
 ] as const;
 
-// Autocomplete session tokens are short-lived; a session seen again after this counts as new,
-// which can only overcharge.
+// How long a legacy autocomplete session token is remembered. A token seen again after this
+// counts as a new session, which can only overcharge (a session costs more than a request).
 const SESSION_TTL_SEC = 600;
+// Google bills a session as one only while it stays short: a token used for more requests, or
+// for longer, than a person typing one query would is billed per request. The exact limits are
+// unpublished, so these are deliberately tight.
+const SESSION_MAX_REQUESTS = 12;
+const SESSION_WINDOW_SEC = 180;
 
 const KEY_REJECTION_REASONS = new Set([
   'API_KEY_INVALID',
@@ -229,20 +234,30 @@ export class GoogleMapsAdapter implements ProviderAdapter {
         items: [{ sku, units: 1n }, ...extra],
       });
       switch (place) {
-        case 'autocomplete':
+        case 'autocomplete': {
           if (!q.has('sessiontoken')) return base('legacy.places.autocomplete');
           // Billed once per session: the first request carries the session price, the rest are
           // free. A session closed by Place Details is free here too, but we cannot know that up
-          // front, so the first request keeps the abandoned-session price.
+          // front, so the first request keeps the abandoned-session price. A session that runs
+          // too long or too many requests is no longer one, so those requests pay their own way.
+          const calls = opts.billingSessionCalls ?? (opts.billingSessionStarted ? 1 : 0);
+          if (calls === 0) {
+            return {
+              route: 'legacy.places.autocomplete',
+              items: [{ sku: 'legacy.places.autocomplete_session', units: 1n }],
+            };
+          }
+          if (
+            calls >= SESSION_MAX_REQUESTS ||
+            (opts.billingSessionAgeSec ?? 0) > SESSION_WINDOW_SEC
+          ) {
+            return base('legacy.places.autocomplete');
+          }
           return {
             route: 'legacy.places.autocomplete',
-            items: [
-              {
-                sku: 'legacy.places.autocomplete_session',
-                units: opts.billingSessionStarted ? 0n : 1n,
-              },
-            ],
+            items: [{ sku: 'legacy.places.autocomplete_session', units: 0n }],
           };
+        }
         case 'queryautocomplete':
           return base('legacy.places.query_autocomplete');
         case 'findplacefromtext': {
@@ -270,10 +285,15 @@ export class GoogleMapsAdapter implements ProviderAdapter {
 
   billingSession(req: IncomingReq): BillingSession | null {
     const token = req.query.get('sessiontoken');
-    if (req.origin !== MAPS || !token || !req.path.startsWith('/maps/api/place/autocomplete/')) {
-      return null;
+    if (req.origin !== MAPS || !token) return null;
+    if (req.path.startsWith('/maps/api/place/autocomplete/')) {
+      return { token, ttlSec: SESSION_TTL_SEC };
     }
-    return { token, ttlSec: SESSION_TTL_SEC };
+    // Place Details with the token closes the session; reusing the token after that starts over.
+    if (req.path.startsWith('/maps/api/place/details/')) {
+      return { token, ttlSec: SESSION_TTL_SEC, ends: true };
+    }
+    return null;
   }
 
   needsBody(c: PricedClassified): boolean {

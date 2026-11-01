@@ -82,7 +82,8 @@ for i = 0, n - 1 do
     cap[1] = ARGV[a + 4]
   end
   local hard = tonumber(cap[1] or '-1')
-  if hard >= 0 and u + amount > hard then
+  -- A free request still needs room: at or over the cap, nothing more goes through.
+  if hard >= 0 and (u + amount > hard or (amount == 0 and u >= hard)) then
     local firstDeny = 0
     if hard > 0 and redis.call('HSETNX', KEYS[k + 3], '100', '1') == 1 then
       redis.call('EXPIRE', KEYS[k + 3], ARGV[a + 3], 'NX')

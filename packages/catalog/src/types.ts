@@ -70,6 +70,8 @@ export interface ClassifyOptions {
   billingSessionStarted?: boolean;
   /** Billed requests already counted in that session (0 when not started or unknown). */
   billingSessionCalls?: number;
+  /** Seconds since that session's first billed request (unknown counts as just started). */
+  billingSessionAgeSec?: number;
 }
 
 /** A provider-side billing session, such as a legacy Places autocomplete session token. */

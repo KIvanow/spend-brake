@@ -542,13 +542,19 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
     // more requests inside it than it holds. Only the actual cost uses it (fresh counts below).
     let ctx: PriceCtx = { monthlyUnits: new Map(), trustFreeTier: false };
     try {
-      const calls =
-        billingSessionHash === null
-          ? 0
-          : await engine.billingSessionCalls(org.id, adapter.id, billingSessionHash);
+      const session =
+        billingSessionHash === null || billingSession === null
+          ? { calls: 0, ttlLeftSec: 0 }
+          : await engine.billingSessionState(org.id, adapter.id, billingSessionHash);
+      const calls = session.calls;
       const c = adapter.classify(incoming, {
         billingSessionStarted: calls > 0,
         billingSessionCalls: calls,
+        // A fixed TTL runs from the session's first request, so what is gone of it is its age.
+        billingSessionAgeSec:
+          calls > 0 && billingSession && !billingSession.sliding
+            ? billingSession.ttlSec - session.ttlLeftSec
+            : 0,
       });
       if (c.priced) {
         ctx = {

@@ -70,8 +70,10 @@ Pricing rules, all built to never undercharge:
 - `billedOnStatus(status, classified?)` is route-aware: photo endpoints bill their 302 redirect.
 - `needsBody(c)` says whether `actual()` needs the response body (legacy JSON statuses, matrices);
   otherwise the proxy streams the response untouched.
-- `billingSession(req)` and `classify(req, { billingSessionStarted })` price provider billing
-  sessions once: a legacy autocomplete session token is charged on its first request only.
+- `billingSession(req)` and `classify(req, { billingSessionCalls, billingSessionAgeSec })` price
+  provider billing sessions once: a legacy autocomplete session token is charged on its first
+  request only, up to 12 requests and 3 minutes (past either, each request is billed on its own),
+  and Place Details with the token closes the session.
 - Prices keep Google's own unit (USD per 1,000 events, as strings) with volume bands shared per
   file; `source` and `verifiedAt` are recorded per file, with Google's SKU ID on every price.
 
