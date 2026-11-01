@@ -8,7 +8,7 @@
 // and creates it again (a new secret), e.g. when the secret is lost or the API version moved.
 import Stripe from 'stripe';
 import { dashboardFromEnv, stripeFromEnv } from './stripe.js';
-import { HANDLED_EVENTS } from './webhooks.js';
+import { HANDLED_EVENTS } from './events.js';
 
 export const WEBHOOK_METADATA = 'spend_brake_webhook';
 /** The API version this SDK speaks: event payloads must have the shape the code reads. */

@@ -32,15 +32,8 @@ export interface WebhookDeps {
 
 export type Outcome = 'applied' | 'duplicate' | 'ignored';
 
-/** The events applyEvent acts on: the webhook endpoint subscribes to exactly these. */
-export const HANDLED_EVENTS = [
-  'checkout.session.completed',
-  'customer.subscription.created',
-  'customer.subscription.updated',
-  'customer.subscription.deleted',
-  'invoice.paid',
-  'invoice.payment_failed',
-] as const satisfies readonly Stripe.Event.Type[];
+/** The events applyEvent acts on (the webhook endpoint subscribes to exactly these). */
+export { HANDLED_EVENTS } from './events.js';
 
 const id = (v: string | { id: string } | null | undefined) =>
   v === null || v === undefined ? null : typeof v === 'string' ? v : v.id;
