@@ -159,7 +159,9 @@ the host:
 COMPOSE_FILES="-f infra/docker-compose.yml -f infra/docker-compose.tls.yml" scripts/backup.sh
 ```
 
-Restore replaces the data of a running install (services stop for the swap, then restart):
+Restore replaces the data of a running install (services stop for the swap, then restart). The
+dump is first restored into a scratch database while the install keeps running; if that fails,
+nothing is changed:
 
 ```sh
 COMPOSE_FILES="..." scripts/restore.sh backups/20261030T120000Z
