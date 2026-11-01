@@ -19,6 +19,8 @@ services:
       # hops in front (the dashboard's nginx, and Caddy with docker-compose.tls.yml).
       TRUST_PROXY: 'true'
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:?set STRIPE_SECRET_KEY (sk_test_...) in infra/.env}
+      # true takes real payments, and then STRIPE_SECRET_KEY must be a live key (and vice versa).
+      BILLING_LIVE_MODE: ${BILLING_LIVE_MODE:-false}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:?set STRIPE_WEBHOOK_SECRET (whsec_...) in infra/.env}
       BRAKE_DASHBOARD_URL: ${BRAKE_DASHBOARD_URL:-http://localhost:3000}
       BRAKE_HOSTED_SIGNUP: ${BRAKE_HOSTED_SIGNUP:-false}

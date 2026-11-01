@@ -18,7 +18,7 @@ const loginMailer = env.BRAKE_HOSTED_SIGNUP ? queueLoginMailer(valkey) : null;
 const app = await buildServer({
   db,
   valkey,
-  stripe: stripeClient(env.STRIPE_SECRET_KEY),
+  stripe: stripeClient(env.STRIPE_SECRET_KEY, { allowLive: env.BILLING_LIVE_MODE }),
   webhookSecret: env.STRIPE_WEBHOOK_SECRET,
   dashboardUrl: env.BRAKE_DASHBOARD_URL,
   licenseKey: env.licenseKey,

@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { z } from 'zod';
+import { assertStripeKeyMode } from './stripe.js';
 
 const envSchema = z.object({
   PORT: z.coerce.number().int().default(8083),
@@ -9,8 +10,10 @@ const envSchema = z.object({
   TRUST_PROXY: z.stringbool().default(false),
   DATABASE_URL: z.string().default('postgres://brake:brake@localhost:15432/brake'),
   VALKEY_URL: z.string().default('redis://localhost:16379'),
-  /** Test mode only (sk_test_ / rk_test_); live keys are refused. */
+  /** A test-mode key (sk_test_ / rk_test_), or a live one (sk_live_ / rk_live_) in live mode. */
   STRIPE_SECRET_KEY: z.string().min(1),
+  /** Take real payments: STRIPE_SECRET_KEY must then be a live key, and a test key is refused. */
+  BILLING_LIVE_MODE: z.stringbool().default(false),
   /** The webhook endpoint's signing secret (whsec_...), from Stripe or `stripe listen`. */
   STRIPE_WEBHOOK_SECRET: z.string().startsWith('whsec_'),
   BRAKE_DASHBOARD_URL: z.url().default('http://localhost:3000'),
@@ -26,6 +29,7 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): BillingEnv {
   const parsed = envSchema.parse(
     Object.fromEntries(Object.entries(env).filter(([, v]) => v !== '')),
   );
+  assertStripeKeyMode(parsed.STRIPE_SECRET_KEY, parsed.BILLING_LIVE_MODE);
   const licenseKey =
     parsed.BRAKE_LICENSE_SIGNING_KEY ??
     (parsed.BRAKE_LICENSE_SIGNING_KEY_FILE

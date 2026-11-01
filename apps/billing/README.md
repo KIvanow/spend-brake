@@ -1,7 +1,9 @@
 # @spend-brake/billing
 
-Hosted plans and license sales through Stripe, **test mode only** (`sk_test_` / `rk_test_`
-keys; a live key is refused at start).
+Hosted plans and license sales through Stripe, **test mode by default** (`sk_test_` /
+`rk_test_` keys). Live mode takes `BILLING_LIVE_MODE=true` and a live key (`sk_live_` /
+`rk_live_`); the service refuses to start on a mismatch either way (a live key without the
+flag, or a test key with it).
 
 | Plan       | Price                       | What                                                                                         |
 | ---------- | --------------------------- | -------------------------------------------------------------------------------------------- |
@@ -63,7 +65,8 @@ Prices and Customer portal), then
 STRIPE_SECRET_KEY=rk_live_... BRAKE_STRIPE_ALLOW_LIVE=true pnpm --filter @spend-brake/billing seed
 ```
 
-The billing service itself still refuses live keys (test mode only).
+The billing service takes a live key only with `BILLING_LIVE_MODE=true` (and then refuses a
+test key).
 
 ## Local testing with the Stripe CLI
 
