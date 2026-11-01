@@ -16,10 +16,18 @@ RUN pnpm --filter @spend-brake/${APP} deploy --prod --legacy /out
 
 FROM node:22-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da
 ARG START=start
-ENV NODE_ENV=production BRAKE_START=${START}
+ENV NODE_ENV=production
 WORKDIR /app
 # Mount point for verified catalog updates (owned by the service user, so a fresh volume is too).
 RUN mkdir /catalog && chown node:node /catalog
 COPY --from=build --chown=node:node /out .
+# The START script from package.json, run without npm: `exec env` makes node itself PID 1, so
+# docker stop's SIGTERM reaches the service's graceful shutdown (npm exits on it at once, and the
+# kernel then kills node mid-drain). Only plain commands with leading VAR=value are supported.
+RUN cmd="$(node -p "require('./package.json').scripts[process.argv[1]] ?? ''" "$START")" && \
+  case "$cmd" in \
+    '' | *[\;\&\|\<\>\`\$\(\)]*) echo "unsupported start script '$START': $cmd" >&2; exit 1 ;; \
+  esac && \
+  printf '#!/bin/sh\nexec env %s\n' "$cmd" > /start && chmod 755 /start
 USER node
-CMD ["sh", "-c", "exec npm run \"$BRAKE_START\""]
+CMD ["/start"]

@@ -28,6 +28,8 @@ VALKEY_PASSWORD=$(openssl rand -hex 24)
 POSTGRES_PASSWORD=$(openssl rand -hex 24)
 EOF
 
+# Fresh secrets need fresh volumes (a KEEP=1 run leaves its own behind).
+compose down -v --remove-orphans >/dev/null 2>&1 || true
 compose up -d --build --wait --wait-timeout 300
 
 check() {
@@ -50,3 +52,16 @@ compose exec -T worker node -e \
   "fetch('http://localhost:9464/metrics').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
 echo "ok   worker :9464/metrics"
 echo "Stack is up and every service answers."
+
+# Node runs as PID 1, so docker stop's SIGTERM reaches its graceful shutdown: each service
+# drains and exits 0 well inside the grace period.
+for service in api proxy worker notifier; do
+  pid1="$(compose exec -T "$service" cat /proc/1/comm)"
+  [ "$pid1" = node ] || { echo "FAIL $service runs $pid1 as PID 1, not node"; exit 1; }
+done
+compose stop -t 20 api proxy worker notifier
+for service in api proxy worker notifier; do
+  code="$(docker inspect -f '{{.State.ExitCode}}' "$(compose ps -a -q "$service")")"
+  [ "$code" = 0 ] || { echo "FAIL $service exited $code on SIGTERM"; exit 1; }
+  echo "ok   $service shut down cleanly"
+done
