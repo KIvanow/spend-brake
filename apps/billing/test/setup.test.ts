@@ -1,8 +1,11 @@
 // The Stripe setup scripts against an in-memory fake: no network, no real key.
+import { readFileSync } from 'node:fs';
 import type Stripe from 'stripe';
 import { describe, expect, it } from 'vitest';
 import { PRIVACY_URL, TERMS_URL, seedReport, seedStripe } from '../src/seed.js';
 import { stripeFromEnv } from '../src/stripe.js';
+import { API_VERSION, setupWebhook, webhookReport, webhookUrl } from '../src/webhook-setup.js';
+import { HANDLED_EVENTS } from '../src/webhooks.js';
 
 type Params = Record<string, unknown>;
 
@@ -157,5 +160,109 @@ describe('setup scripts and live keys', () => {
     expect(() =>
       stripeFromEnv({ STRIPE_SECRET_KEY: 'pk_live_dummy', BRAKE_STRIPE_ALLOW_LIVE: '1' }),
     ).toThrow();
+  });
+});
+
+function fakeWebhooks() {
+  const endpoints: Stripe.WebhookEndpoint[] = [];
+  let seq = 0;
+  const stripe = {
+    webhookEndpoints: {
+      list: () => ({ [Symbol.asyncIterator]: () => endpoints[Symbol.iterator]() }),
+      create: (p: Stripe.WebhookEndpointCreateParams) => {
+        const e = {
+          id: `we_${++seq}`,
+          url: p.url,
+          enabled_events: p.enabled_events,
+          api_version: p.api_version ?? null,
+          metadata: p.metadata ?? {},
+          status: 'enabled',
+        } as Stripe.WebhookEndpoint;
+        endpoints.push(e);
+        // Stripe returns the secret on creation only.
+        return Promise.resolve({ ...e, secret: `whsec_dummy_${seq}` });
+      },
+      update: (id: string, p: Stripe.WebhookEndpointUpdateParams) => {
+        const e = endpoints.find((x) => x.id === id)!;
+        Object.assign(e, {
+          url: p.url ?? e.url,
+          enabled_events: p.enabled_events ?? e.enabled_events,
+          metadata: p.metadata ?? e.metadata,
+          status: p.disabled === false ? 'enabled' : e.status,
+        });
+        return Promise.resolve(e);
+      },
+      del: (id: string) => {
+        endpoints.splice(
+          endpoints.findIndex((x) => x.id === id),
+          1,
+        );
+        return Promise.resolve({ id, deleted: true });
+      },
+    },
+  };
+  return { endpoints, stripe: stripe as unknown as Stripe };
+}
+
+describe('webhook setup', () => {
+  const url = webhookUrl('https://app.spendbrake.dev/');
+
+  it('subscribes to exactly the events billing handles', async () => {
+    expect(url).toBe('https://app.spendbrake.dev/v1/billing/webhook');
+    const { endpoints, stripe } = fakeWebhooks();
+    const first = await setupWebhook(stripe, { url });
+    expect(first).toMatchObject({ action: 'created', secret: 'whsec_dummy_1' });
+    expect(endpoints).toHaveLength(1);
+    expect(endpoints[0]).toMatchObject({
+      url,
+      api_version: API_VERSION,
+      metadata: { spend_brake_webhook: '1' },
+    });
+    expect([...endpoints[0]!.enabled_events].sort()).toEqual([...HANDLED_EVENTS].sort());
+    expect(webhookReport(first, true)).toContain('STRIPE_WEBHOOK_SECRET=whsec_dummy_1');
+    // The list is the cases applyEvent handles, no more and no fewer.
+    const source = readFileSync(new URL('../src/webhooks.ts', import.meta.url), 'utf8');
+    const cases = [...source.matchAll(/case '([a-z_]+\.[a-z_.]+)':/g)].map((m) => m[1]);
+    expect(cases.sort()).toEqual([...HANDLED_EVENTS].sort());
+  });
+
+  it('is idempotent and never shows the secret again', async () => {
+    const { endpoints, stripe } = fakeWebhooks();
+    await setupWebhook(stripe, { url });
+    const again = await setupWebhook(stripe, { url });
+    expect(again).toMatchObject({ action: 'unchanged', secret: null, id: 'we_1' });
+    expect(webhookReport(again, false)).toMatch(/Roll secret/);
+
+    // Drifted events are put back; the endpoint is found by its metadata even at another URL.
+    endpoints[0]!.enabled_events = ['invoice.paid'];
+    endpoints[0]!.url = 'https://old.example.com/hook';
+    const fixed = await setupWebhook(stripe, { url });
+    expect(fixed.action).toBe('updated');
+    expect(endpoints[0]).toMatchObject({ url });
+    expect([...endpoints[0]!.enabled_events].sort()).toEqual([...HANDLED_EVENTS].sort());
+    expect(endpoints).toHaveLength(1);
+  });
+
+  it('finds an endpoint made by hand by its URL, flags an old API version, and recreates', async () => {
+    const { endpoints, stripe } = fakeWebhooks();
+    endpoints.push({
+      id: 'we_hand',
+      url,
+      enabled_events: [...HANDLED_EVENTS],
+      api_version: '2020-08-27',
+      metadata: {},
+      status: 'enabled',
+    } as unknown as Stripe.WebhookEndpoint);
+    const found = await setupWebhook(stripe, { url });
+    expect(found).toMatchObject({
+      id: 'we_hand',
+      action: 'updated',
+      apiVersionMismatch: '2020-08-27',
+    });
+    expect(webhookReport(found, true)).toMatch(/--recreate/);
+    const re = await setupWebhook(stripe, { url, recreate: true });
+    expect(re).toMatchObject({ action: 'recreated', secret: 'whsec_dummy_1' });
+    expect(endpoints.map((e) => e.id)).toEqual(['we_1']);
+    expect(endpoints[0]?.api_version).toBe(API_VERSION);
   });
 });

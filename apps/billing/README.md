@@ -77,6 +77,22 @@ read -rs STRIPE_SECRET_KEY && export STRIPE_SECRET_KEY   # paste rk_live_..., no
 BRAKE_STRIPE_ALLOW_LIVE=1 pnpm --filter @spend-brake/billing seed
 ```
 
+The webhook endpoint, test or live (same key rules; the live key also needs write access to
+Webhook endpoints):
+
+```sh
+BRAKE_STRIPE_ALLOW_LIVE=1 pnpm --filter @spend-brake/billing webhook-setup
+```
+
+creates `$BRAKE_DASHBOARD_URL/v1/billing/webhook` (default
+`https://app.spendbrake.dev/v1/billing/webhook`; Caddy hands the app domain to the dashboard's
+nginx, which passes `/v1/billing/` to billing unchanged), subscribed to exactly the events
+above (`HANDLED_EVENTS` in `src/webhooks.ts`) and pinned to the API version of the Stripe SDK
+billing uses. It prints the signing secret once, for `STRIPE_WEBHOOK_SECRET`. Running it again
+finds the endpoint (metadata `spend_brake_webhook=1`, or its URL) and only puts its URL and
+events back in line; the secret is not shown again. `webhook-setup --recreate` deletes and recreates it
+(a new secret), for a lost secret or an endpoint on another API version.
+
 The billing service takes a live key only with `BILLING_LIVE_MODE=true` (and then refuses a
 test key). Its key needs write access to Customers, Checkout Sessions and Customer portal, and
 read access to Products and Prices.

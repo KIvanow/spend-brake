@@ -10,7 +10,8 @@
     "start": "node --import @spend-brake/shared/telemetry-register dist/main.js",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
-    "seed": "tsx src/seed.ts"
+    "seed": "tsx src/seed.ts",
+    "webhook-setup": "tsx src/webhook-setup.ts"
   },
   "dependencies": {
     "@fastify/rate-limit": "^11.2.1",
