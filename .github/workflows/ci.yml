@@ -51,4 +51,5 @@ jobs:
       - name: The images Compose does not build (billing, ee)
         run: |
           docker build -f infra/Dockerfile --build-arg APP=billing .
-          docker build -f infra/Dockerfile --build-arg APP=ee .
+          docker build -f infra/Dockerfile --build-arg APP=ee --build-arg START=start:api .
+          docker build -f infra/Dockerfile --build-arg APP=ee --build-arg START=start:worker .
