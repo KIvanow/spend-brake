@@ -18,7 +18,8 @@
 		}
 		lb_policy round_robin
 		lb_try_duration 2s
-		health_uri /healthz
+		# Ready means Valkey answers too; a replica that cannot reach it gets no traffic.
+		health_uri /readyz
 		health_interval 5s
 	}
 }

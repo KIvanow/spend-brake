@@ -80,7 +80,7 @@ services:
           'CMD',
           'node',
           '-e',
-          "fetch('http://localhost:8081/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))",
+          "fetch('http://localhost:8081/readyz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))",
         ]
       <<: *health
 
@@ -109,7 +109,7 @@ services:
           'CMD',
           'node',
           '-e',
-          "fetch('http://localhost:8080/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))",
+          "fetch('http://localhost:8080/readyz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))",
         ]
       <<: *health
 

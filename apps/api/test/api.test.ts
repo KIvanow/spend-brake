@@ -4,7 +4,9 @@ import { credentialContext, decryptSecret, type Envelope } from '@spend-brake/sh
 import { sql } from '@spend-brake/db';
 import type { InjectOptions } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { Redis } from 'ioredis';
 import { CSV_ROW_CAP } from '../src/routes/ledger.js';
+import { buildApi } from '../src/server.js';
 import { type Env, type Org, bearer, newOrg, startEnv } from './harness.js';
 
 const SECRET = 'AIzaSy-test-provider-secret-9F3k';
@@ -46,6 +48,25 @@ async function key(org: Org, extra: Record<string, unknown> = {}) {
   expect(res.statusCode).toBe(201);
   return res.json<{ id: string; token: string }>();
 }
+
+describe('health', () => {
+  it('is ready only when Valkey and Postgres answer', async () => {
+    expect((await env.app.inject('/readyz')).json()).toEqual({
+      ok: true,
+      valkey: true,
+      postgres: true,
+    });
+    // Nothing listens on port 1: Valkey is down, Postgres is not.
+    const down = new Redis({ port: 1, lazyConnect: true, enableOfflineQueue: false });
+    const app = await buildApi({ db: env.db, valkey: down, wrapper: null });
+    const res = await app.inject('/readyz');
+    expect(res.statusCode).toBe(503);
+    expect(res.json()).toEqual({ ok: false, valkey: false, postgres: true });
+    expect((await app.inject('/healthz')).statusCode).toBe(200);
+    await app.close();
+    down.disconnect();
+  });
+});
 
 describe('authentication', () => {
   it('rejects missing, malformed and unknown tokens', async () => {

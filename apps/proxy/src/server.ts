@@ -33,6 +33,7 @@ import {
 import {
   type GuardedClient,
   PRIVATE_ADDRESS,
+  answers,
   guardedAgent,
   privateLiteralHost,
   redactUrl,
@@ -247,7 +248,7 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
   });
 
   app.addHook('onResponse', (request, _reply, done) => {
-    if (request.url !== '/healthz') {
+    if (request.url !== '/healthz' && request.url !== '/readyz') {
       const l = labels.get(request) ?? { provider: '', sku: '' };
       metrics.requests.inc({ ...l, outcome: outcomes.get(request) ?? 'ok' });
     }
@@ -350,7 +351,13 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
     return sendError(reply, 'internal_error', 'Internal proxy error.');
   });
 
+  // Liveness: the process answers. Readiness: it can also reach Valkey, so a load balancer sends
+  // traffic elsewhere while it cannot (only fail-open keys would get through here).
   app.get('/healthz', () => ({ ok: true, service: 'proxy' }));
+  app.get('/readyz', async (_request, reply) => {
+    const valkey = await answers(() => deps.valkey.ping());
+    return reply.code(valkey ? 200 : 503).send({ ok: valkey, valkey });
+  });
 
   function track(p: Promise<unknown>): void {
     pending.add(p);

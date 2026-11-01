@@ -793,6 +793,19 @@ describe('Valkey outage', () => {
     await side.proxy.close();
   });
 
+  it('reports not ready while Valkey is unreachable, and stays live', async () => {
+    const side = await startProxy(valkeyUrl, mock);
+    expect((await side.proxy.inject('/readyz')).statusCode).toBe(200);
+    const ended = new Promise<void>((r) => side.valkey.once('end', () => r()));
+    side.valkey.disconnect();
+    await ended;
+    const res = await side.proxy.inject('/readyz');
+    expect(res.statusCode).toBe(503);
+    expect(res.json()).toMatchObject({ ok: false, valkey: false });
+    expect((await side.proxy.inject('/healthz')).statusCode).toBe(200);
+    await side.proxy.close();
+  });
+
   /** A proxy with fail-open spend in its journal and Valkey cut off. */
   async function outage(extra: Partial<ProxyDeps>) {
     const side = await startProxy(valkeyUrl, mock, {

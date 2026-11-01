@@ -1,7 +1,13 @@
 import rateLimit from '@fastify/rate-limit';
 import { BudgetEngine, Registry, type ValkeyClient } from '@spend-brake/budget';
-import type { Db } from '@spend-brake/db';
-import { type GuardedClient, type KeyWrapper, guardedAgent, redactUrl } from '@spend-brake/shared';
+import { type Db, sql } from '@spend-brake/db';
+import {
+  type GuardedClient,
+  type KeyWrapper,
+  answers,
+  guardedAgent,
+  redactUrl,
+} from '@spend-brake/shared';
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
 import { Authenticator } from './auth.js';
 import type { ApiHooks, Ctx } from './common.js';
@@ -152,6 +158,15 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
 
   const spec = router.document();
   app.get('/v1/openapi.json', { config: { rateLimit: false } }, () => spec);
+  // Liveness: the process answers. Readiness: Valkey and Postgres answer too.
   app.get('/healthz', { config: { rateLimit: false } }, () => ({ ok: true, service: 'api' }));
+  app.get('/readyz', { config: { rateLimit: false } }, async (_req, reply) => {
+    const [valkey, postgres] = await Promise.all([
+      answers(() => deps.valkey.ping()),
+      answers(() => deps.db.execute(sql`select 1`)),
+    ]);
+    const ok = valkey && postgres;
+    return reply.code(ok ? 200 : 503).send({ ok, valkey, postgres });
+  });
   return app;
 }

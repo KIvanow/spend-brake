@@ -121,4 +121,4 @@ Worth paging on: `brake_reservations_expired_total` rising, `brake_ledger_lag_ev
 
 Set `OTEL_EXPORTER_OTLP_ENDPOINT` on a service and it exports its own OpenTelemetry traces;
 secrets are stripped from every span. Health checks are `GET /healthz` on the proxy, API and
-notifier.
+notifier, and `GET /readyz` (the stores answer too) on the proxy and API.
