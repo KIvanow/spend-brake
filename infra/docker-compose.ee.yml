@@ -13,6 +13,8 @@ services:
       # Single sign-on: where browsers reach this API and the dashboard.
       BRAKE_PUBLIC_API_URL: ${BRAKE_PUBLIC_API_URL:-}
       BRAKE_DASHBOARD_URL: ${BRAKE_DASHBOARD_URL:-}
+      # An OIDC issuer on a private address (an IdP inside your network) needs this.
+      ALLOW_PRIVATE_IDP: ${ALLOW_PRIVATE_IDP:-false}
     volumes: ['catalog:/catalog:ro']
 
   worker:

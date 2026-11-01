@@ -84,13 +84,14 @@ Published images are coming; until then, build from source.
 
 ## Business / Enterprise (`docker-compose.ee.yml`)
 
-| Variable                                                                  | What                                                         |
-| ------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| `BRAKE_PUBLIC_API_URL`                                                    | Where browsers reach the API (single sign-on)                |
-| `BRAKE_CATALOG_FEED_URL`                                                  | The signed catalog feed the worker fetches daily             |
-| `BRAKE_AUDIT_FILE`                                                        | Ship the audit log to a file (JSON Lines)                    |
-| `BRAKE_AUDIT_S3_BUCKET`, `BRAKE_AUDIT_S3_PREFIX`, `BRAKE_AUDIT_S3_REGION` | Ship the audit log to S3                                     |
-| `BRAKE_AUDIT_SYSLOG`                                                      | Ship the audit log to syslog (`udp://host:514` or `tcp://…`) |
+| Variable                                                                  | What                                                                                                                                           |
+| ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BRAKE_PUBLIC_API_URL`                                                    | Where browsers reach the API (single sign-on)                                                                                                  |
+| `BRAKE_CATALOG_FEED_URL`                                                  | The signed catalog feed the worker fetches daily                                                                                               |
+| `BRAKE_AUDIT_FILE`                                                        | Ship the audit log to a file (JSON Lines)                                                                                                      |
+| `BRAKE_AUDIT_S3_BUCKET`, `BRAKE_AUDIT_S3_PREFIX`, `BRAKE_AUDIT_S3_REGION` | Ship the audit log to S3                                                                                                                       |
+| `BRAKE_AUDIT_SYSLOG`                                                      | Ship the audit log to syslog (`udp://host:514` or `tcp://…`)                                                                                   |
+| `ALLOW_PRIVATE_IDP`                                                       | `true` lets an org's OIDC issuer be on a private address (an IdP inside your network); off by default. Leave off on a server other people use. |
 
 See [ee/README.md](https://github.com/KIvanow/spend-brake/blob/main/ee/README.md).
 

@@ -19,6 +19,7 @@ await runApi({
               publicUrl: env.BRAKE_PUBLIC_API_URL,
               dashboardUrl: env.BRAKE_DASHBOARD_URL,
               sessionMs: env.BRAKE_SSO_SESSION_HOURS * 3600_000,
+              allowPrivateIdp: env.ALLOW_PRIVATE_IDP,
             },
           }
         : {}),

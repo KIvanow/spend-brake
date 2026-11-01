@@ -7,6 +7,8 @@ const envSchema = z.object({
   BRAKE_PUBLIC_API_URL: z.url().optional(),
   BRAKE_DASHBOARD_URL: z.url().optional(),
   BRAKE_SSO_SESSION_HOURS: z.coerce.number().positive().max(24).default(8),
+  /** Let an org's OIDC issuer be on a private address (an IdP inside your network). */
+  ALLOW_PRIVATE_IDP: z.stringbool().default(false),
   /** Audit export sinks; any combination. */
   BRAKE_AUDIT_FILE: z.string().optional(),
   BRAKE_AUDIT_S3_BUCKET: z.string().optional(),

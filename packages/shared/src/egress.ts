@@ -1,6 +1,6 @@
 import { lookup } from 'node:dns';
 import { BlockList, isIP } from 'node:net';
-import { Agent } from 'undici';
+import { Agent, fetch as undiciFetch } from 'undici';
 
 // Every address a customer-supplied URL (webhook, OTLP endpoint) must never reach. IPv4-mapped IPv6 (::ffff:a.b.c.d in any
 // spelling) is unpacked and checked as IPv4 below; NAT64 (64:ff9b::/96) is refused outright.
@@ -99,4 +99,26 @@ function lookupGuardedAgent(allowPrivate: boolean, what: string): Agent {
 export function privateLiteralHost(url: string): string | null {
   const host = new URL(url).hostname.replace(/^\[|\]$/g, '');
   return isIP(host) && isPrivateAddress(host) ? host : null;
+}
+
+/**
+ * A fetch through the guarded agent (for libraries that take a custom fetch, such as
+ * openid-client): IP-literal hosts are checked first, and redirects are never followed.
+ */
+export function guardedFetch(
+  client: GuardedClient,
+): (url: string, init?: object) => Promise<Response> {
+  return async (url, init) => {
+    const literal = client.allowPrivate ? null : privateLiteralHost(url);
+    if (literal) {
+      throw Object.assign(new Error(`host is a private address (${literal})`), {
+        code: PRIVATE_ADDRESS,
+      });
+    }
+    return undiciFetch(url, {
+      ...(init as Parameters<typeof undiciFetch>[1]),
+      redirect: 'manual',
+      dispatcher: client.agent,
+    });
+  };
 }

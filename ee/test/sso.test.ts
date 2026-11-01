@@ -86,7 +86,13 @@ let org: Org;
 beforeAll(async () => {
   await startIdp();
   env = await startEnv({
-    sso: { publicUrl: PUBLIC, dashboardUrl: DASHBOARD, allowInsecureIdp: true },
+    // The test IdP listens on 127.0.0.1: a private address, so opt in.
+    sso: {
+      publicUrl: PUBLIC,
+      dashboardUrl: DASHBOARD,
+      allowInsecureIdp: true,
+      allowPrivateIdp: true,
+    },
   });
   org = await newOrg(env);
 });
@@ -224,6 +230,9 @@ describe('single sign-on with OIDC', () => {
     const res = await configureOidc(await newOrg(env), { issuer: 'http://127.0.0.1:9/nothing' });
     expect(res.statusCode).toBe(400);
     expect(res.json()).toMatchObject({ error: 'sso_discovery_failed' });
+    // The client learns nothing about what the API could or could not reach; the log has it.
+    expect(res.body).not.toMatch(/127\.0\.0\.1|ECONNREFUSED|fetch failed/);
+    expect(env.logs.text()).toContain('oidc discovery failed');
   });
 
   it('gives ee roles through groups, and refuses unmapped users and other domains', async () => {
@@ -468,5 +477,31 @@ describe('role mapping', () => {
     expect(roleFor(row, ['c', 'b'])).toBe('admin');
     expect(roleFor(row, ['z'])).toBeNull();
     expect(roleFor({ ...row, defaultRole: 'viewer' }, ['z'])).toBe('viewer');
+  });
+});
+
+describe('OIDC egress', () => {
+  let guarded: Env;
+  beforeAll(async () => {
+    guarded = await startEnv({
+      sso: { publicUrl: PUBLIC, dashboardUrl: DASHBOARD, allowInsecureIdp: true },
+    });
+  });
+  afterAll(() => guarded.stop());
+
+  it('refuses an issuer on a private address unless allowed, with a generic error', async () => {
+    const o = await newOrg(guarded);
+    for (const target of [issuer, issuer.replace('127.0.0.1', 'localhost')]) {
+      const res = await guarded.app.inject({
+        method: 'PUT',
+        url: '/v1/sso',
+        headers: bearer(o.owner),
+        payload: { protocol: 'oidc', issuer: target, clientId: CLIENT, clientSecret: 's3cret' },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toMatchObject({ error: 'sso_discovery_failed' });
+      expect(res.body).not.toMatch(/private|127\.0\.0\.1|::1/);
+    }
+    expect(guarded.logs.text()).toContain('private address');
   });
 });

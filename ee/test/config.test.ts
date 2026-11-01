@@ -14,5 +14,7 @@ describe('ee settings', () => {
     expect(env.BRAKE_PUBLIC_API_URL).toBeUndefined();
     expect(auditSinksFrom(env)).toEqual([]);
     expect(() => loadEeEnv({ BRAKE_PUBLIC_API_URL: 'not a url' })).toThrow();
+    expect(env.ALLOW_PRIVATE_IDP).toBe(false);
+    expect(loadEeEnv({ ALLOW_PRIVATE_IDP: 'true' }).ALLOW_PRIVATE_IDP).toBe(true);
   });
 });

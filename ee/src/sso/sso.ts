@@ -13,7 +13,13 @@ import {
   sha256,
 } from '@spend-brake/api';
 import { and, apiTokens, eq, isNull, notInArray, sql, users } from '@spend-brake/db';
-import { type Envelope, decryptSecret, encryptSecret } from '@spend-brake/shared';
+import {
+  type Envelope,
+  decryptSecret,
+  encryptSecret,
+  guardedAgent,
+  guardedFetch,
+} from '@spend-brake/shared';
 import type { FastifyInstance } from 'fastify';
 import type { ValkeyClient as Redis } from '@spend-brake/budget';
 import * as oidc from 'openid-client';
@@ -32,6 +38,11 @@ export interface SsoOptions {
   sessionMs?: number;
   /** Tests only: talk to an IdP over plain HTTP. */
   allowInsecureIdp?: boolean;
+  /**
+   * Let an org's OIDC issuer (discovery, token endpoint, JWKS) be on a private or loopback
+   * address: an IdP inside your own network (ALLOW_PRIVATE_IDP). Off by default.
+   */
+  allowPrivateIdp?: boolean;
 }
 
 const STATE_TTL_SEC = 600;
@@ -131,6 +142,12 @@ function cookieValue(header: string | undefined): string | null {
   return null;
 }
 
+/** An error's message with its cause's (fetch failures put the reason in the cause). */
+function errorDetail(err: unknown): string {
+  const e = err as Error & { cause?: { message?: string } };
+  return [e?.message, e?.cause?.message].filter(Boolean).join(': ');
+}
+
 const asList = (v: unknown): string[] =>
   Array.isArray(v) ? v.map(String) : typeof v === 'string' ? [v] : [];
 
@@ -172,21 +189,25 @@ export function ssoRoutes(
 
   // Discovery once per org and 10 minutes, not on every (unauthenticated) login start.
   const oidcConfigs = new Map<string, { until: number; config: Promise<oidc.Configuration> }>();
+  // Every request to the IdP (discovery, then the token endpoint and JWKS through the
+  // configuration) refuses private addresses unless the operator allows them.
+  const idpFetch = guardedFetch(guardedAgent(opts.allowPrivateIdp ?? false, 'OIDC issuer'));
   const discover = (secret: string, s: Pick<OidcSettings, 'issuer' | 'clientId'>) =>
-    oidc.discovery(
-      new URL(s.issuer),
-      s.clientId,
-      secret,
-      undefined,
-      opts.allowInsecureIdp ? { execute: [oidc.allowInsecureRequests] } : undefined,
-    );
+    oidc.discovery(new URL(s.issuer), s.clientId, secret, undefined, {
+      [oidc.customFetch]: idpFetch,
+      ...(opts.allowInsecureIdp ? { execute: [oidc.allowInsecureRequests] } : {}),
+    });
   const oidcConfig = async (orgId: string, s: OidcSettings) => {
     const hit = oidcConfigs.get(orgId);
     if (hit && hit.until > Date.now()) return hit.config;
     if (!ctx.wrapper) throw new ApiError(503, 'no_master_key', 'Set the master key first.');
-    const config = discover(await decryptSecret(ctx.wrapper, s.secret, secretContext(orgId)), s);
+    const secret = await decryptSecret(ctx.wrapper, s.secret, secretContext(orgId));
+    const config = discover(secret, s).catch((err: unknown) => {
+      oidcConfigs.delete(orgId);
+      app.log.warn({ err: errorDetail(err), orgId, issuer: s.issuer }, 'oidc discovery failed');
+      throw new ApiError(502, 'sso_idp_unreachable', 'The identity provider could not be reached.');
+    });
     oidcConfigs.set(orgId, { until: Date.now() + CONFIG_TTL_MS, config });
-    config.catch(() => oidcConfigs.delete(orgId));
     return config;
   };
 
@@ -246,10 +267,12 @@ export function ssoRoutes(
         try {
           await discover(body.clientSecret, body);
         } catch (err) {
+          // Details stay in the log: echoing them would tell the caller what this API can reach.
+          app.log.warn({ err: errorDetail(err), issuer: body.issuer }, 'oidc discovery failed');
           throw new ApiError(
             400,
             'sso_discovery_failed',
-            `Could not read the issuer's OpenID configuration: ${(err as Error).message}`,
+            "Could not read the issuer's OpenID configuration.",
           );
         }
         settings = {
