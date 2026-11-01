@@ -8,8 +8,19 @@ set -euo pipefail
 COMPOSE_FILES="${COMPOSE_FILES:--f infra/docker-compose.yml}"
 ENV_FILE="${ENV_FILE:-infra/.env}"
 dir="${1:?usage: scripts/restore.sh <backup-dir>}"
-test -s "$dir/postgres.dump" && test -s "$dir/valkey.rdb"
 compose() { docker compose --env-file "$ENV_FILE" $COMPOSE_FILES "$@"; }
+fail() { echo "restore: $*; nothing was changed." >&2; exit 1; }
+
+# Check the backup before touching anything: a bad file found after the drop leaves no data.
+test -s "$dir/postgres.dump" || fail "$dir/postgres.dump is missing or empty"
+test -s "$dir/valkey.rdb" || fail "$dir/valkey.rdb is missing or empty"
+case "$(head -c 6 "$dir/valkey.rdb")" in
+  REDIS* | VALKEY) ;;
+  *) fail "$dir/valkey.rdb is not a Valkey snapshot" ;;
+esac
+# pg_restore reads the dump's header and table of contents (Postgres stays up throughout).
+compose exec -T postgres pg_restore --list < "$dir/postgres.dump" > /dev/null ||
+  fail "$dir/postgres.dump is not a pg_dump custom-format archive pg_restore can read"
 
 # Nothing may write while the data is swapped.
 services="$(compose config --services | grep -vxE 'postgres|valkey')"
