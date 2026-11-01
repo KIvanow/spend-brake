@@ -46,6 +46,7 @@ import { TtlCache } from './cache.js';
 import { outcomes, sendError } from './errors.js';
 import { ProxyMetrics } from './metrics.js';
 import {
+  DecodedTooLarge,
   decodeBody,
   outgoingHeaders,
   parseBody,
@@ -1132,8 +1133,18 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
       resBytes = raw.length;
       let body: unknown;
       try {
-        body = parseJson(decodeBody(raw, resHeaders['content-encoding']));
-      } catch {
+        body = parseJson(await decodeBody(raw, resHeaders['content-encoding'], 2 * maxBuffered));
+      } catch (err) {
+        if (err instanceof DecodedTooLarge) {
+          // Unreadable, so nothing in it may lower the price: charge the worst case.
+          settle(priced.worst, true, res.statusCode, upstreamMs, err.message);
+          costHeaders(priced.worst);
+          return sendError(
+            reply,
+            'upstream_unavailable',
+            'Provider response inflates past the size the proxy reads.',
+          );
+        }
         body = undefined;
       }
       const { actual, billed } = await actualOf(body);

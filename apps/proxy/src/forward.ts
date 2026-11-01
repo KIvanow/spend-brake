@@ -1,4 +1,9 @@
-import { brotliDecompressSync, gunzipSync, inflateSync } from 'node:zlib';
+import { promisify } from 'node:util';
+import { brotliDecompress, gunzip, inflate } from 'node:zlib';
+
+const gunzipAsync = promisify(gunzip);
+const inflateAsync = promisify(inflate);
+const brotliAsync = promisify(brotliDecompress);
 
 // Hop-by-hop headers (RFC 9110 7.6.1) plus ones the proxy owns or replaces.
 const HOP_BY_HOP = new Set([
@@ -62,21 +67,42 @@ export function upstreamUrl(base: string, path: string, query: URLSearchParams):
   return url;
 }
 
-/** Decode a buffered response body for pricing; the client still gets the original bytes. */
-export function decodeBody(raw: Buffer, encoding: string | undefined): Buffer {
-  switch ((encoding ?? '').trim().toLowerCase()) {
-    case '':
-    case 'identity':
-      return raw;
-    case 'gzip':
-    case 'x-gzip':
-      return gunzipSync(raw);
-    case 'deflate':
-      return inflateSync(raw);
-    case 'br':
-      return brotliDecompressSync(raw);
-    default:
-      throw new Error(`unsupported content-encoding ${encoding}`);
+/** A compressed body that inflates past the limit (a decompression bomb, or just too big). */
+export class DecodedTooLarge extends Error {
+  constructor() {
+    super('decoded_too_large');
+  }
+}
+
+/**
+ * Decode a buffered response body for pricing; the client still gets the original bytes. Off the
+ * event loop, and never more than `maxOutput` bytes: a few kilobytes of gzip can inflate to
+ * gigabytes.
+ */
+export async function decodeBody(
+  raw: Buffer,
+  encoding: string | undefined,
+  maxOutput: number,
+): Promise<Buffer> {
+  const opts = { maxOutputLength: maxOutput };
+  try {
+    switch ((encoding ?? '').trim().toLowerCase()) {
+      case '':
+      case 'identity':
+        return raw;
+      case 'gzip':
+      case 'x-gzip':
+        return await gunzipAsync(raw, opts);
+      case 'deflate':
+        return await inflateAsync(raw, opts);
+      case 'br':
+        return await brotliAsync(raw, opts);
+      default:
+        throw new Error(`unsupported content-encoding ${encoding}`);
+    }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ERR_BUFFER_TOO_LARGE') throw new DecodedTooLarge();
+    throw err;
   }
 }
 

@@ -450,6 +450,28 @@ describe('upstream behaviour', () => {
     expect(await spent(org)).toBe(5_000n);
   });
 
+  it('refuses a compressed body that inflates past the limit and charges the worst case', async () => {
+    const small = await startProxy(valkeyUrl, mock, { maxBufferedBytes: 4096 });
+    const org = newOrg();
+    const { token } = await newKey(small, org);
+    // A few hundred bytes on the wire, 1 MB once inflated.
+    const bomb = gzipSync(JSON.stringify({ status: 'REQUEST_DENIED', pad: ' '.repeat(1 << 20) }));
+    mock.respond = (_req, reply) =>
+      reply
+        .header('content-encoding', 'gzip')
+        .header('content-type', 'application/json')
+        .send(bomb);
+    const res = await small.proxy.inject(
+      `/google-maps/maps/api/geocode/json?address=x&key=${token}`,
+    );
+    expect(res.statusCode).toBe(502);
+    expect(res.json()).toMatchObject({ error: 'upstream_unavailable' });
+    expect(res.headers['x-brake-cost-micros']).toBe('5000');
+    await small.proxy.brakeDrain();
+    expect(await spent(org)).toBe(5_000n);
+    await small.proxy.close();
+  });
+
   it('streams chunked bodies to the client', async () => {
     const org = newOrg();
     const { token } = await newKey(h, org);
