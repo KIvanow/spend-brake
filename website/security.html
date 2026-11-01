@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Security - Spend Brake</title>
+    <meta
+      name="description"
+      content="How Spend Brake protects provider keys and accounts: envelope encryption, what is stored and what is not, hashed tokens, outbound address checks, TLS, hosting, backups, and how to report a vulnerability."
+    />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#f7f7f5" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#141413" media="(prefers-color-scheme: dark)" />
+    <link rel="canonical" href="https://spendbrake.dev/security" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/site.css" />
+    <script
+      defer
+      src="https://cdn.jsdelivr.net/npm/posthog-js@1.438.12/dist/array.no-external.js"
+      integrity="sha384-+Lkmn19DYonVgUwLkn6wB27C9VRu21N4rIsR+Y5JGqhmp6JLZKAzUV0uUwgMMdiY"
+      crossorigin="anonymous"
+    ></script>
+    <script defer src="/analytics.js"></script>
+  </head>
+  <body>
+    <header class="top">
+      <div class="wrap">
+        <a class="brand" href="/">
+          <svg viewBox="0 0 32 32" aria-hidden="true">
+            <circle cx="16" cy="16" r="12.5" fill="none" stroke="var(--accent)" stroke-width="3" />
+            <rect x="8" y="14" width="16" height="4" rx="1" fill="var(--brake)" />
+          </svg>
+          Spend Brake
+        </a>
+        <nav aria-label="Sections">
+          <a href="/#how">How it works</a>
+          <a href="/#pricing">Pricing</a>
+          <a href="/#self-host">Self-host</a>
+          <a href="https://docs.spendbrake.dev/">Docs</a>
+        </nav>
+        <div class="menu" id="menu">
+          <a class="toggle open" href="#menu">Menu</a>
+          <a class="toggle close" href="#close" aria-label="Close menu">Close</a>
+          <nav aria-label="Sections (menu)">
+            <a href="/#how">How it works</a>
+            <a href="/#pricing">Pricing</a>
+            <a href="/#self-host">Self-host</a>
+            <a href="https://docs.spendbrake.dev/">Docs</a>
+            <a href="https://app.spendbrake.dev/">Sign in</a>
+          </nav>
+        </div>
+        <div class="cta">
+          <a class="btn ghost" href="https://app.spendbrake.dev/">Sign in</a>
+          <a class="btn primary" href="https://app.spendbrake.dev/#/signup">Start free</a>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="legal">
+        <div class="wrap">
+          <h1>Security</h1>
+          <p class="meta">Last updated 1 November 2026</p>
+
+          <div class="summary">
+            <h2>In short</h2>
+            <ul>
+              <li>
+                Provider keys are encrypted with AES-256-GCM under a random data key per secret,
+                bound to the org and credential they belong to. They are decrypted in the proxy's
+                memory to forward your requests and are never written to logs.
+              </li>
+              <li>
+                Request and response bodies and query strings are not stored. Credential headers and
+                secret query parameters are redacted before a log line is written.
+              </li>
+              <li>
+                Your keys and sign-in tokens are stored as SHA-256 hashes. Sign-in is by one-time
+                emailed link; there are no passwords.
+              </li>
+              <li>
+                Outbound connections you configure (webhooks, telemetry collectors, custom APIs,
+                single sign-on) are refused when they point at private or internal addresses.
+              </li>
+              <li>
+                The hosted service runs in DigitalOcean's Frankfurt (FRA1) region behind TLS with
+                HSTS. Backups are taken nightly, kept 14 days, and live on the same server.
+              </li>
+              <li>
+                Found a problem? Email
+                <a href="mailto:kristiyan@spendbrake.dev">kristiyan@spendbrake.dev</a>. The code is
+                public at
+                <a href="https://github.com/KIvanow/spend-brake">github.com/KIvanow/spend-brake</a>.
+              </li>
+            </ul>
+          </div>
+
+          <p>
+            Spend Brake is operated by Kristiyan Ivanov, an individual. This page describes what the
+            software does to protect your provider keys and your account, as it is built today. It
+            is written from the code, which you can read yourself; where this page and the code
+            disagree, the code is right and I would like to hear about it. It is not a
+            certification: Spend Brake has no SOC 2 or ISO 27001 audit.
+          </p>
+          <p>
+            Everything below applies equally to a self-hosted install, except that hosting, TLS and
+            backups are then yours to arrange (the
+            <a href="https://docs.spendbrake.dev/self-hosting/">self-hosting guide</a> covers each).
+          </p>
+
+          <h2>Provider keys</h2>
+          <h3>How they are encrypted</h3>
+          <p>
+            Each provider key you store is sealed with envelope encryption, in the
+            <code>encryptSecret</code> function of <code>packages/shared/src/envelope.ts</code>:
+          </p>
+          <ul>
+            <li>
+              A fresh random 32-byte <strong>data key</strong> is generated for every secret and
+              used once, with <strong>AES-256-GCM</strong> and a random 12-byte nonce, to encrypt
+              the key.
+            </li>
+            <li>
+              The data key is then <strong>wrapped by a master key</strong>, either a 32-byte key
+              held in the service's environment or an AWS KMS key. Only the wrapped data key is
+              stored. Rotating the master key re-wraps data keys; the secrets themselves are not
+              touched.
+            </li>
+            <li>
+              Both layers carry <strong>associated data</strong> naming the purpose, the org id and
+              the credential id (<code>purpose=provider-credential</code>). A ciphertext moved to
+              another org or another credential row fails to decrypt.
+            </li>
+            <li>
+              The data key is zeroed in memory as soon as it has been used, on both the encrypting
+              and the decrypting side.
+            </li>
+          </ul>
+          <p>
+            The same scheme protects webhook URLs and their signing secrets, OpenTelemetry headers,
+            SSO client secrets and billing-export service accounts, each with its own purpose in the
+            associated data.
+          </p>
+
+          <h3>Where they are decrypted</h3>
+          <p>
+            The encrypted envelope is what the admin API stores in Postgres and writes through to
+            Valkey; the plaintext is in neither. The proxy reads the envelope and decrypts it with
+            the master key <strong>in its own memory</strong> when it forwards a request, keeping
+            the decrypted key in memory for at most five minutes so it is not unwrapped on every
+            call. The one other place a provider key is decrypted is the worker, which uses a Twilio
+            credential to look up the final price of a message after it is sent. Nothing writes a
+            decrypted key to disk, to a log, to a trace or to a response.
+          </p>
+          <p>
+            Credentials your application sends are never forwarded to the provider: the proxy drops
+            <code>Authorization</code>, <code>Cookie</code>, <code>X-Goog-Api-Key</code>,
+            <code>X-Api-Key</code>, <code>X-Subscription-Token</code> and every
+            <code>X-Brake-*</code> header from the incoming request and injects the real key itself.
+          </p>
+          <p>
+            The master key is not part of any backup. A self-hosted install that loses it loses
+            access to every stored credential, which is why the backup script says so each time it
+            runs.
+          </p>
+
+          <h2>What is stored, and what is not</h2>
+          <p>
+            For each call through the proxy, Spend Brake records a usage event: timestamp, org, key,
+            environment, agent and session labels, provider, route and SKU, worst-case and actual
+            cost, outcome, the provider's HTTP status, latency, the caller's trace context and user
+            agent, request and response sizes, and a one-way hash of the request used to detect
+            identical repeated calls.
+          </p>
+          <p>
+            <strong>Not stored:</strong> request bodies, response bodies and query strings. The
+            places, addresses, messages and search terms your requests are about never reach the
+            database. Responses are passed through to your application and not cached. The
+            <a href="/privacy">privacy policy</a> lists every category of data in full.
+          </p>
+          <h3>Logs</h3>
+          <p>
+            The proxy, admin API, notifier and billing services log through a redacting logger
+            (<code>packages/shared/src/redact.ts</code>). Before a line is written, credential
+            headers (<code>Authorization</code>, <code>Proxy-Authorization</code>,
+            <code>Cookie</code>, <code>Set-Cookie</code>, <code>X-Brake-Key</code>,
+            <code>X-Goog-Api-Key</code>, <code>X-Api-Key</code>, <code>Api-Key</code>,
+            <code>X-Subscription-Token</code>) are replaced with <code>[redacted]</code>, secret
+            query parameters (<code>key</code>, <code>api_key</code>, <code>apikey</code>,
+            <code>access_token</code>, <code>token</code>, <code>signature</code>,
+            <code>client_secret</code>) lose their values, and anything shaped like a Spend Brake
+            key (<code>sb_live_…</code>, <code>sb_test_…</code>) is removed from free text,
+            including error messages. Logs are kept for 14 days.
+          </p>
+
+          <h2>Keys, tokens and sign-in</h2>
+          <ul>
+            <li>
+              <strong>Spend Brake keys</strong> (<code>sb_live_…</code>) are shown once when
+              created. The service stores their SHA-256 hash and looks them up by that hash; the
+              proxy caches the result for five seconds. Keys can be scoped, capped, restricted to an
+              IP allowlist, and revoked at any time.
+            </li>
+            <li>
+              <strong>Admin API tokens</strong> (<code>sbt_…</code>, 32 random characters) are
+              stored as SHA-256 hashes with an optional expiry, and can be revoked.
+            </li>
+            <li>
+              <strong>Sign-in</strong> to the hosted dashboard is by emailed link. The link carries
+              a random 32-byte code in the URL fragment, so it does not appear in server or proxy
+              logs; only the code's hash is stored, it is valid for 15 minutes, and it works once.
+              At most five links an hour are sent to one address, and the response does not reveal
+              whether the address is known. A session lasts seven days; the dashboard keeps its
+              token in your browser's local or session storage and sets no cookies.
+            </li>
+            <li>
+              <strong>Admin endpoints are rate-limited</strong> per client address. Behind the HTTPS
+              front only the private hops in front of the service are trusted to say what that
+              address is.
+            </li>
+            <li>
+              <strong>Alert actions</strong> (Kill, Raise, Mute links in alerts) and
+              <strong>outgoing webhooks</strong> are signed with HMAC-SHA256: action links with a
+              server secret, webhooks with the per-webhook secret you are shown when you create it,
+              over a timestamp and the raw body.
+            </li>
+            <li>
+              <strong>Audit log.</strong> Changes to caps, keys, credentials, team members and kill
+              switches are recorded with who made them and when.
+            </li>
+          </ul>
+
+          <h2>Outbound connections</h2>
+          <p>
+            Several features make the service connect to a URL you supply: alert webhooks,
+            OpenTelemetry collectors, custom APIs you add to the proxy, and (with the Business or
+            Enterprise license) the OpenID Connect issuer for single sign-on. Each of these goes
+            through a guarded HTTP client (<code>packages/shared/src/egress.ts</code>) that refuses
+            loopback, private, link-local (including cloud metadata), carrier-grade NAT, multicast,
+            unspecified, NAT64 and IPv4-mapped addresses. The check runs on the address actually
+            resolved and connected to, not just on the hostname, so a name that resolves to an
+            internal address is refused too, and IP-literal hosts are refused before any connection
+            is made. The SSO client does not follow redirects. When a custom API is refused, the
+            caller gets an error and nothing is sent.
+          </p>
+          <p>
+            On a self-hosted install, where a collector or an API may legitimately live on the same
+            network, each guard can be relaxed on purpose with
+            <code>ALLOW_PRIVATE_WEBHOOKS</code>, <code>ALLOW_PRIVATE_COLLECTORS</code>,
+            <code>ALLOW_PRIVATE_CUSTOM_APIS</code> or <code>ALLOW_PRIVATE_IDP</code>. All are off by
+            default.
+          </p>
+
+          <h2>Transport and browser protections</h2>
+          <ul>
+            <li>
+              The hosted proxy and dashboard sit behind Caddy, which obtains and renews certificates
+              from Let's Encrypt. Both send
+              <code>Strict-Transport-Security: max-age=31536000; includeSubDomains</code>, so a
+              browser that has visited once will not go back to plain HTTP. Server version headers
+              are removed.
+            </li>
+            <li>
+              The dashboard is served with a Content Security Policy that allows scripts and styles
+              from itself only, connections to its own API and to PostHog EU, and forbids framing.
+              This website has a stricter policy still (<code>default-src 'none'</code>, one pinned
+              analytics script with a subresource integrity hash) and sends
+              <code>X-Content-Type-Options</code>, <code>X-Frame-Options</code> and
+              <code>Referrer-Policy</code> headers.
+            </li>
+            <li>
+              Postgres and Valkey are not published outside the service's container network; the
+              application ports bind to the loopback interface and are reached only through Caddy.
+            </li>
+          </ul>
+
+          <h2>Hosting and backups</h2>
+          <p>
+            The hosted service, its database and its cache run on DigitalOcean in the Frankfurt,
+            Germany (FRA1) region. This website is served by Vercel. Transactional email goes
+            through Resend, payments through Stripe, and product analytics to PostHog's EU cloud;
+            the <a href="/privacy">privacy policy</a> says what each of them sees.
+          </p>
+          <p>
+            Backups of Postgres (configuration, ledger, audit log) and Valkey (live counters,
+            reservations, kill switches) are taken nightly and kept for 14 days. They are stored on
+            the same server as the service: they cover a bad upgrade or a mistaken deletion, not the
+            loss of the machine. They contain the encrypted credential envelopes and not the master
+            key, so a copy of a backup on its own does not expose provider keys. Deleted data may
+            remain in backups until they rotate out.
+          </p>
+
+          <h2>What a key cannot protect you from</h2>
+          <p>
+            Caps hold only if the proxy is the only path to spend: a provider key that is also used
+            directly is uncapped there. <code>brake init</code> prints the steps to restrict a key
+            to the proxy's outbound addresses and the APIs you use. Overshoot is bounded by a single
+            call's worst case unless a key opts into fail-open, and while Valkey is unreachable the
+            proxy fails closed with <code>503</code> for every other key. Keep the provider's own
+            budgets and quotas on as a backstop.
+          </p>
+
+          <h2 id="report">Reporting a vulnerability</h2>
+          <p>
+            If you believe you have found a security problem in Spend Brake, the hosted service or
+            this website, please email
+            <a href="mailto:kristiyan@spendbrake.dev">kristiyan@spendbrake.dev</a> with enough
+            detail to reproduce it. I read that address myself. Please give me a reasonable window
+            to fix the issue before you publish it, and do not access, change or delete other
+            people's data while demonstrating it. There is no bug bounty.
+          </p>
+          <p>
+            The whole codebase, including the proxy, the budget engine, the encryption and the
+            infrastructure files, is public under Apache-2.0 at
+            <a href="https://github.com/KIvanow/spend-brake">github.com/KIvanow/spend-brake</a>. If
+            you would rather not rely on my hosting, run it yourself and read what it does.
+          </p>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="wrap">
+        <div>
+          <a class="brand" href="/">
+            <svg viewBox="0 0 32 32" aria-hidden="true">
+              <circle
+                cx="16"
+                cy="16"
+                r="12.5"
+                fill="none"
+                stroke="var(--accent)"
+                stroke-width="3"
+              />
+              <rect x="8" y="14" width="16" height="4" rx="1" fill="var(--brake)" />
+            </svg>
+            Spend Brake
+          </a>
+          <p>
+            Hard dollar caps for paid APIs. Run as a hosted service at
+            <a href="https://app.spendbrake.dev/">app.spendbrake.dev</a> or
+            <a href="https://docs.spendbrake.dev/self-hosting/">self-hosted</a>
+            under Apache-2.0.
+          </p>
+        </div>
+        <nav aria-label="Legal and contact">
+          <a href="/privacy">Privacy</a>
+          <a href="/terms">Terms</a>
+          <a href="/security">Security</a>
+          <a href="mailto:kristiyan@spendbrake.dev">kristiyan@spendbrake.dev</a>
+          <a href="https://github.com/KIvanow/spend-brake">GitHub</a>
+          <a href="https://docs.spendbrake.dev/self-hosting/">Self-hosting</a>
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>
