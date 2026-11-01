@@ -72,3 +72,14 @@ test('base images are pinned by digest', () => {
   const restoreImages = [...read('scripts/restore.sh').matchAll(/valkey\/valkey:\S+/g)];
   for (const [image] of restoreImages) assert.match(image, pinned, `restore.sh ${image}`);
 });
+
+test('the billing service is configured for test or live keys, and documented', () => {
+  const env = hosted.services.billing.environment;
+  assert.match(env.STRIPE_SECRET_KEY, /sk_test_.*sk_live_.*BILLING_LIVE_MODE/);
+  assert.match(env.BILLING_LIVE_MODE, /^\$\{BILLING_LIVE_MODE:-false\}$/);
+  const docs = read('docs/configuration.md');
+  const vars = [...read('apps/billing/src/config.ts').matchAll(/^ {2}([A-Z_]+): z\./gm)];
+  assert.ok(vars.length > 5);
+  for (const [, name] of vars) assert.ok(docs.includes(`\`${name}\``), `${name} documented`);
+  assert.match(docs, /## Hosted billing[\s\S]*`BILLING_LIVE_MODE`/);
+});

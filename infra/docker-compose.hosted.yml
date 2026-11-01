@@ -1,5 +1,6 @@
-# The hosted service: adds billing (Stripe test mode) to the stack. The dashboard forwards
-# /v1/billing to it; Stripe sends webhooks to https://<app domain>/v1/billing/webhook.
+# The hosted service: adds billing (Stripe test mode unless BILLING_LIVE_MODE=true) to the
+# stack. The dashboard forwards /v1/billing to it; Stripe sends webhooks to
+# https://<app domain>/v1/billing/webhook.
 #   docker compose -f infra/docker-compose.yml -f infra/docker-compose.hosted.yml up -d --build
 services:
   # Customers sign up and sign in with emailed links.
@@ -18,7 +19,7 @@ services:
       # Rate limits per client: the address comes from X-Forwarded-For, trusting only the private
       # hops in front (the dashboard's nginx, and Caddy with docker-compose.tls.yml).
       TRUST_PROXY: 'true'
-      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:?set STRIPE_SECRET_KEY (sk_test_...) in infra/.env}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:?set STRIPE_SECRET_KEY (sk_test_..., or sk_live_... with BILLING_LIVE_MODE=true) in infra/.env}
       # true takes real payments, and then STRIPE_SECRET_KEY must be a live key (and vice versa).
       BILLING_LIVE_MODE: ${BILLING_LIVE_MODE:-false}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:?set STRIPE_WEBHOOK_SECRET (whsec_...) in infra/.env}

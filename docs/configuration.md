@@ -109,6 +109,27 @@ Published images are coming; until then, build from source.
 
 See [ee/README.md](https://github.com/KIvanow/spend-brake/blob/main/ee/README.md).
 
+## Hosted billing (`docker-compose.hosted.yml`)
+
+Only for running the hosted service: the billing service sells plans and licenses through
+Stripe. A self-hosted install doesn't need any of this.
+
+| Variable                                     | Default                 | What                                                                                                                                                                                                                   |
+| -------------------------------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `STRIPE_SECRET_KEY`                          |                         | Required. A test-mode key (`sk_test_` / `rk_test_`), or a live key (`sk_live_` / `rk_live_`) with `BILLING_LIVE_MODE=true`.                                                                                            |
+| `BILLING_LIVE_MODE`                          | `false`                 | `true` takes real payments. Billing refuses to start on a mismatch: a live key without it, or a test key with it.                                                                                                      |
+| `STRIPE_WEBHOOK_SECRET`                      |                         | Required. The webhook endpoint's signing secret (`whsec_...`). Stripe sends webhooks to `https://<app domain>/v1/billing/webhook`.                                                                                     |
+| `BRAKE_HOSTED_SIGNUP`                        | `false`                 | Open self-service sign-up (set on the API too); billing emails new owners a sign-in link.                                                                                                                              |
+| `BRAKE_LICENSE_SIGNING_KEY_DIR`              | `infra/license-key`     | A directory holding the Ed25519 private key (PEM) that signs Business / Enterprise license files, mounted read-only at `/run/secrets/license`.                                                                         |
+| `BRAKE_LICENSE_SIGNING_KEY_FILE`             |                         | The key file's path inside the container, e.g. `/run/secrets/license/license-ed25519.pem`. Without a key, invoices issue no license. `BRAKE_LICENSE_SIGNING_KEY` takes the PEM itself instead (not passed by compose). |
+| `BRAKE_DASHBOARD_URL`                        | `http://localhost:3000` | Where Checkout and the customer portal send people back to, and the links in sign-in emails.                                                                                                                           |
+| `BRAKE_BILLING_MEMORY`, `BRAKE_BILLING_CPUS` | `192M`, `0.5`           | The container's limits (see [Ports and resources](#ports-and-resources)).                                                                                                                                              |
+
+Compose sets `PORT` (`8083`), `TRUST_PROXY` (`true`: rate limits use `X-Forwarded-For` from the
+private hops in front), `DATABASE_URL` and `VALKEY_URL` on the billing service; `HOST`
+(`0.0.0.0`) and `LOG_LEVEL` (`info`) keep their defaults. See
+[apps/billing/README.md](https://github.com/KIvanow/spend-brake/blob/main/apps/billing/README.md).
+
 ## Per-service settings
 
 These are not in `infra/.env`; set them on a service with a compose override file if you need
