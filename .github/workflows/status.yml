@@ -1,0 +1,63 @@
+name: Status
+
+# Uptime checks behind https://status.spendbrake.dev (website/status.html).
+#
+# Every ~5 minutes (GitHub may delay scheduled runs) scripts/status/run.mjs checks each public
+# endpoint with curl and writes status.json, which is published as the only file on the orphan
+# branch `status-data` (one commit, replaced each run, so the branch never grows). A service that
+# fails two runs in a row gets an issue labeled `incident`, closed with a comment when it recovers.
+# The first run creates the branch. CI (ci.yml) runs only for main and pull requests, so these
+# commits never reach the DCO check.
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: status
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/status
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Previous status.json (none on the first run)
+        run: |
+          if git fetch --depth=1 origin status-data; then
+            git show FETCH_HEAD:status.json > "$RUNNER_TEMP/previous.json" || true
+          else
+            echo "No status-data branch yet: starting fresh."
+          fi
+
+      - name: Check services and update incident issues
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/status/run.mjs --in "$RUNNER_TEMP/previous.json" --out "$RUNNER_TEMP/status.json"
+
+      # Publish even if the issue API failed, as long as the checks produced a file.
+      - name: Publish to the status-data branch
+        if: ${{ !cancelled() }}
+        env:
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: |
+          if [ ! -s "$RUNNER_TEMP/status.json" ]; then echo "No status.json written."; exit 1; fi
+          blob="$(git hash-object -w "$RUNNER_TEMP/status.json")"
+          tree="$(printf '100644 blob %s\tstatus.json\n' "$blob" | git mktree)"
+          commit="$(git commit-tree "$tree" -m "Update status.json [skip ci]" \
+            -m "Signed-off-by: $GIT_AUTHOR_NAME <$GIT_AUTHOR_EMAIL>")"
+          git push --force origin "$commit:refs/heads/status-data"

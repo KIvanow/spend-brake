@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Status - Spend Brake</title>
+    <meta
+      name="description"
+      content="Live status of the hosted Spend Brake service: dashboard, API, proxy, website and docs, with 90 days of uptime and recent incidents."
+    />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#f7f7f5" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#141413" media="(prefers-color-scheme: dark)" />
+    <link rel="canonical" href="https://spendbrake.dev/status" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/site.css" />
+    <style>
+      :root {
+        --warn: #b45309;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme='light']) {
+          --warn: #fbbf24;
+        }
+      }
+      :root[data-theme='dark'] {
+        --warn: #fbbf24;
+      }
+      .status {
+        padding: 40px 0 72px;
+        border-top: 0;
+      }
+      .status .wrap {
+        max-width: 880px;
+      }
+      .status h1 {
+        font-size: clamp(30px, 4vw, 40px);
+        font-weight: 700;
+        letter-spacing: -0.025em;
+        margin-bottom: 20px;
+      }
+      .status h2 {
+        font-size: 22px;
+        margin: 40px 0 12px;
+      }
+      .banner {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        border: 1px solid var(--border);
+        border-left: 4px solid var(--muted);
+        border-radius: 10px;
+        background: var(--surface);
+        padding: 16px 20px;
+        font-size: 18px;
+        font-weight: 650;
+      }
+      .banner::before {
+        content: '';
+        flex: none;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: var(--muted);
+      }
+      .banner.ok {
+        border-left-color: var(--ok);
+      }
+      .banner.ok::before {
+        background: var(--ok);
+      }
+      .banner.down {
+        border-left-color: var(--brake);
+        background: var(--brake-soft);
+      }
+      .banner.down::before {
+        background: var(--brake);
+      }
+      .updated {
+        color: var(--muted);
+        font-size: 14px;
+        margin: 10px 0 0;
+      }
+      .updated.late {
+        color: var(--warn);
+      }
+      .services {
+        list-style: none;
+        padding: 0;
+        margin: 24px 0 0;
+        display: grid;
+        gap: 12px;
+      }
+      .service {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 16px 18px;
+        min-width: 0;
+      }
+      .service .head {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 4px 12px;
+        margin-bottom: 12px;
+      }
+      .service h3 {
+        font-size: 17px;
+        font-weight: 650;
+      }
+      .service .host {
+        color: var(--muted);
+        font-size: 13px;
+        overflow-wrap: anywhere;
+      }
+      .service .now {
+        margin-left: auto;
+        display: flex;
+        gap: 12px;
+        align-items: baseline;
+        font-size: 14px;
+        white-space: nowrap;
+      }
+      .service .latency {
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+      }
+      .pill {
+        font-weight: 600;
+      }
+      .pill.up {
+        color: var(--ok);
+      }
+      .pill.down {
+        color: var(--brake);
+      }
+      .pill.unknown {
+        color: var(--muted);
+      }
+      .bar {
+        display: grid;
+        grid-template-columns: repeat(90, minmax(0, 1fr));
+        gap: 1px;
+        height: 30px;
+      }
+      @media (min-width: 640px) {
+        .bar {
+          gap: 2px;
+        }
+      }
+      .bar i,
+      .legend i.none {
+        border-radius: 2px;
+        background: var(--surface-2);
+      }
+      .bar i.u100,
+      .legend i.u100 {
+        background: var(--ok);
+      }
+      .bar i.u99,
+      .legend i.u99 {
+        background: color-mix(in srgb, var(--ok) 55%, var(--warn));
+      }
+      .bar i.u95,
+      .legend i.u95 {
+        background: var(--warn);
+      }
+      .bar i.u0,
+      .legend i.u0 {
+        background: var(--brake);
+      }
+      .scale {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .scale b {
+        color: var(--text);
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+      }
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 16px;
+        margin: 14px 0 0;
+        padding: 0;
+        list-style: none;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .legend li {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .legend i {
+        width: 10px;
+        height: 10px;
+        border-radius: 2px;
+      }
+      .incidents {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: var(--surface);
+      }
+      .incidents li {
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--border);
+        overflow-wrap: anywhere;
+      }
+      .incidents li:last-child {
+        border-bottom: 0;
+      }
+      .incidents .when {
+        display: block;
+        color: var(--muted);
+        font-size: 13px;
+        margin-top: 2px;
+      }
+      .incidents .tag {
+        font-size: 12px;
+        font-weight: 600;
+        margin-left: 8px;
+        white-space: nowrap;
+      }
+      .incidents .tag.open {
+        color: var(--brake);
+      }
+      .incidents .tag.closed {
+        color: var(--ok);
+      }
+      .incidents .none {
+        color: var(--muted);
+      }
+      .about {
+        color: var(--muted);
+        font-size: 15px;
+      }
+      .about p {
+        max-width: 68ch;
+        text-wrap: pretty;
+      }
+    </style>
+    <script
+      defer
+      src="https://cdn.jsdelivr.net/npm/posthog-js@1.438.12/dist/array.no-external.js"
+      integrity="sha384-+Lkmn19DYonVgUwLkn6wB27C9VRu21N4rIsR+Y5JGqhmp6JLZKAzUV0uUwgMMdiY"
+      crossorigin="anonymous"
+    ></script>
+    <script defer src="/analytics.js"></script>
+    <script defer src="/status.js"></script>
+  </head>
+  <body>
+    <header class="top">
+      <div class="wrap">
+        <a class="brand" href="/">
+          <svg viewBox="0 0 32 32" aria-hidden="true">
+            <circle cx="16" cy="16" r="12.5" fill="none" stroke="var(--accent)" stroke-width="3" />
+            <rect x="8" y="14" width="16" height="4" rx="1" fill="var(--brake)" />
+          </svg>
+          Spend Brake
+        </a>
+        <nav aria-label="Sections">
+          <a href="/#how">How it works</a>
+          <a href="/#pricing">Pricing</a>
+          <a href="/#self-host">Self-host</a>
+          <a href="https://docs.spendbrake.dev/">Docs</a>
+        </nav>
+        <div class="menu" id="menu">
+          <a class="toggle open" href="#menu">Menu</a>
+          <a class="toggle close" href="#close" aria-label="Close menu">Close</a>
+          <nav aria-label="Sections (menu)">
+            <a href="/#how">How it works</a>
+            <a href="/#pricing">Pricing</a>
+            <a href="/#self-host">Self-host</a>
+            <a href="https://docs.spendbrake.dev/">Docs</a>
+            <a href="https://app.spendbrake.dev/">Sign in</a>
+          </nav>
+        </div>
+        <div class="cta">
+          <a class="btn ghost" href="https://app.spendbrake.dev/">Sign in</a>
+          <a class="btn primary" href="https://app.spendbrake.dev/#/signup">Start free</a>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="status" id="status">
+        <div class="wrap">
+          <h1>Status</h1>
+          <div class="banner" id="banner" role="status" aria-live="polite">
+            Loading the latest checks…
+          </div>
+          <p class="updated" id="updated">
+            Checks run every ~5 minutes from GitHub Actions.
+            <noscript>
+              This page needs JavaScript to show them; the raw results are in
+              <a
+                href="https://raw.githubusercontent.com/KIvanow/spend-brake/status-data/status.json"
+                >status.json</a
+              >.
+            </noscript>
+          </p>
+
+          <ul class="services" id="services" aria-label="Services"></ul>
+          <ul class="legend" aria-label="Uptime colours">
+            <li><i class="u100"></i>100%</li>
+            <li><i class="u99"></i>99% or more</li>
+            <li><i class="u95"></i>95% or more</li>
+            <li><i class="u0"></i>below 95%</li>
+            <li><i class="none"></i>no data</li>
+          </ul>
+
+          <h2>Recent incidents</h2>
+          <ul class="incidents" id="incidents">
+            <li class="none">Loading…</li>
+          </ul>
+
+          <h2>How this works</h2>
+          <div class="about">
+            <p>
+              Every ~5 minutes a scheduled GitHub Actions workflow requests each service's public
+              address (the dashboard, <code>/v1/auth/options</code> on the API, the proxy's
+              <code>/healthz</code>, this website and the docs) with a 10-second timeout and one
+              retry, and records whether it answered and how long it took. GitHub sometimes runs
+              scheduled jobs late, so gaps of a few extra minutes are normal.
+            </p>
+            <p>
+              When a service fails two runs in a row, an
+              <a href="https://github.com/KIvanow/spend-brake/issues?q=label%3Aincident"
+                >incident issue</a
+              >
+              is opened on GitHub; it is closed when the service answers again. The results are
+              public as
+              <a
+                href="https://raw.githubusercontent.com/KIvanow/spend-brake/status-data/status.json"
+                >status.json</a
+              >, and the checker is
+              <a
+                href="https://github.com/KIvanow/spend-brake/blob/main/.github/workflows/status.yml"
+                >in the repository</a
+              >. Checks run from GitHub's network, so a problem only some regions see may not show
+              here.
+            </p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="wrap">
+        <div>
+          <a class="brand" href="/">
+            <svg viewBox="0 0 32 32" aria-hidden="true">
+              <circle
+                cx="16"
+                cy="16"
+                r="12.5"
+                fill="none"
+                stroke="var(--accent)"
+                stroke-width="3"
+              />
+              <rect x="8" y="14" width="16" height="4" rx="1" fill="var(--brake)" />
+            </svg>
+            Spend Brake
+          </a>
+          <p>
+            Hard dollar caps for paid APIs. Run as a hosted service at
+            <a href="https://app.spendbrake.dev/">app.spendbrake.dev</a> or
+            <a href="https://docs.spendbrake.dev/self-hosting/">self-hosted</a>
+            under Apache-2.0.
+          </p>
+        </div>
+        <nav aria-label="Legal and contact">
+          <a href="/privacy">Privacy</a>
+          <a href="/terms">Terms</a>
+          <a href="/security">Security</a>
+          <a href="/status">Status</a>
+          <a href="mailto:kristiyan@spendbrake.dev">kristiyan@spendbrake.dev</a>
+          <a href="https://github.com/KIvanow/spend-brake">GitHub</a>
+          <a href="https://docs.spendbrake.dev/self-hosting/">Self-hosting</a>
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>
