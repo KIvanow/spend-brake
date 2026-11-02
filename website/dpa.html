@@ -61,7 +61,7 @@
         <div class="wrap">
           <h1>Data Processing Agreement</h1>
           <p class="meta">
-            Effective as of 2 November 2026
+            Effective as of 1 November 2026
             <span class="pdf-link">&middot; <a href="/dpa.pdf">Download PDF</a></span>
           </p>
           <p class="print-note">
@@ -304,7 +304,7 @@
           <p>
             I am based in Bulgaria, and the Hosted Service, its database and its cache run in
             DigitalOcean's Frankfurt, Germany (FRA1) region. Product analytics are stored in
-            PostHog's US Cloud, in the United States. Stripe, Resend, Vercel and PostHog are United
+            PostHog's EU Cloud, also in Frankfurt. Stripe, Resend, Vercel and PostHog are United
             States companies and may process data in the United States and elsewhere.
           </p>
           <p>
@@ -779,7 +779,7 @@
             </li>
             <li>
               The dashboard is served with a Content Security Policy that allows scripts and styles
-              from itself only, connections to its own API and PostHog, and forbids framing. The
+              from itself only, connections to its own API and PostHog EU, and forbids framing. The
               website has a stricter policy still and sends <code>X-Content-Type-Options</code>,
               <code>X-Frame-Options</code> and <code>Referrer-Policy</code> headers.
             </li>
@@ -873,14 +873,15 @@
                 </tr>
                 <tr>
                   <td>PostHog</td>
-                  <td>Product analytics (PostHog, Inc.; US Cloud, hosted in the United States)</td>
+                  <td>Product analytics (PostHog, Inc.; EU Cloud, hosted in Frankfurt, Germany)</td>
                   <td>
                     Pages viewed, button clicks and the product events above, browser and device
                     details, coarse location; on the dashboard, your internal user and org ids
                   </td>
                   <td>
-                    Data stored in the United States. Transfer relies on PostHog's Standard
-                    Contractual Clauses or Data Privacy Framework certification.
+                    Data stored in Frankfurt, Germany. PostHog, Inc. is a United States company; any
+                    access from there relies on PostHog's Standard Contractual Clauses or Data
+                    Privacy Framework certification.
                   </td>
                 </tr>
               </tbody>

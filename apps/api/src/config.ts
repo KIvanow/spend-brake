@@ -62,11 +62,11 @@ const envSchema = z.object({
         .regex(/^phc_[A-Za-z0-9_-]+$/, 'a PostHog project key (phc_...)')
         .optional(),
     ),
-  /** Where the dashboard sends analytics (PostHog US Cloud by default). */
+  /** Where the dashboard sends analytics (PostHog EU Cloud by default). */
   BRAKE_POSTHOG_HOST: z
     .string()
     .default('')
-    .transform((v) => v.trim().replace(/\/+$/, '') || 'https://us.i.posthog.com')
+    .transform((v) => v.trim().replace(/\/+$/, '') || 'https://eu.i.posthog.com')
     .pipe(z.url({ protocol: /^https$/ })),
 });
 

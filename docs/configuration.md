@@ -47,7 +47,7 @@ Off unless you set a key: then the dashboard loads nothing from PostHog and send
 | Variable             | Default                    | What                                                                                                                                                                                                                                                           |
 | -------------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `BRAKE_POSTHOG_KEY`  |                            | A PostHog project key (`phc_...`). The API hands it to the dashboard, which then counts page views (the page name only) and a few product events, with people known by their internal user id. Nothing is stored in the browser; no autocapture or recordings. |
-| `BRAKE_POSTHOG_HOST` | `https://us.i.posthog.com` | Where the dashboard sends them. Another host also needs adding to `connect-src` in `infra/nginx.conf`, the dashboard's Content Security Policy.                                                                                                                |
+| `BRAKE_POSTHOG_HOST` | `https://eu.i.posthog.com` | Where the dashboard sends them. Another host also needs adding to `connect-src` in `infra/nginx.conf`, the dashboard's Content Security Policy.                                                                                                                |
 
 ## HTTPS (`docker-compose.tls.yml`)
 

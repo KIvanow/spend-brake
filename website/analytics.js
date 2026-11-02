@@ -1,4 +1,4 @@
-// Product analytics (PostHog US Cloud), loaded after the pinned posthog-js bundle.
+// Product analytics (PostHog EU Cloud), loaded after the pinned posthog-js bundle.
 //
 // Cookieless: nothing is stored in the browser (no cookies, no local or session storage), and no
 // session recordings, surveys or autocapture. It counts page views, clicks on the sign-up
@@ -9,9 +9,9 @@
   var posthog = window.posthog;
   if (!posthog || typeof posthog.init !== 'function') return;
 
-  posthog.init('phc_ok82sESQoKwQiXZDBno6aNoxGGhtr3ESf6ieRxfzy8pc', {
-    api_host: 'https://us.i.posthog.com',
-    ui_host: 'https://us.posthog.com',
+  posthog.init('phc_pVe3R8NDCnwRGoecKxUDR5xydaXGoCh38ZFXnFY8K54c', {
+    api_host: 'https://eu.i.posthog.com',
+    ui_host: 'https://eu.posthog.com',
     cookieless_mode: 'always',
     persistence: 'memory',
     capture_pageview: true,
