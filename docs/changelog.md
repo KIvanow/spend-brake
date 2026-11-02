@@ -12,12 +12,23 @@ images for linux/amd64 and linux/arm64
 (`ghcr.io/kivanow/spend-brake-<service>:<version>`, with build provenance) and the CLI
 (`@spend-brake/cli`).
 
-## [Unreleased]
+## [0.2.0] - 2026-11-02
+
+### Changed
+
+- `brake init` no longer needs a Google key: without one it sets up the org, its caps and the
+  tokens, and explains how to add a provider key and a virtual key (for installs that only use
+  other providers or custom APIs). Press Enter at the prompt to skip it.
 
 ### Fixed
 
+- `brake init` printed no owner token when the API refused the Google key, after the one-time
+  setup token was already spent. The org is now set up all the same, the owner token is printed,
+  and `init` exits 1 with the reason.
 - `brake call custom/<id> <method> <path>` reaches a custom API (it was refused as an invalid
   provider).
+- `brake caps set --pretty` prints the caps table, and `brake caps rm --pretty` says what it
+  removed, instead of JSON.
 
 ## [0.1.0] - 2026-11-02
 
