@@ -29,7 +29,7 @@ vi.mock('posthog-js/no-external', () => {
   return { default: ph };
 });
 
-const CONFIG = { key: 'phc_test', host: 'https://eu.i.posthog.com' };
+const CONFIG = { key: 'phc_test', host: 'https://us.i.posthog.com' };
 
 beforeEach(() => {
   ph.loaded = 0;
@@ -69,7 +69,7 @@ describe('analytics, configured', () => {
     const [key, options] = ph.init.mock.calls[0] as [string, Record<string, unknown>];
     expect(key).toBe('phc_test');
     expect(options).toMatchObject({
-      api_host: 'https://eu.i.posthog.com',
+      api_host: 'https://us.i.posthog.com',
       persistence: 'memory',
       autocapture: false,
       capture_pageview: false,
