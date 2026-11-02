@@ -9,7 +9,7 @@
   var posthog = window.posthog;
   if (!posthog || typeof posthog.init !== 'function') return;
 
-  posthog.init('phc_pVe3R8NDCnwRGoecKxUDR5xydaXGoCh38ZFXnFY8K54c', {
+  posthog.init('phc_vVRQ38x7ujfKk9KUYaPeb5jwdken7jwxttsXrT7TCJ9B', {
     api_host: 'https://eu.i.posthog.com',
     ui_host: 'https://eu.posthog.com',
     cookieless_mode: 'always',
