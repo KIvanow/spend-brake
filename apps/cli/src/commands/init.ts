@@ -56,21 +56,27 @@ interface InitOptions {
 }
 
 /**
- * First-run wizard: create the org (with the API's BRAKE_SETUP_TOKEN), store the Google key
- * encrypted, create a virtual key, optionally cap the org, save the admin token locally (0600)
- * and print the Google Cloud steps that restrict the real key to the proxy.
+ * First-run wizard: create the org (with the API's BRAKE_SETUP_TOKEN), optionally cap it, save
+ * the admin token locally (0600) and, given a Google key, store it encrypted, create a virtual
+ * key and print the Google Cloud steps that restrict the real key to the proxy. Without one (or
+ * if the API refuses it) the org is still set up, and the output says how to add a provider key.
  */
 export function initCommand(program: Command, io: Io, done: (code: number) => void): void {
   program
     .command('init')
-    .description('Set up a new install: org, Google key, first virtual key, caps')
+    .description(
+      'Set up a new install: org, caps, and optionally a Google key and first virtual key',
+    )
     .option('--api-url <url>', 'admin API URL')
     .option('--proxy-url <url>', 'proxy URL your apps will call')
     .option('--setup-token <token>', "the API's BRAKE_SETUP_TOKEN (or env BRAKE_SETUP_TOKEN)")
     .option('--org <id>', 'org id, e.g. acme')
     .option('--name <name>', 'org display name')
     .option('--tz <zone>', 'time zone for daily caps', 'UTC')
-    .option('--google-key <key>', 'the real Google key, stored encrypted (or env GOOGLE_MAPS_KEY)')
+    .option(
+      '--google-key <key>',
+      'the real Google key, stored encrypted (or env GOOGLE_MAPS_KEY); optional',
+    )
     .option('--egress-ip <ip...>', "the proxy's public egress IP(s), for the key restriction")
     .option('--day-cap <usd>', 'org hard cap per day')
     .option('--month-cap <usd>', 'org hard cap per month')
@@ -107,11 +113,17 @@ export function initCommand(program: Command, io: Io, done: (code: number) => vo
         true,
       );
       const orgId = await ask(o.org, 'Org id');
-      const googleKey = await ask(
-        o.googleKey ?? io.env.GOOGLE_MAPS_KEY,
-        'Google Maps Platform API key (GOOGLE_MAPS_KEY)',
-        true,
-      );
+      // Optional: an install may only use other providers or custom APIs.
+      const googleKey =
+        o.googleKey ??
+        io.env.GOOGLE_MAPS_KEY ??
+        (io.prompt
+          ? (
+              await io.prompt('Google Maps Platform API key (GOOGLE_MAPS_KEY), Enter to skip', {
+                secret: true,
+              })
+            ).trim()
+          : '');
       const caps = {
         ...(o.dayCap ? { day: { hard: usdToMicros(o.dayCap).toString() } } : {}),
         ...(o.monthCap ? { month: { hard: usdToMicros(o.monthCap).toString() } } : {}),
@@ -140,31 +152,55 @@ export function initCommand(program: Command, io: Io, done: (code: number) => vo
         orgId: setup.orgId,
       });
       const admin: Io = { ...scoped, env: { ...scoped.env, BRAKE_ADMIN_TOKEN: adminToken.token } };
-
-      const cred = await apiCall<{
-        id: string;
-        check?: { warnings: string[]; apiRestricted: boolean | null; ipRestricted: boolean | null };
-      }>(admin, 'POST', '/v1/providers/credentials', {
-        provider: 'google-maps',
-        name: 'google',
-        secret: googleKey,
-      });
-      const key = await apiCall<{ id: string; token: string }>(admin, 'POST', '/v1/keys', {
-        name: 'default',
-        credentials: { 'google-maps': cred.id },
-        canMintSessions: true,
-      });
       if (caps.day || caps.month) await apiCall(admin, 'PUT', '/v1/caps/org', caps);
+
+      // The setup token is spent by now, so a refused Google key must not lose the owner token:
+      // report it and finish.
+      let cred:
+        | {
+            id: string;
+            check?: {
+              warnings: string[];
+              apiRestricted: boolean | null;
+              ipRestricted: boolean | null;
+            };
+          }
+        | undefined;
+      let key: { id: string; token: string } | undefined;
+      let googleError: string | undefined;
+      if (googleKey) {
+        try {
+          cred = await apiCall(admin, 'POST', '/v1/providers/credentials', {
+            provider: 'google-maps',
+            name: 'google',
+            secret: googleKey,
+          });
+          key = await apiCall(admin, 'POST', '/v1/keys', {
+            name: 'default',
+            credentials: { 'google-maps': cred!.id },
+            canMintSessions: true,
+          });
+        } catch (e) {
+          googleError = e instanceof Error ? e.message : String(e);
+        }
+      }
 
       const result = {
         orgId: setup.orgId,
         configPath: path,
-        credentialId: cred.id,
-        keyCheck: cred.check ?? null,
-        virtualKey: { id: key.id, token: key.token },
+        credentialId: cred?.id ?? null,
+        keyCheck: cred?.check ?? null,
+        virtualKey: key ? { id: key.id, token: key.token } : null,
         ownerToken: setup.ownerToken,
         proxyUrl,
+        ...(googleError ? { googleError } : {}),
       };
+      const nextSteps = [
+        'Next, add a provider key (dashboard: Keys, Provider keys; or POST /v1/providers/credentials)',
+        'and create a virtual key that uses it:',
+        '  brake keys create --name default --credential <provider>=<credential id>',
+        `Custom APIs: brake custom-apis add <file>, then call ${proxyUrl}/custom/<id>/...`,
+      ];
       if (o.json) {
         io.stdout(`${JSON.stringify(result)}\n`);
       } else {
@@ -175,23 +211,33 @@ export function initCommand(program: Command, io: Io, done: (code: number) => vo
             'Owner token (shown once, not saved; keep it in a password manager):',
             `  ${setup.ownerToken}`,
             '',
-            'Your virtual key (shown once, store it now):',
-            `  ${key.token}`,
-            '',
-            'Use it instead of the Google key, with the proxy as the base URL:',
-            `  ${proxyUrl}/google-maps/maps/api/geocode/json?address=Sofia&key=${key.token}`,
-            `  ${proxyUrl}/google-places/v1/places:searchText   (X-Goog-Api-Key: ${key.token})`,
-            '',
-            ...(cred.check?.warnings.length
-              ? ['Key check:', ...cred.check.warnings.map((w) => `  ! ${w}`), '']
-              : []),
-            restrictionSteps(o.egressIp ?? []),
+            ...(key
+              ? [
+                  'Your virtual key (shown once, store it now):',
+                  `  ${key.token}`,
+                  '',
+                  'Use it instead of the Google key, with the proxy as the base URL:',
+                  `  ${proxyUrl}/google-maps/maps/api/geocode/json?address=Sofia&key=${key.token}`,
+                  `  ${proxyUrl}/google-places/v1/places:searchText   (X-Goog-Api-Key: ${key.token})`,
+                  '',
+                  ...(cred?.check?.warnings.length
+                    ? ['Key check:', ...cred.check.warnings.map((w) => `  ! ${w}`), '']
+                    : []),
+                  restrictionSteps(o.egressIp ?? []),
+                ]
+              : [
+                  ...(googleError
+                    ? [`The Google key was not added: ${googleError}`, '']
+                    : ['No Google key given, so no virtual key yet.', '']),
+                  ...nextSteps,
+                ]),
             '',
             'Remove BRAKE_SETUP_TOKEN from the API environment now.',
             '',
           ].join('\n'),
         );
       }
-      done(EXIT.ok);
+      if (googleError) io.stderr(`brake: the Google key was not added: ${googleError}\n`);
+      done(googleError ? EXIT.error : EXIT.ok);
     });
 }

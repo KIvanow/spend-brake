@@ -1,3 +1,6 @@
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { EXIT, durationSec, microsToUsd, usdToMicros } from '../src/io.js';
 import { run } from '../src/program.js';
@@ -439,5 +442,85 @@ describe('brake custom-apis', () => {
     expect(await run(['custom-apis', 'delete', 'acme'], f.io)).toBe(EXIT.error);
     expect(f.err.join('')).toContain('Key "agent" calls Acme.');
     expect(await run(['custom-apis', 'add', join(dir, 'missing.json')], f.io)).toBe(EXIT.usage);
+  });
+});
+
+describe('brake init without Google', () => {
+  const setupApi = (credential: (c: Call) => { status: number; body: unknown }) => (c: Call) => {
+    if (c.url.endsWith('/v1/setup'))
+      return { status: 200, body: { orgId: 'acme', ownerToken: 'sbt_owner' } };
+    if (c.url.endsWith('/v1/tokens')) return { status: 200, body: { token: 'sbt_admin' } };
+    if (c.url.endsWith('/v1/caps/org')) return { status: 200, body: { items: [] } };
+    if (c.url.endsWith('/v1/providers/credentials')) return credential(c);
+    if (c.url.endsWith('/v1/keys'))
+      return { status: 200, body: { id: 'key_1', token: 'sb_live_x' } };
+    return { status: 404, body: {} };
+  };
+  const args = (...extra: string[]) => [
+    'init',
+    '--api-url',
+    'http://api',
+    '--proxy-url',
+    'http://proxy',
+    '--setup-token',
+    'setup',
+    '--org',
+    'acme',
+    '--day-cap',
+    '5',
+    ...extra,
+  ];
+  const home = () => mkdtempSync(join(tmpdir(), 'brake-init-'));
+
+  it('sets up the org and caps and explains the next step', async () => {
+    const f = fake(
+      { HOME: home() },
+      setupApi(() => ({ status: 500, body: {} })),
+    );
+    expect(await run(args(), f.io)).toBe(EXIT.ok);
+    const out = f.out.join('');
+    expect(out).toContain('Org acme is ready');
+    expect(out).toContain('sbt_owner');
+    expect(out).toContain('No Google key given');
+    expect(out).toContain('brake keys create');
+    expect(f.calls.map((c) => new URL(c.url).pathname)).toEqual([
+      '/v1/setup',
+      '/v1/tokens',
+      '/v1/caps/org',
+    ]);
+  });
+
+  it('keeps the owner token when the API refuses the Google key', async () => {
+    const f = fake(
+      { HOME: home() },
+      setupApi(() => ({
+        status: 400,
+        body: { error: 'invalid_key', message: 'Google says this API key is not valid.' },
+      })),
+    );
+    expect(await run([...args('--google-key', 'AIza-bad'), '--json'], f.io)).toBe(EXIT.error);
+    const result = JSON.parse(f.out.join('')) as Record<string, unknown>;
+    expect(result).toMatchObject({ orgId: 'acme', ownerToken: 'sbt_owner', virtualKey: null });
+    expect(String(result.googleError)).toContain('not valid');
+    expect(f.err.join('')).toContain('the Google key was not added');
+  });
+});
+
+describe('brake caps --pretty', () => {
+  const ADMIN = { ...ENV, BRAKE_ADMIN_TOKEN: 'sbt_admin' };
+  const cap = { scope: 'key:k1', kind: 'd', hard: 1_500_000, soft: null, version: 2 };
+
+  it('set prints the caps table', async () => {
+    const f = fake(ADMIN, () => ({ status: 200, body: { items: [cap] } }));
+    expect(await run(['caps', 'set', 'key:k1', '--day', '1.50', '--pretty'], f.io)).toBe(0);
+    expect(f.out.join('')).toMatch(
+      /scope\s+window\s+hard\s+soft\s+version\nkey:k1\s+day\s+\$1\.50\s+2\n/,
+    );
+  });
+
+  it('rm says what it removed', async () => {
+    const f = fake(ADMIN, () => ({ status: 200, body: { scope: 'key:k1', deleted: ['d', 'm'] } }));
+    expect(await run(['caps', 'rm', 'key:k1', '--pretty'], f.io)).toBe(0);
+    expect(f.out.join('')).toBe('Removed the day and month cap of key:k1.\n');
   });
 });

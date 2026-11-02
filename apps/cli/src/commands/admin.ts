@@ -58,6 +58,25 @@ interface Status {
   remaining: number | null;
 }
 
+/** Caps as a table with --pretty (list and set answer with the same items). */
+function printCaps(io: Io, r: { items: Cap[]; pending?: unknown[] }, asTable: boolean) {
+  print(
+    io,
+    r,
+    asTable,
+    r.items.map((c) => ({
+      ...c,
+      window: c.kind === 'd' ? 'day' : 'month',
+      hard: money(c.hard),
+      soft: money(c.soft),
+    })),
+    ['scope', 'window', 'hard', 'soft', 'version'],
+  );
+  if (asTable && r.pending?.length) {
+    io.stdout(`${r.pending.length} change(s) wait for a second approver.\n`);
+  }
+}
+
 export function adminCommands(program: Command, io: Io, done: (code: number) => void): void {
   // --- keys --------------------------------------------------------------------------------
   const keys = program.command('keys').description('Virtual keys');
@@ -200,19 +219,7 @@ export function adminCommands(program: Command, io: Io, done: (code: number) => 
       'Dollar caps per scope (org, key:<id>, sku:<p>:<sku>, env:<n>, sess:<id>, agent:<id>)',
     );
   leaf(caps, 'list').action(async (_o: unknown, cmd: Command) => {
-    const r = await apiCall<{ items: Cap[] }>(io, 'GET', '/v1/caps');
-    print(
-      io,
-      r,
-      pretty(cmd),
-      r.items.map((c) => ({
-        ...c,
-        window: c.kind === 'd' ? 'day' : 'month',
-        hard: money(c.hard),
-        soft: money(c.soft),
-      })),
-      ['scope', 'window', 'hard', 'soft', 'version'],
-    );
+    printCaps(io, await apiCall<{ items: Cap[] }>(io, 'GET', '/v1/caps'), pretty(cmd));
     done(EXIT.ok);
   });
   leaf(caps, 'set')
@@ -237,11 +244,13 @@ export function adminCommands(program: Command, io: Io, done: (code: number) => 
         const day = window(o.day, o.softDay);
         const month = window(o.month, o.softMonth);
         if (!day && !month) throw new CliError('Give --day and/or --month.', EXIT.usage);
-        const r = await apiCall(io, 'PUT', `/v1/caps/${encodeURIComponent(scope)}`, {
-          ...(day ? { day } : {}),
-          ...(month ? { month } : {}),
-        });
-        print(io, r, pretty(cmd));
+        const r = await apiCall<{ items: Cap[]; pending?: unknown[] }>(
+          io,
+          'PUT',
+          `/v1/caps/${encodeURIComponent(scope)}`,
+          { ...(day ? { day } : {}), ...(month ? { month } : {}) },
+        );
+        printCaps(io, r, pretty(cmd));
         done(EXIT.ok);
       },
     );
@@ -250,11 +259,21 @@ export function adminCommands(program: Command, io: Io, done: (code: number) => 
     .option('--kind <d|m>', 'only the day or month cap')
     .action(async (scope: string, o: { kind?: string }, cmd: Command) => {
       const q = o.kind ? `?kind=${encodeURIComponent(o.kind)}` : '';
-      print(
+      const r = await apiCall<{ scope: string; deleted: ('d' | 'm')[]; pending?: unknown[] }>(
         io,
-        await apiCall(io, 'DELETE', `/v1/caps/${encodeURIComponent(scope)}${q}`),
-        pretty(cmd),
+        'DELETE',
+        `/v1/caps/${encodeURIComponent(scope)}${q}`,
       );
+      if (pretty(cmd)) {
+        const windows = r.deleted.map((k) => (k === 'd' ? 'day' : 'month'));
+        io.stdout(
+          `${windows.length ? `Removed the ${windows.join(' and ')} cap of ${r.scope}.` : `${r.scope} had no cap to remove.`}\n`,
+        );
+        if (r.pending?.length)
+          io.stdout(`${r.pending.length} change(s) wait for a second approver.\n`);
+      } else {
+        print(io, r, false);
+      }
       done(EXIT.ok);
     });
 

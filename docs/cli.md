@@ -48,7 +48,8 @@ For the hosted service: `BRAKE_URL=https://proxy.spendbrake.dev` and
 
 ## brake init
 
-Sets up a new self-hosted install: the org, the Google key, the first virtual key and caps.
+Sets up a new self-hosted install: the org and its caps and, with a Google key, the first
+virtual key.
 
 ```sh
 export BRAKE_SETUP_TOKEN=…            # from infra/.env
@@ -57,24 +58,29 @@ brake init --api-url http://localhost:8081 --proxy-url http://localhost:8080 \
   --org acme --day-cap 5 --month-cap 50
 ```
 
-| Option                | What                                                             |
-| --------------------- | ---------------------------------------------------------------- |
-| `--api-url <url>`     | Admin API URL                                                    |
-| `--proxy-url <url>`   | Proxy URL your apps will call                                    |
-| `--setup-token <t>`   | The API's `BRAKE_SETUP_TOKEN` (or env `BRAKE_SETUP_TOKEN`)       |
-| `--org <id>`          | Org id, e.g. `acme`                                              |
-| `--name <name>`       | Org display name                                                 |
-| `--tz <zone>`         | Time zone for daily caps (default `UTC`)                         |
-| `--google-key <key>`  | The real Google key, stored encrypted (or env `GOOGLE_MAPS_KEY`) |
-| `--egress-ip <ip...>` | The proxy's public egress IPs, for the key restriction steps     |
-| `--day-cap <usd>`     | Org hard cap per day                                             |
-| `--month-cap <usd>`   | Org hard cap per month                                           |
-| `--json`              | Print a JSON result instead of instructions                      |
+| Option                | What                                                                       |
+| --------------------- | -------------------------------------------------------------------------- |
+| `--api-url <url>`     | Admin API URL                                                              |
+| `--proxy-url <url>`   | Proxy URL your apps will call                                              |
+| `--setup-token <t>`   | The API's `BRAKE_SETUP_TOKEN` (or env `BRAKE_SETUP_TOKEN`)                 |
+| `--org <id>`          | Org id, e.g. `acme`                                                        |
+| `--name <name>`       | Org display name                                                           |
+| `--tz <zone>`         | Time zone for daily caps (default `UTC`)                                   |
+| `--google-key <key>`  | Optional: the real Google key, stored encrypted (or env `GOOGLE_MAPS_KEY`) |
+| `--egress-ip <ip...>` | The proxy's public egress IPs, for the key restriction steps               |
+| `--day-cap <usd>`     | Org hard cap per day                                                       |
+| `--month-cap <usd>`   | Org hard cap per month                                                     |
+| `--json`              | Print a JSON result instead of instructions                                |
 
-The URLs, setup token, org id and Google key are asked for when left out. Pass secrets in the environment or at the prompt: flags land in
-shell history. `init` prints the owner token and the virtual key once, checks whether the Google
-key is restricted, and prints the Google Cloud steps (console and `gcloud`) to restrict it to
-the proxy.
+The URLs, setup token, org id and Google key are asked for when left out (press Enter to skip
+the Google key). Pass secrets in the environment or at the prompt: flags land in shell history.
+`init` prints the owner token and the virtual key once, checks whether the Google key is
+restricted, and prints the Google Cloud steps (console and `gcloud`) to restrict it to the proxy.
+
+Without a Google key (for an install that only uses other providers or custom APIs), `init`
+sets up the org, its caps and the tokens, and says how to add a provider key and create a
+virtual key with `brake keys create`. If the API refuses the Google key, the org is set up all
+the same and the owner token is still printed; `init` exits 1 with the reason.
 
 ## brake session
 
@@ -106,6 +112,7 @@ brake search exa "agent budgets" --type lite --results 5
 brake search brave "spend caps"
 brake search serpapi "coffee" --engine bing
 brake call google-places POST /v1/places:searchText -d '{"textQuery":"x"}' -H 'X-Goog-FieldMask: places.id'
+brake call custom/acme GET /v1/items          # a custom API
 ```
 
 - `brake maps` uses the cheapest field set by default; `--fields <mask>` opts into higher
