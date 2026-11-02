@@ -33,6 +33,15 @@
     "testcontainers": "^12.2.1"
   },
   "description": "Hard dollar caps for every paid API your agents touch: capped calls, agent sessions and budgets from the shell.",
+  "homepage": "https://spendbrake.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KIvanow/spend-brake.git",
+    "directory": "apps/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/KIvanow/spend-brake/issues"
+  },
   "engines": {
     "node": ">=22"
   },

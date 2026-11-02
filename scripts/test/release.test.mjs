@@ -37,16 +37,29 @@ test('release runs the licensing checks before anything is published', () => {
 
 test('latest is tagged only after every image is pushed', () => {
   const build = release.jobs.images.steps.find((s) => s.uses?.startsWith('docker/build-push'));
-  assert.doesNotMatch(build.with.tags, /:latest/);
-  assert.ok(needs(release.jobs.latest).includes('images'));
+  // Platform images are pushed by digest only; merge tags the version, latest moves last.
+  assert.equal(build.with.tags, undefined);
+  assert.match(build.with.outputs, /push-by-digest=true/);
+  assert.ok(needs(release.jobs.merge).includes('images'));
+  assert.ok(needs(release.jobs.latest).includes('merge'));
   const loop = runs(release.jobs.latest)
     .join('\n')
     .match(/for name in ([^;]+);/);
   assert.ok(loop, 'latest job loops over the image names');
   const tagged = loop[1].trim().split(/\s+/).sort();
-  const built = release.jobs.images.strategy.matrix.include.map((m) => m.name).sort();
+  const built = release.jobs.images.strategy.matrix.image.map((m) => m.name).sort();
   assert.deepEqual(tagged, built);
+  assert.deepEqual([...release.jobs.merge.strategy.matrix.name].sort(), built);
   assert.ok(needs(release.jobs.release).includes('latest'));
+});
+
+test('every image is built for amd64 and arm64 and attested', () => {
+  const arches = release.jobs.images.strategy.matrix.platform.map((p) => p.arch).sort();
+  assert.deepEqual(arches, ['amd64', 'arm64']);
+  assert.ok(
+    release.jobs.merge.steps.some((s) => s.uses?.startsWith('actions/attest-build-provenance')),
+  );
+  assert.equal(release.jobs.merge.permissions?.attestations, 'write');
 });
 
 test('CI starts the whole stack', () => {

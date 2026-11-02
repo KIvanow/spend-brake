@@ -1,8 +1,8 @@
 name: Release
 
 # Push a tag like v0.1.0 (matching apps/cli/package.json's version) to publish:
-# - container images to ghcr.io/<owner>/spend-brake-<service>:<version>, and :latest once every
-#   image is pushed
+# - container images for linux/amd64 and linux/arm64 to ghcr.io/<owner>/spend-brake-<service>:<version>,
+#   with a build provenance attestation, and :latest once every image is pushed
 # - the CLI to npm as @spend-brake/cli (needs the NPM_TOKEN repository secret)
 # - a GitHub release with that version's CHANGELOG section
 # Nothing is published unless the same checks as CI pass on the tagged commit.
@@ -14,6 +14,7 @@ permissions:
   contents: write
   packages: write
   id-token: write
+  attestations: write
 
 jobs:
   version:
@@ -73,13 +74,15 @@ jobs:
       - name: Nothing outside ee/ imports from ee/
         run: node scripts/check-ee-imports.mjs
 
+  # Each image is built natively for amd64 and arm64 and pushed by digest; merge joins the two into
+  # one multi-arch tag.
   images:
     needs: [version, check, stack, licensing]
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.platform.runner }}
     strategy:
       fail-fast: false
       matrix:
-        include:
+        image:
           - { name: proxy, file: infra/Dockerfile, app: proxy, start: start }
           - { name: api, file: infra/Dockerfile, app: api, start: start }
           - { name: worker, file: infra/Dockerfile, app: worker, start: start }
@@ -88,6 +91,9 @@ jobs:
           - { name: ee-api, file: infra/Dockerfile, app: ee, start: 'start:api' }
           - { name: ee-worker, file: infra/Dockerfile, app: ee, start: 'start:worker' }
           - { name: web, file: infra/web.Dockerfile, app: web, start: start }
+        platform:
+          - { arch: amd64, runner: ubuntu-24.04 }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -97,27 +103,90 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - id: image
-        run: echo "name=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/spend-brake-${{ matrix.name }}" >> "$GITHUB_OUTPUT"
-      - uses: docker/build-push-action@v6
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/spend-brake-${{ matrix.image.name }}" >> "$GITHUB_OUTPUT"
+      - id: build
+        uses: docker/build-push-action@v6
         with:
           context: .
-          file: ${{ matrix.file }}
+          file: ${{ matrix.image.file }}
+          platforms: linux/${{ matrix.platform.arch }}
           build-args: |
-            APP=${{ matrix.app }}
-            START=${{ matrix.start }}
-          push: true
-          tags: |
-            ${{ steps.image.outputs.name }}:${{ needs.version.outputs.version }}
+            APP=${{ matrix.image.app }}
+            START=${{ matrix.image.start }}
+          outputs: type=image,name=${{ steps.image.outputs.name }},push-by-digest=true,name-canonical=true,push=true
+          # Provenance is attested once on the merged image (merge), not per platform.
+          provenance: false
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.version=${{ needs.version.outputs.version }}
-            org.opencontainers.image.licenses=${{ startsWith(matrix.name, 'ee-') && 'LicenseRef-Spend-Brake-EE' || 'Apache-2.0' }}
-          cache-from: type=gha,scope=${{ matrix.name }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+            org.opencontainers.image.licenses=${{ startsWith(matrix.image.name, 'ee-') && 'LicenseRef-Spend-Brake-EE' || 'Apache-2.0' }}
+          cache-from: type=gha,scope=${{ matrix.image.name }}-${{ matrix.platform.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}-${{ matrix.platform.arch }}
+      - name: Save the digest
+        run: |
+          mkdir -p /tmp/digests
+          touch "/tmp/digests/${DIGEST#sha256:}"
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.image.name }}-${{ matrix.platform.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # Tag the version on a manifest list of both platforms, and attest where and how it was built.
+  merge:
+    needs: [version, images]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        name: [proxy, api, worker, notifier, billing, ee-api, ee-worker, web]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-${{ matrix.name }}-*
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: merge
+        working-directory: /tmp/digests
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          LICENSE: ${{ startsWith(matrix.name, 'ee-') && 'LicenseRef-Spend-Brake-EE' || 'Apache-2.0' }}
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/spend-brake-${{ matrix.name }}"
+          sources=()
+          for d in *; do sources+=("$image@sha256:$d"); done
+          test "${#sources[@]}" -eq 2 || { echo "::error::expected 2 platform digests, got ${#sources[@]}"; exit 1; }
+          # The index annotations let GHCR link the package to this repository and show its license.
+          docker buildx imagetools create --tag "$image:$VERSION" \
+            --annotation "index:org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --annotation "index:org.opencontainers.image.licenses=$LICENSE" \
+            "${sources[@]}"
+          digest="$(docker buildx imagetools inspect "$image:$VERSION" --format '{{json .Manifest.Digest}}' | tr -d '"')"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ steps.merge.outputs.image }}
+          subject-digest: ${{ steps.merge.outputs.digest }}
+          push-to-registry: true
 
   # Move :latest only once every image of this version is pushed (a failed one skips this job).
   latest:
-    needs: [version, licensing, images]
+    needs: [version, licensing, merge]
     runs-on: ubuntu-latest
     steps:
       - uses: docker/setup-buildx-action@v3
@@ -159,7 +228,7 @@ jobs:
           cd apps/cli && npm publish --provenance --access public
 
   release:
-    needs: [version, licensing, images, latest, npm]
+    needs: [version, licensing, merge, latest, npm]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
