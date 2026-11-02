@@ -189,11 +189,20 @@ describe('brake call', () => {
     });
   });
 
+  it('calls a custom API under /custom/<id>', async () => {
+    const f = fake(ENV, () => ok);
+    expect(await run(['call', 'custom/acme', 'get', '/v1/items'], f.io)).toBe(0);
+    expect(f.calls[0]).toMatchObject({ url: 'http://proxy/custom/acme/v1/items', method: 'GET' });
+  });
+
   it('validates its input', async () => {
     for (const args of [
       ['call', 'acme', 'TRACE', '/x'],
       ['call', 'acme', 'GET', 'x'],
       ['call', '../evil', 'GET', '/x'],
+      ['call', 'custom/..', 'GET', '/x'],
+      ['call', 'custom/a/b', 'GET', '/x'],
+      ['call', 'other/acme', 'GET', '/x'],
       ['call', 'acme', 'POST', '/x', '-d', '{not json'],
     ]) {
       const f = fake(ENV, () => ok);

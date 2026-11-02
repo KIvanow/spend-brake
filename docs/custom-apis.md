@@ -84,6 +84,8 @@ curl https://proxy.spendbrake.dev/custom/acme/v1/search \
   -d '{"q": "brakes"}'
 ```
 
+Or with the CLI: `BRAKE_KEY=sb_live_… brake call custom/acme POST /v1/search -d '{"q":"brakes"}'`.
+
 The proxy adds the real key where `auth` says and forwards the request to
 `https://api.acme.example/v1/search`. On a self-hosted install, use your own proxy URL. The id is
 looked up in your org, so another org's `acme` is a different API.

@@ -12,7 +12,7 @@ export function callCommand(program: Command, io: Io, done: (code: number) => vo
     .description('Any capped request: brake call <provider> <method> <path>')
     .argument(
       '<provider>',
-      'proxy prefix, e.g. google-maps, google-places, google-routes, or a generic provider',
+      'proxy prefix, e.g. google-maps, google-places, google-routes, a generic provider, or custom/<id> for a custom API',
     )
     .argument('<method>')
     .argument('<path>', 'path on the provider, e.g. /maps/api/geocode/json')
@@ -33,7 +33,10 @@ export function callCommand(program: Command, io: Io, done: (code: number) => vo
       ) => {
         const m = method.toUpperCase();
         if (!METHODS.has(m)) throw new CliError(`unknown method ${method}`, EXIT.usage);
-        if (!/^[A-Za-z0-9_.-]+$/.test(provider)) throw new CliError('invalid provider', EXIT.usage);
+        // Custom APIs live under /custom/<id>/ on the proxy.
+        if (!/^(custom\/)?[A-Za-z0-9_.-]+$/.test(provider) || /(^|\/)\.\.?$/.test(provider)) {
+          throw new CliError('invalid provider', EXIT.usage);
+        }
         if (!path.startsWith('/')) throw new CliError('path must start with /', EXIT.usage);
         const query: Record<string, string> = {};
         for (const q of o.query ?? []) {

@@ -12,6 +12,13 @@ images for linux/amd64 and linux/arm64
 (`ghcr.io/kivanow/spend-brake-<service>:<version>`, with build provenance) and the CLI
 (`@spend-brake/cli`).
 
+## [Unreleased]
+
+### Fixed
+
+- `brake call custom/<id> <method> <path>` reaches a custom API (it was refused as an invalid
+  provider).
+
 ## [0.1.0] - 2026-11-02
 
 First release: the open-source proxy, dashboard and CLI, and the hosted service at
