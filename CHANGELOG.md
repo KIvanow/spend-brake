@@ -5,6 +5,13 @@ images for linux/amd64 and linux/arm64
 (`ghcr.io/kivanow/spend-brake-<service>:<version>`, with build provenance) and the CLI
 (`@spend-brake/cli`).
 
+## [Unreleased]
+
+### Fixed
+
+- `brake --version` printed `0.1.0` in the 0.2.0 package; the bundle now takes the version from
+  the package itself.
+
 ## [0.2.0] - 2026-11-02
 
 ### Changed

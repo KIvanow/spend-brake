@@ -9,7 +9,9 @@ import { searchCommand } from './commands/search.js';
 import { sessionCommand } from './commands/session.js';
 import { CliError, EXIT, type Io } from './io.js';
 
-export const VERSION = '0.1.0';
+// The bundle sets this from package.json (scripts/bundle.mjs); running from source says so.
+declare const __BRAKE_VERSION__: string | undefined;
+export const VERSION = typeof __BRAKE_VERSION__ === 'string' ? __BRAKE_VERSION__ : '0.0.0-dev';
 
 export function buildProgram(io: Io, done: (code: number) => void): Command {
   const program = new Command('brake')
