@@ -17,3 +17,5 @@ docs/.sass-cache/
 docs/.bundle/
 docs/vendor/
 docs/Gemfile.lock
+# Local screenshots from manual and end-to-end test runs.
+screenshots/
