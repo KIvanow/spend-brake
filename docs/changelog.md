@@ -8,11 +8,22 @@ description: What changed in each Spend Brake release.
 # Changelog
 
 Versions follow [Semantic Versioning](https://semver.org/). Each release publishes container
-images (`ghcr.io/kivanow/spend-brake-<service>:<version>`) and the CLI (`@spend-brake/cli`).
+images for linux/amd64 and linux/arm64
+(`ghcr.io/kivanow/spend-brake-<service>:<version>`, with build provenance) and the CLI
+(`@spend-brake/cli`).
 
-## [0.1.0] - unreleased
+## [0.1.0] - 2026-11-02
 
-First release.
+First release: the open-source proxy, dashboard and CLI, and the hosted service at
+[spendbrake.dev](https://spendbrake.dev).
+
+### Install
+
+- CLI: `npx @spend-brake/cli --help` (Node 22 or newer).
+- Self-hosting from published images, for linux/amd64 and linux/arm64, each with a build
+  provenance attestation:
+  `BRAKE_VERSION=0.1.0 docker compose -f infra/docker-compose.yml -f infra/docker-compose.release.yml up -d --wait`.
+  See the [self-hosting guide](https://docs.spendbrake.dev/self-hosting/).
 
 ### Core (Apache-2.0)
 
@@ -27,12 +38,22 @@ First release.
   sessions, migration estimate to OSM providers, Mapbox and HERE.
 - Self-hosting: Docker Compose stack, HTTPS overlay with automatic certificates (Caddy),
   proxy replicas, Valkey Cluster (`redis-cluster://` URLs), backup and restore scripts.
+- Custom APIs: put any HTTP API you call behind a cap at `/custom/<id>/…`, priced per request or
+  from a cost the response reports (with a maximum per request); 1, 3, 10 or 25 per org by
+  plan on the hosted service.
+- Google Places Autocomplete sessions priced as Google bills them, closed by Place Details and
+  switched to per-request pricing after 12 requests or 3 minutes.
 
 ### Hosted billing
 
-- Stripe (test mode): Free, Indie, Team, Agents plans with limits enforced by the admin API;
-  Business license by subscription and Enterprise by invoice, each paid invoice issuing or
-  renewing a signed license; Checkout, Customer Portal, idempotent webhooks.
+- Stripe: Free, Indie, Team, Agents plans with limits enforced by the admin API; Business
+  license by subscription and Enterprise by invoice, each paid invoice issuing or renewing a
+  signed license; Checkout, Customer Portal, idempotent webhooks.
+- Live mode behind `BILLING_LIVE_MODE`, with VAT through Stripe Tax (billing address and tax ID
+  at Checkout, prices exclusive of tax), a seed and a webhook setup script that are safe to run
+  against a live account, and an operator runbook.
+- Paid checkout asks the buyer to accept the Terms and waive the withdrawal period; the
+  acceptance is recorded in the audit log and on the Stripe session.
 
 ### Accounts
 
@@ -58,6 +79,24 @@ First release.
 - OpenTelemetry export: every call as an OTLP span to the org's collector, joining the caller's
   trace; headers encrypted, private addresses refused, bounded retry queue. Team and Agents
   plans on the hosted service.
+
+### Reliability and security
+
+- Fail-open spend is journaled and recorded exactly once after an outage, across restarts,
+  shutdowns and overlapping replays; `/readyz` on the proxy and API.
+- Compressed responses (gzip, deflate, brotli, zstd) are decoded with a size bound; secondary
+  SKUs (such as Places fields billed at a higher tier) count against their own caps.
+- Outbound calls to identity providers, collectors and custom APIs refuse private addresses
+  unless allowed; `X-Forwarded-For` is trusted only from private hops.
+- Compose stack: resource limits on every service, third-party images pinned by digest, ports
+  bound to localhost by default, services running as node with node as PID 1; `restore.sh`
+  checks a backup in a scratch database before swapping it in.
+
+### Hosted service
+
+- Public [status page](https://spendbrake.dev/status) with incident history, privacy policy,
+  terms, data processing agreement and security page; product analytics (PostHog EU,
+  cookieless on the website, no personal data on the dashboard).
 
 ### Business / Enterprise (`ee/`, LICENSE-EE)
 
