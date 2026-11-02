@@ -422,8 +422,9 @@ describe('upstream behaviour', () => {
   it('commits worst case on a timeout, since Google may have billed', async () => {
     const org = newOrg();
     const { token } = await newKey(h, org);
+    // Far past the 1 s upstream timeout, so a busy runner cannot let the answer win the race.
     mock.respond = async (_req, reply) => {
-      await new Promise((r) => setTimeout(r, 1_500));
+      await new Promise((r) => setTimeout(r, 6_000));
       return reply.send({ places: [] });
     };
     const res = await textSearch(token);
@@ -431,7 +432,7 @@ describe('upstream behaviour', () => {
     expect(res.json()).toMatchObject({ error: 'upstream_timeout' });
     expect(res.headers['x-brake-cost-micros']).toBe('32000');
     expect(await spent(org)).toBe(32_000n);
-  });
+  }, 15_000);
 
   it('refunds when the provider cannot be reached at all', async () => {
     const dead = await startProxy(valkeyUrl, mock, {
