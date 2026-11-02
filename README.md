@@ -33,15 +33,15 @@ sed -i "s|^BRAKE_MASTER_KEY=.*|BRAKE_MASTER_KEY=$(openssl rand -base64 32)|; \
         s|^VALKEY_PASSWORD=.*|VALKEY_PASSWORD=$(openssl rand -hex 24)|; \
         s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$(openssl rand -hex 24)|" infra/.env
 
-docker compose -f infra/docker-compose.yml up -d --build --wait
+export BRAKE_VERSION=0.1.0   # the published images to run
+docker compose -f infra/docker-compose.yml -f infra/docker-compose.release.yml up -d --wait
 ```
 
 That starts the proxy (`:8080`), admin API (`:8081`), notifier (`:8082`), dashboard (`:3000`),
 worker, Valkey and Postgres, listening on 127.0.0.1 only. Then set up your org, store the Google key and get a virtual key:
 
 ```sh
-pnpm install && pnpm --filter @spend-brake/cli build
-alias brake="node $PWD/apps/cli/dist/brake.cjs"
+npm install -g @spend-brake/cli   # or run it without installing: npx @spend-brake/cli
 
 # Secrets from the environment (or omit them to be prompted): flags would land in shell history.
 export BRAKE_SETUP_TOKEN="$(grep BRAKE_SETUP_TOKEN infra/.env | cut -d= -f2)"
@@ -50,8 +50,9 @@ brake init --api-url http://localhost:8081 --proxy-url http://localhost:8080 \
   --org acme --day-cap 5 --month-cap 50
 ```
 
-The CLI and the Docker images are built from source for now; published packages (`npx
-@spend-brake/cli`) and images are coming.
+To build the images and the CLI from source instead, leave out the release file and add
+`--build` (`docker compose -f infra/docker-compose.yml up -d --build --wait`), then
+`pnpm install && pnpm --filter @spend-brake/cli build` and use `node apps/cli/dist/brake.cjs`.
 
 `init` prints the owner token once (keep it in a password manager) and saves an admin token for
 the CLI. Valkey and Postgres are only reachable from the other containers.

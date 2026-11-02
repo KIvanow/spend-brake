@@ -12,13 +12,17 @@ indented data instead.
 
 ## Install
 
-Build it from source for now; a published package (`npx @spend-brake/cli`) is coming.
+```sh
+npm install -g @spend-brake/cli
+brake --help
+```
+
+Or run it without installing: `npx @spend-brake/cli --help`. To build it from source:
 
 ```sh
 git clone https://github.com/KIvanow/spend-brake && cd spend-brake
 pnpm install && pnpm --filter @spend-brake/cli build   # writes apps/cli/dist/brake.cjs
 alias brake="node $PWD/apps/cli/dist/brake.cjs"
-brake --help
 ```
 
 Node 22 or newer. `pnpm --filter @spend-brake/cli build:sea` also builds a single executable,

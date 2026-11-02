@@ -88,7 +88,8 @@ so on a 1-CPU host keep every `_CPUS` at 1 or below.
 
 ## Published images (`docker-compose.release.yml`)
 
-Published images are coming; until then, build from source.
+Run the published images (`ghcr.io/kivanow/spend-brake-<service>`, linux/amd64 and
+linux/arm64) instead of building from source: add `-f infra/docker-compose.release.yml` last.
 
 | Variable             | What                                                  |
 | -------------------- | ----------------------------------------------------- |

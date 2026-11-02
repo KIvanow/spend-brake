@@ -26,7 +26,8 @@ sed -i "s|^BRAKE_MASTER_KEY=.*|BRAKE_MASTER_KEY=$(openssl rand -base64 32)|; \
         s|^VALKEY_PASSWORD=.*|VALKEY_PASSWORD=$(openssl rand -hex 24)|; \
         s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$(openssl rand -hex 24)|" infra/.env
 
-docker compose -f infra/docker-compose.yml up -d --build --wait
+export BRAKE_VERSION=0.1.0   # the published images to run
+docker compose -f infra/docker-compose.yml -f infra/docker-compose.release.yml up -d --wait
 ```
 
 That starts the proxy (`:8080`), admin API (`:8081`), notifier (`:8082`), dashboard (`:3000`),
@@ -35,8 +36,7 @@ publish them elsewhere); Valkey and Postgres are only reachable from the other c
 Then set up your org, store the Google key and get a virtual key:
 
 ```sh
-pnpm install && pnpm --filter @spend-brake/cli build
-alias brake="node $PWD/apps/cli/dist/brake.cjs"
+npm install -g @spend-brake/cli   # or run it without installing: npx @spend-brake/cli
 
 # Secrets from the environment (or omit them to be prompted): flags would land in shell history.
 export BRAKE_SETUP_TOKEN="$(grep BRAKE_SETUP_TOKEN infra/.env | cut -d= -f2)"
@@ -59,8 +59,11 @@ of Google:
 Open the dashboard at http://localhost:3000 with the owner token, or the admin token
 `brake init` saved.
 
-The CLI and the Docker images are built from source for now; published packages
-(`npx @spend-brake/cli`) and images are coming.
+The images are published for linux/amd64 and linux/arm64 as
+`ghcr.io/kivanow/spend-brake-<service>:<version>`, and the CLI as
+[`@spend-brake/cli`](https://www.npmjs.com/package/@spend-brake/cli). To build both from source
+instead, leave out the release file and add `--build`, then
+`pnpm install && pnpm --filter @spend-brake/cli build`.
 
 ## 1. Install
 
@@ -68,27 +71,29 @@ Copy `infra/.env.example` to `infra/.env` and fill it in (the file says how to g
 secret). Keep `BRAKE_MASTER_KEY` somewhere outside the host as well: provider keys and webhook
 URLs are encrypted with it and cannot be recovered without it.
 
-Build the images from source and start the stack:
+Set `BRAKE_VERSION` in `infra/.env` to the release to run (for example `0.1.0`), then pull
+the published images and start the stack:
 
 ```sh
-F="-f infra/docker-compose.yml -f infra/docker-compose.tls.yml"
-docker compose --env-file infra/.env $F build
+F="-f infra/docker-compose.yml -f infra/docker-compose.tls.yml -f infra/docker-compose.release.yml"
+docker compose --env-file infra/.env $F pull
 docker compose --env-file infra/.env $F up -d --wait
 ```
+
+To build from source instead, leave out `-f infra/docker-compose.release.yml` and run
+`docker compose --env-file infra/.env $F build` before `up`.
 
 Every container has memory and CPU limits that fit a 4 GB host, and Valkey has a memory
 ceiling (`VALKEY_MAXMEMORY`, default 256 MB) at which it refuses writes rather than forget
 spend: raise both on a bigger host or with many keys (see
 [Configuration: ports and resources](../configuration/#ports-and-resources)).
 
-Published images are coming; until then there is nothing to pull, and
-`infra/docker-compose.release.yml` is for when they are. Business / Enterprise: add
-`-f infra/docker-compose.ee.yml` right after the base file (see [ee/README.md](https://github.com/KIvanow/spend-brake/blob/main/ee/README.md)).
+Business / Enterprise: add `-f infra/docker-compose.ee.yml` right after the base file and,
+with published images, set `BRAKE_API_IMAGE=ee-api` and `BRAKE_WORKER_IMAGE=ee-worker` (see
+[ee/README.md](https://github.com/KIvanow/spend-brake/blob/main/ee/README.md)).
 
-Then build the CLI (`pnpm install && pnpm --filter @spend-brake/cli build`, which writes
-`apps/cli/dist/brake.cjs`; published packages are coming too), run
-`node apps/cli/dist/brake.cjs init` once (it uses `BRAKE_SETUP_TOKEN`), and remove the setup
-token from `infra/.env` afterwards.
+Then install the CLI (`npm install -g @spend-brake/cli`), run `brake init` once (it uses
+`BRAKE_SETUP_TOKEN`), and remove the setup token from `infra/.env` afterwards.
 
 People sign in to the dashboard with an API token by default. With email set up (section 2),
 set `BRAKE_EMAIL_SIGN_IN=true` and invite your team under Team: each person gets a one-time
