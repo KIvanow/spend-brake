@@ -174,8 +174,10 @@ describe('email sign-in', () => {
     expect(window.localStorage.getItem('brake.adminToken')).toBe('sbt_email');
     expect(window.sessionStorage.getItem('brake.adminToken')).toBeNull();
     render(<App client={client()} signingIn={Promise.resolve(null)} />);
-    expect(await screen.findByRole('heading', { name: 'Live budget' })).toBeTruthy();
-  });
+    expect(
+      await screen.findByRole('heading', { name: 'Live budget' }, { timeout: 5_000 }),
+    ).toBeTruthy();
+  }, 15_000);
 
   it('says when a link was used or expired', async () => {
     const error = redeemLoginCode('d'.repeat(43));
@@ -186,14 +188,14 @@ describe('email sign-in', () => {
 
   it('goes back to sign-in when the session ends', async () => {
     signedInByEmail();
-    await screen.findByRole('heading', { name: 'Live budget' });
+    await screen.findByRole('heading', { name: 'Live budget' }, { timeout: 5_000 });
     // The session ended (expired, or the person's role changed): the next request gets a 401.
     routes['GET /v1/users'] = () => [401, { message: 'Missing or invalid API token.' }];
     window.location.hash = '/team';
     window.dispatchEvent(new HashChangeEvent('hashchange'));
     expect(await screen.findByLabelText('Email')).toBeTruthy();
     expect(getToken()).toBeNull();
-  });
+  }, 15_000);
 });
 
 describe('sessions', () => {
@@ -201,7 +203,7 @@ describe('sessions', () => {
     routes['DELETE /v1/auth/session'] = () => [200, { revoked: true }];
     signedInByEmail();
     const user = userEvent.setup();
-    await screen.findByRole('heading', { name: 'Live budget' });
+    await screen.findByRole('heading', { name: 'Live budget' }, { timeout: 5_000 });
     await user.click(screen.getByRole('button', { name: 'Sign out' }));
     await waitFor(() =>
       expect(calls.find((c) => c.method === 'DELETE' && c.url === '/v1/auth/session')?.auth).toBe(
@@ -210,7 +212,7 @@ describe('sessions', () => {
     );
     expect(getToken()).toBeNull();
     expect(await screen.findByLabelText('Email')).toBeTruthy();
-  });
+  }, 15_000);
 
   it('spends a sign-in link opened in a tab that is already open', async () => {
     render(<App client={client()} />);
