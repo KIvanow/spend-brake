@@ -12,7 +12,7 @@ images for linux/amd64 and linux/arm64
 (`ghcr.io/kivanow/spend-brake-<service>:<version>`, with build provenance) and the CLI
 (`@spend-brake/cli`).
 
-## [Unreleased]
+## [0.2.1] - 2026-11-02
 
 ### Fixed
 

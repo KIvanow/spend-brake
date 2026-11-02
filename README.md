@@ -33,7 +33,7 @@ sed -i "s|^BRAKE_MASTER_KEY=.*|BRAKE_MASTER_KEY=$(openssl rand -base64 32)|; \
         s|^VALKEY_PASSWORD=.*|VALKEY_PASSWORD=$(openssl rand -hex 24)|; \
         s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$(openssl rand -hex 24)|" infra/.env
 
-export BRAKE_VERSION=0.2.0   # the published images to run
+export BRAKE_VERSION=0.2.1   # the published images to run
 docker compose -f infra/docker-compose.yml -f infra/docker-compose.release.yml up -d --wait
 ```
 
