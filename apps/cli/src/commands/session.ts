@@ -93,7 +93,7 @@ export function sessionCommand(
 
         if (readSavedConfig(io).adminToken) {
           io.stderr(
-            `brake: warning: ${configPath(io)} holds an admin token the command can read. Run agents as another user (or with XDG_CONFIG_HOME elsewhere) so they cannot lift their own caps.\n`,
+            `brake: warning: ${configPath(io)} holds an admin token the command can read. Run agents as another OS user so they cannot lift their own caps.\n`,
           );
         }
 

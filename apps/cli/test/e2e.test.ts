@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { randomBytes } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -15,7 +16,7 @@ import { StaticSecretStore } from '@spend-brake/proxy/secrets';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { Redis } from 'ioredis';
 import { GenericContainer, type StartedTestContainer, Wait } from 'testcontainers';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, onTestFinished } from 'vitest';
 
 // The built CLI, exactly what `npx @spend-brake/cli` runs.
 const CLI = fileURLToPath(new URL('../dist/brake.cjs', import.meta.url));
@@ -281,6 +282,13 @@ describe('brake mcp end to end', () => {
         stdio: ['pipe', 'pipe', 'pipe'],
       },
     );
+    const exited = once(child, 'exit');
+    // Also when an assertion fails or a reply never comes: no session process outlives the test.
+    onTestFinished(async () => {
+      child.stdin.end();
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
+      await exited;
+    });
     const replies = createInterface({ input: child.stdout })[Symbol.asyncIterator]();
     let id = 0;
     // One request at a time, so which call meets the cap is fixed.
@@ -321,7 +329,7 @@ describe('brake mcp end to end', () => {
     });
 
     child.stdin.end();
-    const code = await new Promise<number | null>((resolve) => child.on('exit', resolve));
+    const [code] = (await exited) as [number | null];
     expect(code).toBe(0);
   });
 });

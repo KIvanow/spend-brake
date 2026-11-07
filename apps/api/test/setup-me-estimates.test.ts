@@ -150,6 +150,32 @@ describe('GET /v1/me', () => {
     // Credential ids stay private.
     expect(me.body).not.toContain(acme);
   });
+
+  it('shows the budget of a session the client names, for keys with a session budget', async () => {
+    const org = await newOrg(env);
+    const call = (method: 'GET' | 'POST', url: string, payload?: object) =>
+      env.app.inject({ method, url, headers: bearer(org.admin), ...(payload ? { payload } : {}) });
+    const cred = (
+      await call('POST', '/v1/providers/credentials', { provider: 'acme', name: 'c', secret: 's' })
+    ).json<{ id: string }>().id;
+    const key = async (sessionCapMicros: number | null) =>
+      (
+        await call('POST', '/v1/keys', { name: 'k', credentials: { acme: cred }, sessionCapMicros })
+      ).json<{ token: string }>().token;
+    const me = async (token: string) =>
+      (
+        await env.app.inject({
+          url: '/v1/me',
+          headers: { 'x-brake-key': token, 'x-brake-session': 'run-7' },
+        })
+      ).json<{ scopes: { scope: string; window: string; hard: number | null }[] }>();
+
+    // Before the first call the session cap is the key's session budget.
+    const sess = (await me(await key(2_000_000))).scopes.filter((s) => s.scope === 'sess:run-7');
+    expect(sess.find((s) => s.window.startsWith('m:'))).toMatchObject({ hard: 2_000_000 });
+    // Without a session budget the proxy refuses the header, so it is not a scope here either.
+    expect((await me(await key(null))).scopes.some((s) => s.scope === 'sess:run-7')).toBe(false);
+  });
 });
 
 describe('Google key restriction check', () => {
