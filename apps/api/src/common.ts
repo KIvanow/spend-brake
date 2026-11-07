@@ -1,6 +1,6 @@
 import type { BudgetEngine, Registry } from '@spend-brake/budget';
 import { type KillTarget, MAX_MICROS, type Scope, type ValkeyClient } from '@spend-brake/budget';
-import { type Db, auditLog, caps } from '@spend-brake/db';
+import { type Db, and, auditLog, caps, eq, sql, virtualKeys } from '@spend-brake/db';
 import type { KeyWrapper } from '@spend-brake/shared';
 import { z } from 'zod';
 import type { Auth, Role } from './auth.js';
@@ -134,6 +134,35 @@ export async function audit(
   });
 }
 
+/**
+ * A $0 probe session's caps never change: it is left out of the plan's sessions only because it
+ * cannot spend, and a raised cap would let it.
+ */
+export async function refuseProbeCapChange(ctx: Ctx, orgId: string, label: string): Promise<void> {
+  const scope = toScope(label);
+  if (scope.kind !== 'key' && scope.kind !== 'sess') return;
+  const [row] = await ctx.db
+    .select({ id: virtualKeys.id })
+    .from(virtualKeys)
+    .where(
+      and(
+        eq(virtualKeys.orgId, orgId),
+        scope.kind === 'key'
+          ? eq(virtualKeys.id, scope.id)
+          : sql`${virtualKeys.config}->>'sessionId' = ${scope.id}`,
+        sql`${virtualKeys.config}->>'probe' = 'true'`,
+      ),
+    )
+    .limit(1);
+  if (row) {
+    throw new ApiError(
+      409,
+      'probe_session',
+      'This is a $0 probe session (brake doctor --prove): its caps cannot change. Start a session with a budget instead.',
+    );
+  }
+}
+
 /** Set a cap in Valkey (enforced on the next request), then record it in Postgres. */
 export async function writeCap(
   ctx: Ctx,
@@ -142,6 +171,7 @@ export async function writeCap(
   kind: 'd' | 'm',
   values: { hard: bigint | null; soft: bigint | null },
 ): Promise<number> {
+  await refuseProbeCapChange(ctx, orgId, label);
   const version = await ctx.engine.setCap(orgId, toScope(label), kind, values);
   const row = {
     orgId,

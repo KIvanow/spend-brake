@@ -101,6 +101,7 @@ function record(keyId: string, orgId: string, f: Fields, base?: KeyRecord): KeyR
     sessionId: base?.sessionId ?? null,
     agentDayCapMicros: base?.agentDayCapMicros ?? null,
     parentKeyId: base?.parentKeyId ?? null,
+    ...(base?.probe ? { probe: true } : {}),
   };
 }
 

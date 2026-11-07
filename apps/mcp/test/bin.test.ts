@@ -30,7 +30,11 @@ it('keeps its version, the registry entry and the CLI in step', () => {
     name: string;
     version: string;
     description: string;
-    packages: { identifier: string; version: string }[];
+    packages: {
+      identifier: string;
+      version: string;
+      environmentVariables: { name: string; isRequired: boolean }[];
+    }[];
   };
   const cli = json('../../cli/package.json') as { version: string };
   expect(pkg.version).toBe(cli.version);
@@ -40,6 +44,12 @@ it('keeps its version, the registry entry and the CLI in step', () => {
     version: pkg.version,
   });
   expect(server.name).toBe(pkg.mcpName);
+  // Without BRAKE_API_URL the CLI falls back to localhost and sends the key there.
+  expect(server.packages[0]!.environmentVariables.map((v) => [v.name, v.isRequired])).toEqual([
+    ['BRAKE_KEY', true],
+    ['BRAKE_URL', true],
+    ['BRAKE_API_URL', true],
+  ]);
   // The registry's limit.
   expect(server.description.length).toBeLessThanOrEqual(100);
 });

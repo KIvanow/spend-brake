@@ -13,7 +13,7 @@ import { type Ctx, audit, id, micros, n } from '../common.js';
 import { newId, random62 } from '../ids.js';
 import { ApiError, type Router, errorSchema, notFound } from '../route.js';
 import { orgTimeZone } from './budget.js';
-import { PROBE_TTL_SEC, requireCapacity } from '../entitlements.js';
+import { requireCapacity } from '../entitlements.js';
 
 const createBody = z.object({
   /** Required with an admin token; implied when the caller authenticates with the parent key. */
@@ -131,9 +131,10 @@ export function sessionRoutes(
       dayBudgetMicros: parsed.data.dayBudgetMicros ?? 20_000_000n,
     };
     const orgId = c.auth.orgId;
-    // A $0 session of a minute at most (brake doctor --prove) can spend nothing, so it does not
-    // use up the plan's sessions; a failed payment or a spent request allowance still stops it.
-    const probe = body.budgetMicros === 0n && body.ttlSec <= PROBE_TTL_SEC;
+    // A $0 session (brake doctor --prove) is marked a probe: its caps can never be raised, so it
+    // spends nothing and does not use up the plan's sessions. A failed payment or a spent request
+    // allowance still stops it.
+    const probe = body.budgetMicros === 0n;
     await requireCapacity(ctx, orgId, probe ? 'probe' : 'session');
 
     let parent: KeyRecord;
@@ -179,6 +180,7 @@ export function sessionRoutes(
       parentKeyId: parent.id,
       canMintSessions: false,
       failOpenMicros: null,
+      ...(probe ? { probe: true } : {}),
     };
     // The session budget is the key's own cap: enforced even when a client never sends the
     // session header. Month window: a session's whole life.

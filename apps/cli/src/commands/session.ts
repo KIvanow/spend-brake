@@ -1,4 +1,5 @@
 import type { Command } from 'commander';
+import { type Minted, endSession, mintSession } from '../admin.js';
 import {
   CliError,
   EXIT,
@@ -9,16 +10,6 @@ import {
   savedConfigs,
   usdToMicros,
 } from '../io.js';
-
-interface Minted {
-  sessionId: string;
-  keyId: string;
-  token: string;
-  agentId: string;
-  budgetMicros: number;
-  dayBudgetMicros: number;
-  expiresAt: string;
-}
 
 const SIGNALS = { SIGINT: 2, SIGTERM: 15, SIGHUP: 1 } as const;
 
@@ -71,22 +62,19 @@ export function sessionCommand(
         if (auth.authorization && !o.parentKey) {
           throw new CliError('With BRAKE_ADMIN_TOKEN, give --parent-key <id>.', EXIT.usage);
         }
-        const res = await io.fetch(`${cfg.apiUrl}/v1/sessions`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', ...auth },
-          body: JSON.stringify({
+        let minted: Minted;
+        try {
+          minted = await mintSession(io, auth, {
             budgetMicros: usdToMicros(o.budget).toString(),
             dayBudgetMicros: usdToMicros(o.dayBudget).toString(),
             ttlSec: durationSec(o.ttl),
             ...(o.agent ? { agentId: o.agent } : {}),
             ...(o.parentKey ? { parentKeyId: o.parentKey } : {}),
-          }),
-        });
-        const minted = (await res.json()) as Minted & { message?: string };
-        if (res.status !== 201) {
+          });
+        } catch (err) {
           throw new CliError(
-            `could not start a session: ${minted.message ?? `HTTP ${res.status}`}`,
-            res.status === 401 ? EXIT.auth : EXIT.error,
+            `could not start a session: ${(err as Error).message}`,
+            err instanceof CliError ? err.code : EXIT.error,
           );
         }
 
@@ -132,21 +120,13 @@ export function sessionCommand(
           exitCode: code,
         };
         try {
-          const end = await io.fetch(`${cfg.apiUrl}/v1/sessions/${minted.keyId}`, {
-            method: 'DELETE',
-            headers: { 'x-brake-key': minted.token },
-          });
-          const e = (await end.json()) as { spentMicros?: number; heldMicros?: number };
-          if (end.ok) {
-            summary = {
-              ...summary,
-              spentMicros: e.spentMicros,
-              spent: microsToUsd(e.spentMicros ?? 0),
-              budget: microsToUsd(minted.budgetMicros, 2),
-            };
-          } else {
-            summary.revokeError = `HTTP ${end.status}`;
-          }
+          const e = await endSession(io, minted);
+          summary = {
+            ...summary,
+            spentMicros: e.spentMicros,
+            spent: microsToUsd(e.spentMicros ?? 0),
+            budget: microsToUsd(minted.budgetMicros, 2),
+          };
         } catch (err) {
           summary.revokeError = (err as Error).message;
         }

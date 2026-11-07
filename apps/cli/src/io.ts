@@ -40,10 +40,15 @@ export class CliError extends Error {
   constructor(
     message: string,
     readonly code: number = EXIT.error,
+    options?: ErrorOptions,
   ) {
-    super(message);
+    super(message, options);
   }
 }
+
+/** Whether an error (or what caused it) is a request given up by `withTimeout`. */
+export const timedOut = (err: unknown): boolean =>
+  err instanceof Error && (err.name === 'TimeoutError' || timedOut(err.cause));
 
 export interface SavedConfig {
   apiUrl?: string;
@@ -133,12 +138,17 @@ export function keyHeaders(cfg: {
   };
 }
 
-/** The same Io, with every request (and its body) given up after `ms`. */
+/** The same Io, with every request (and its body) given up after `ms`, or on the caller's signal. */
 export function withTimeout(io: Io, ms: number): Io {
   return {
     ...io,
-    fetch: (input: string | URL | Request, init?: RequestInit) =>
-      io.fetch(input, { ...init, signal: AbortSignal.timeout(ms) }),
+    fetch: (input: string | URL | Request, init?: RequestInit) => {
+      const timeout = AbortSignal.timeout(ms);
+      return io.fetch(input, {
+        ...init,
+        signal: init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout,
+      });
+    },
   };
 }
 

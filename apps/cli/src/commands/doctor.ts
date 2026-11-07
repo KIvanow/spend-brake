@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Command } from 'commander';
+import { type Me, type Minted, endSession, mintSession } from '../admin.js';
 import {
   EXIT,
   type Io,
@@ -20,24 +21,6 @@ export interface Check {
   title: string;
   detail?: string;
   fix?: string;
-}
-
-interface Me {
-  keyId: string;
-  sessionId: string | null;
-  killed: boolean;
-  /** Servers before 0.3.0 do not send it. */
-  killedProviders?: string[];
-  scopes: { scope: string; window: string; hard: number | null; remaining: number | null }[];
-  /** Servers before 0.3.0 do not send it. */
-  policy?: {
-    providers: string[];
-    skus: string[] | null;
-    canMintSessions: boolean;
-    expiresAt: string | null;
-    failOpenMicros: number | null;
-    unpriced: Record<string, { policy: string; defaultPriceMicros: number | null }>;
-  };
 }
 
 /** What a client cannot see, printed with every report: doctor never promises protection. */
@@ -60,7 +43,6 @@ const PROVIDER_KEY_VARS = [
   'SERPAPI_KEY',
   'GOOGLE_MAPS_KEY',
   'GOOGLE_MAPS_API_KEY',
-  'GOOGLE_API_KEY',
   'MAPBOX_TOKEN',
   'MAPBOX_ACCESS_TOKEN',
   'HERE_API_KEY',
@@ -72,11 +54,16 @@ const VIRTUAL_KEY = /^sb_live_[0-9A-Za-z]{22}$/;
 /** Values that look like a provider key whatever the variable is called. */
 const PROVIDER_KEY_SHAPES: [string, RegExp][] = [
   ['Tavily', /^tvly-[0-9A-Za-z-]{16,}$/],
-  ['Google', /^AIza[0-9A-Za-z_-]{35}$/],
   ['Mapbox secret', /^sk\.eyJ[0-9A-Za-z._-]+$/],
 ];
+/**
+ * A Google API key may be for Gemini, not Maps: only a warning, unless the variable names Maps.
+ * One that may call Maps reaches it around the proxy.
+ */
+const GOOGLE_KEY = /^AIza[0-9A-Za-z_-]{35}$/;
+const GOOGLE_KEY_VARS = ['GOOGLE_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY'];
 
-type Found = { name: string; kind: 'admin' | 'provider' | 'virtual'; what: string };
+type Found = { name: string; kind: 'admin' | 'provider' | 'google' | 'virtual'; what: string };
 
 /** Example values (`.env.example`, docs): `your_tavily_api_key_here`, `tvly-xxxxxxxxxxxxxxxx`. */
 const PLACEHOLDER =
@@ -94,6 +81,12 @@ function classify(name: string, value: string, key: string | undefined, strict: 
   }
   for (const [label, re] of PROVIDER_KEY_SHAPES) {
     if (re.test(v)) return { name, kind: 'provider', what: `${label} key` } as Found;
+  }
+  if (GOOGLE_KEY.test(v) && !PROVIDER_KEY_VARS.includes(name)) {
+    return { name, kind: 'google', what: 'Google API key' } as Found;
+  }
+  if (GOOGLE_KEY_VARS.includes(name) && (!strict || /^[0-9A-Za-z._-]{16,}$/.test(v))) {
+    return { name, kind: 'google', what: 'Google API key' } as Found;
   }
   if (PROVIDER_KEY_VARS.includes(name) && (!strict || /^[0-9A-Za-z._-]{16,}$/.test(v))) {
     return { name, kind: 'provider', what: 'provider key' } as Found;
@@ -230,6 +223,18 @@ export function localChecks(io: Io, cwd: string): Check[] {
   );
 
   checks.push(
+    names('google')
+      ? {
+          id: 'google-keys.env',
+          status: 'warn',
+          title: 'A Google API key is in the environment',
+          detail: `${names('google')}. It may be for Gemini; if it can also call the Maps APIs, the workload can reach them around the proxy and its caps.`,
+          fix: 'In Google Cloud, restrict the key to the APIs it is for (not Maps), or store the Maps key in Spend Brake only.',
+        }
+      : { id: 'google-keys.env', status: 'pass', title: 'No Google API keys in the environment' },
+  );
+
+  checks.push(
     names('virtual')
       ? {
           id: 'virtual-keys.env',
@@ -253,7 +258,7 @@ export function localChecks(io: Io, cwd: string): Check[] {
       .filter((f): f is Found => f !== null),
   }));
   const hits = files.filter((f) => f.found.length > 0);
-  const severe = hits.some((f) => f.found.some((x) => x.kind !== 'virtual'));
+  const severe = hits.some((f) => f.found.some((x) => x.kind === 'admin' || x.kind === 'provider'));
   const notRead = scan.skipped.length
     ? ` Not read (over ${MAX_DOTENV_BYTES / 1_000_000} MB): ${scan.skipped.join(', ')}.`
     : '';
@@ -284,9 +289,9 @@ export function localChecks(io: Io, cwd: string): Check[] {
           },
   );
 
-  for (const [name, url] of [
-    ['proxy', cfg.proxyUrl],
-    ['admin API', cfg.apiUrl],
+  for (const [name, which, url] of [
+    ['proxy', 'proxy', cfg.proxyUrl],
+    ['admin API', 'api', cfg.apiUrl],
   ] as const) {
     let host = '';
     try {
@@ -297,7 +302,7 @@ export function localChecks(io: Io, cwd: string): Check[] {
     }
     if (host && !['localhost', '127.0.0.1', '[::1]', '::1'].includes(host)) {
       checks.push({
-        id: 'transport.tls',
+        id: `transport.tls.${which}`,
         status: 'warn',
         title: `The ${name} URL is plain HTTP`,
         detail: `${url}: the virtual key travels unencrypted.`,
@@ -401,8 +406,17 @@ async function prove(io: Io, me: Me | null): Promise<Check> {
       fix: 'Run `brake doctor --prove` with a key created with --can-mint-sessions.',
     };
   }
-  const providers = (me.policy?.providers ?? Object.keys(PROBES)).filter((p) => p in PROBES);
-  if (providers.length === 0) {
+  if (me.killed) {
+    return {
+      id,
+      status: 'unknown',
+      title,
+      detail:
+        'Spending is switched off for this key, so the proxy refuses the probe whatever its caps.',
+    };
+  }
+  const allowed = (me.policy?.providers ?? Object.keys(PROBES)).filter((p) => p in PROBES);
+  if (allowed.length === 0) {
     return {
       id,
       status: 'unknown',
@@ -410,36 +424,36 @@ async function prove(io: Io, me: Me | null): Promise<Check> {
       detail: `Doctor has a probe for ${Object.keys(PROBES).join(', ')}; this key calls none of them.`,
     };
   }
+  // A killed provider is refused before its caps are checked: it proves nothing.
+  const providers = allowed.filter((p) => !me.killedProviders?.includes(p));
+  if (providers.length === 0) {
+    return {
+      id,
+      status: 'unknown',
+      title,
+      detail: `Every provider doctor could probe with this key is switched off: ${allowed.join(', ')}.`,
+    };
+  }
 
-  let res: Response;
-  let minted: { keyId?: string; token?: string; message?: string };
+  let minted: Minted;
   try {
-    res = await io.fetch(`${cfg.apiUrl}/v1/sessions`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-brake-key': cfg.key! },
-      body: JSON.stringify({
+    minted = await mintSession(
+      io,
+      { 'x-brake-key': cfg.key! },
+      {
         budgetMicros: '0',
         dayBudgetMicros: '0',
         agentId: 'brake-doctor',
         ttlSec: 60,
         name: 'brake doctor probe',
-      }),
-    });
-    minted = (await res.json().catch(() => ({}))) as typeof minted;
+      },
+    );
   } catch (err) {
     return {
       id,
       status: 'unknown',
       title,
       detail: `Could not mint the $0 probe session: ${(err as Error).message}`,
-    };
-  }
-  if (res.status !== 201 || !minted.token || !minted.keyId) {
-    return {
-      id,
-      status: 'unknown',
-      title,
-      detail: `Could not mint the $0 probe session: ${minted.message ?? `HTTP ${res.status}`}`,
     };
   }
 
@@ -463,10 +477,19 @@ async function prove(io: Io, me: Me | null): Promise<Check> {
         break;
       }
       const e = (r.data ?? {}) as { error?: string };
-      // Not this key's provider, or not one this proxy serves: try the next.
-      if (r.status === 403 && e.error === 'sku_not_allowed') continue;
-      if (r.status === 404 && e.error === 'unknown_route') continue;
-      if (r.costMicros !== null && r.costMicros > 0) {
+      const charged = r.costMicros !== null && r.costMicros > 0;
+      // Not this key's provider, not one this proxy serves or prices, or switched off since
+      // /v1/me: refused before the caps, so try the next.
+      if (
+        !charged &&
+        ((r.status === 403 && e.error === 'sku_not_allowed') ||
+          (r.status === 404 && e.error === 'unknown_route') ||
+          e.error === 'killed' ||
+          e.error === 'unpriced_route')
+      ) {
+        continue;
+      }
+      if (charged) {
         result = {
           id,
           status: 'fail',
@@ -503,11 +526,7 @@ async function prove(io: Io, me: Me | null): Promise<Check> {
   } finally {
     let end: { spentMicros?: number } = {};
     try {
-      const r = await io.fetch(`${cfg.apiUrl}/v1/sessions/${minted.keyId}`, {
-        method: 'DELETE',
-        headers: { 'x-brake-key': minted.token },
-      });
-      end = (await r.json()) as { spentMicros?: number };
+      end = await endSession(io, minted);
     } catch {
       // the session expires in 60 s anyway
     }
@@ -526,7 +545,7 @@ async function prove(io: Io, me: Me | null): Promise<Check> {
       id,
       status: 'unknown',
       title,
-      detail: 'The key may not call any provider doctor has a probe for.',
+      detail: `No probe reached the caps: ${providers.join(', ')} refused it for another reason first (not allowed, unpriced or switched off).`,
     }
   );
 }
@@ -622,24 +641,37 @@ export async function remoteChecks(
     title: 'BRAKE_KEY works',
     detail: `Key ${me.keyId}${me.sessionId ? `, session ${me.sessionId}` : ''}.`,
   });
+  // Killed because every one of its providers is: name them, the key itself is not killed.
+  const allProviders =
+    me.killedProviders?.length && me.policy
+      ? me.policy.providers.every((p) => me.killedProviders!.includes(p))
+      : false;
   checks.push(
-    me.killed
+    me.killed && allProviders
       ? {
           id: 'key.killed',
           status: 'fail',
-          title: 'Spending is switched off for this key',
-          detail: 'The key, its parent, its session or the org is killed: every call is refused.',
-          fix: 'Expected after a kill; resume it with `brake unkill` when ready.',
+          title: "Every one of this key's providers is switched off",
+          detail: `${me.killedProviders!.join(', ')}: every call is refused.`,
+          fix: `Expected after a kill; resume them with ${me.killedProviders!.map((p) => `\`brake unkill prov:${p}\``).join(', ')} when ready.`,
         }
-      : me.killedProviders?.length
+      : me.killed
         ? {
             id: 'key.killed',
-            status: 'warn',
-            title: "Some of this key's providers are switched off",
-            detail: `${me.killedProviders.join(', ')}: every call to them is refused.`,
-            fix: 'Expected after a kill; resume them with `brake unkill` when ready.',
+            status: 'fail',
+            title: 'Spending is switched off for this key',
+            detail: 'The key, its parent, its session or the org is killed: every call is refused.',
+            fix: 'Expected after a kill; resume it with `brake unkill` when ready.',
           }
-        : { id: 'key.killed', status: 'pass', title: 'Spending is switched on' },
+        : me.killedProviders?.length
+          ? {
+              id: 'key.killed',
+              status: 'warn',
+              title: "Some of this key's providers are switched off",
+              detail: `${me.killedProviders.join(', ')}: every call to them is refused.`,
+              fix: 'Expected after a kill; resume them with `brake unkill` when ready.',
+            }
+          : { id: 'key.killed', status: 'pass', title: 'Spending is switched on' },
   );
   // A session the client names (X-Brake-Session) is no limit: the client can pick a fresh name,
   // or send none. Only a session key's own session binds it.

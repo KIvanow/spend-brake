@@ -75,7 +75,17 @@ describe('brake mcp', () => {
       'exa_search',
       'brake_budget',
     ]);
-    expect(JSON.stringify(m.byId(2).result)).toContain('"readOnlyHint":true');
+    // The searches spend money, and a repeat spends it again; only the budget is read-only.
+    const hints = Object.fromEntries(
+      (m.byId(2).result!.tools as unknown as { name: string; annotations: object }[]).map((t) => [
+        t.name,
+        t.annotations,
+      ]),
+    );
+    for (const name of ['tavily_search', 'exa_search']) {
+      expect(hints[name]).toMatchObject({ readOnlyHint: false, idempotentHint: false });
+    }
+    expect(hints.brake_budget).toMatchObject({ readOnlyHint: true });
 
     const old = await mcp([init('2024-11-05')]);
     expect(old.byId(1).result!.protocolVersion).toBe('2024-11-05');
@@ -286,5 +296,56 @@ describe('brake mcp', () => {
   it('tells an unavailable budget from a refused key', async () => {
     const m = await mcp([init(), call(2, 'brake_budget')], () => ({ status: 503, body: {} }));
     expect(m.byId(2).result!.content![0]!.text).toContain('unavailable right now (HTTP 503)');
+  });
+
+  it("passes the server's reason through when the budget is refused", async () => {
+    const m = await mcp(
+      [init(), call(2, 'brake_budget')],
+      () => ({
+        status: 400,
+        body: {
+          error: 'invalid_request',
+          message: 'This key has no session budget; drop X-Brake-Session.',
+        },
+      }),
+      { env: { ...ENV, BRAKE_SESSION: 'run-7' } },
+    );
+    expect(m.byId(2).result!.content![0]!.text).toContain(
+      'This key has no session budget; drop X-Brake-Session.',
+    );
+  });
+
+  it('never invites a retry of a search that timed out: it may have been charged', async () => {
+    const m = await mcp([init(), call(2, 'exa_search', { query: 'q' })], () => {
+      throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+    });
+    const t = m.byId(2).result!.content![0]!.text;
+    expect(m.byId(2).result!.isError).toBe(true);
+    expect(t).toMatch(/^STOP\./);
+    expect(t).toContain('may already have been forwarded and charged');
+    expect(t).toContain('brake_budget');
+    expect(t).not.toContain('cannot reach');
+
+    // Any other failure to connect is not a timeout.
+    const down = await mcp([init(), call(2, 'exa_search', { query: 'q' })], () => {
+      throw new TypeError('fetch failed');
+    });
+    expect(down.byId(2).result!.content![0]!.text).toContain('cannot reach the proxy');
+  });
+
+  it("shows a short excerpt of the provider's error, so the model can fix its arguments", async () => {
+    const m = await mcp(
+      [init(), call(2, 'tavily_search', { query: 'q' }), call(3, 'exa_search', { query: 'q' })],
+      (c) =>
+        c.url.includes('/tavily/')
+          ? { status: 400, body: { detail: { error: 'Invalid topic' } } }
+          : { status: 422, body: `${'x'.repeat(1000)}` },
+    );
+    const tavily = m.byId(2).result!.content![0]!.text;
+    expect(tavily).toContain('HTTP 400');
+    expect(tavily).toContain('Invalid topic');
+    const exa = m.byId(3).result!.content![0]!.text;
+    expect(exa).toContain('HTTP 422');
+    expect(exa.length).toBeLessThan(400);
   });
 });

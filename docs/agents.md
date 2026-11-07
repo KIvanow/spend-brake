@@ -103,18 +103,22 @@ brake doctor --prove --pretty              # with a key that may mint sessions
 It fails on a missing, revoked, killed or uncapped key (a budget per `X-Brake-Session` alone is
 no cap: the client names the session, so it can start a fresh one), a `BRAKE_SESSION` the proxy
 would refuse, unpriced routes charged $0, an admin token the agent can read (in the environment
-or the saved config), and raw provider keys (`TAVILY_API_KEY`, `AIza…`, …) in the environment
-or in `./.env*` files, which let the agent call the provider directly; placeholders such as
-`your_key_here` are skipped. It warns on a second virtual key, plain HTTP to a remote host,
+or the saved config), and raw provider keys (`TAVILY_API_KEY`, `GOOGLE_MAPS_KEY`, …) in the
+environment or in `./.env*` files, which let the agent call the provider directly; placeholders
+such as `your_key_here` are skipped. It warns on a generic Google API key (`GOOGLE_API_KEY`,
+`AIza…`): it may be for Gemini, but one that can also call Maps goes around the proxy, so
+restrict it in Google Cloud. It also warns on a second virtual key, plain HTTP to a remote host,
 some of the key's providers killed, fail-open keys, keys that never expire, keys with many
 providers, and providers whose unpriced routes are forwarded at a default price. Secrets are
 named, never printed.
 
 `--prove` mints a $0, 60-second session from the key and sends one priced request with it. The
 proxy must refuse it with `402 budget_exceeded` before it contacts the provider; the session is
-then ended, having spent nothing. Such a session does not count toward a plan's agent sessions,
-so `--prove` can run on every deploy (it still needs a plan whose payment has gone through and
-whose monthly requests are not used up). The repository runs the same probe against a counting
+then ended, having spent nothing. The API marks every $0 session as a probe: its caps can never
+be raised, so it cannot spend, and it does not count toward a plan's agent sessions. `--prove`
+can run on every deploy (it still needs a plan whose payment has gone through and whose monthly
+requests are not used up). Killed providers are skipped, and a provider the proxy refuses for
+another reason first (killed, unpriced) makes doctor try the next. The repository runs the same probe against a counting
 mock provider and checks it receives no request (`apps/cli/test/e2e.test.ts`).
 
 Doctor exits 1 when a check fails, and also when it could not read the key's caps or, with
@@ -155,4 +159,8 @@ MCP connection, start it in a session: `"args": ["-y", "@spend-brake/cli", "sess
 offers one provider only. With the CLI installed, `brake mcp` is the same server.
 
 Each result carries its `cost` and the `remaining` budget. When a cap stops a search the tool
-answers with an error that starts with `STOP.` and tells the model not to retry.
+answers with an error that starts with `STOP.` and tells the model not to retry. So does a
+search with no answer within 60 s: the proxy may have forwarded and charged it, so the model is
+told to check `brake_budget` before searching again. Other failures carry a short excerpt of
+the provider's error. The search tools are annotated as neither read-only nor idempotent.
+`BRAKE_API_URL` is required: without it `brake_budget` asks `http://localhost:8081`.

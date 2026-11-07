@@ -50,7 +50,11 @@ export async function proxyCall(io: Io, req: ProxyRequest): Promise<ProxyResult>
       ...(body !== undefined ? { body } : {}),
     });
   } catch (err) {
-    throw new CliError(`cannot reach the proxy at ${cfg.proxyUrl}: ${(err as Error).message}`);
+    throw new CliError(
+      `cannot reach the proxy at ${cfg.proxyUrl}: ${(err as Error).message}`,
+      EXIT.error,
+      { cause: err },
+    );
   }
   const text = await res.text();
   let data: unknown = text;

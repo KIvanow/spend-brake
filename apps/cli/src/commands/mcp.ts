@@ -1,6 +1,16 @@
 import { createInterface } from 'node:readline';
 import type { Command } from 'commander';
-import { CliError, EXIT, type Io, config, keyHeaders, microsToUsd, withTimeout } from '../io.js';
+import type { Me } from '../admin.js';
+import {
+  CliError,
+  EXIT,
+  type Io,
+  config,
+  keyHeaders,
+  microsToUsd,
+  timedOut,
+  withTimeout,
+} from '../io.js';
 import { VERSION } from '../version.js';
 import { type ProxyRequest, proxyCall, refusal } from '../proxy.js';
 
@@ -10,8 +20,9 @@ const PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05
 const INSTRUCTIONS =
   'Web search through Spend Brake: every call is charged against a hard dollar cap. When a tool ' +
   'answers with STOP, do not retry or work around it, and do not switch to the other search ' +
-  'tool: the same caps apply to both. Tell the user and ask them to raise the cap. brake_budget ' +
-  'shows what is left.';
+  'tool: the same caps apply to both. Tell the user and ask them to raise the cap. A search ' +
+  'that timed out may still have been forwarded and charged: do not repeat it blindly, check ' +
+  'brake_budget first. brake_budget shows what is left.';
 
 type Json = Record<string, unknown>;
 
@@ -118,7 +129,14 @@ const TOOLS: Tool[] = [
     description:
       'Search the web with Tavily. Each call is charged against a hard spend cap; the result shows its cost and the budget left.',
     inputSchema: tavilySchema,
-    annotations: { title: 'Tavily search (capped)', readOnlyHint: true, openWorldHint: true },
+    // Not read-only: every call spends money, and a repeat spends it again.
+    annotations: {
+      title: 'Tavily search (capped)',
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
     build: (args) => {
       const a = pick(args, tavilySchema);
       if (typeof a === 'string') return a;
@@ -135,7 +153,13 @@ const TOOLS: Tool[] = [
     description:
       'Search the web with Exa. Each call is charged against a hard spend cap; the result shows its cost and the budget left.',
     inputSchema: exaSchema,
-    annotations: { title: 'Exa search (capped)', readOnlyHint: true, openWorldHint: true },
+    annotations: {
+      title: 'Exa search (capped)',
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
     build: (args) => {
       const a = pick(args, exaSchema);
       if (typeof a === 'string') return a;
@@ -172,23 +196,25 @@ const result = (data: Json, structured: boolean): ToolResult => ({
   ...(structured ? { structuredContent: data } : {}),
 });
 
-interface Me {
-  keyId: string;
-  sessionId: string | null;
-  killed: boolean;
-  scopes: {
-    scope: string;
-    window: string;
-    spent: number;
-    held: number;
-    hard: number | null;
-    remaining: number | null;
-  }[];
-}
-
 /** How long a tool call waits for an answer (and its body) before it reports one never came. */
 const SEARCH_TIMEOUT_MS = 60_000;
 const ME_TIMEOUT_MS = 10_000;
+
+const TIMED_OUT = (proxyUrl: string) =>
+  `STOP. No answer from the proxy at ${proxyUrl} within ${SEARCH_TIMEOUT_MS / 1000} s. The search may already have been forwarded and charged: do not retry it blindly. Check brake_budget first, and ask the user before searching again.`;
+
+/** The provider's own error, short enough for the model to read and fix its arguments. */
+function excerpt(data: unknown): string {
+  let s: string;
+  if (typeof data === 'string') s = data;
+  else if (typeof data === 'object' && data !== null) {
+    const o = data as Record<string, unknown>;
+    const field = [o.detail, o.message, o.error].find((v) => v !== undefined && v !== null);
+    s = typeof field === 'string' ? field : JSON.stringify(field ?? o);
+  } else return '';
+  s = s.replace(/\s+/g, ' ').trim();
+  return s.length > 300 ? `${s.slice(0, 300)}…` : s;
+}
 
 const NO_KEY =
   'BRAKE_KEY is not set for this MCP server: add a Spend Brake virtual key to the "env" of its entry in the MCP configuration.';
@@ -204,7 +230,16 @@ async function budget(io: Io, structured: boolean): Promise<ToolResult> {
     if (res.status === 401 || res.status === 403) {
       return text(`The key was refused (HTTP ${res.status}): unknown, revoked or expired.`, true);
     }
-    if (!res.ok) return text(`The budget is unavailable right now (HTTP ${res.status}).`, true);
+    if (!res.ok) {
+      // The server's reason when it gives one, such as a refused X-Brake-Session.
+      const e = (await res.json().catch(() => ({}))) as { message?: unknown };
+      return text(
+        typeof e.message === 'string' && res.status < 500
+          ? `The budget was refused (HTTP ${res.status}): ${e.message}`
+          : `The budget is unavailable right now (HTTP ${res.status}).`,
+        true,
+      );
+    }
     me = (await res.json()) as Me;
   } catch (err) {
     return text(`cannot reach the admin API at ${cfg.apiUrl}: ${(err as Error).message}`, true);
@@ -238,15 +273,26 @@ async function callTool(io: Io, tool: Tool, args: Json, structured: boolean): Pr
   }
   const req = tool.build(args);
   if (typeof req === 'string') return text(`Invalid arguments: ${req}.`, true);
-  if (!config(io).key) return text(NO_KEY, true);
+  const cfg = config(io);
+  if (!cfg.key) return text(NO_KEY, true);
   let r;
   try {
     r = await proxyCall(withTimeout(io, SEARCH_TIMEOUT_MS), req);
   } catch (err) {
+    // The proxy may have forwarded it (Exa bills a call that times out): never invite a retry.
+    if (timedOut(err)) return text(TIMED_OUT(cfg.proxyUrl), true);
     return text(err instanceof CliError ? err.message : (err as Error).message, true);
   }
   const why = refusal(r);
-  if (why) return text(why.message, true);
+  if (why) {
+    // A STOP says all there is to say; any other failure carries the provider's own error, so
+    // the model can fix its arguments.
+    const more = why.code === EXIT.error ? excerpt(r.data) : '';
+    return text(
+      more && !why.message.includes(more) ? `${why.message} (provider said: ${more})` : why.message,
+      true,
+    );
+  }
   return result(
     {
       cost: r.cost,

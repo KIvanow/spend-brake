@@ -1,7 +1,7 @@
 import { createHash, randomInt } from 'node:crypto';
 import { z } from 'zod';
 import { type CapTemplate, DEFAULT_LOOP_POLICY } from './engine.js';
-import { type Scope, assertOrgId } from './keys.js';
+import { type KillTarget, type Scope, assertOrgId } from './keys.js';
 import type { ValkeyClient } from './scripts.js';
 
 // Org and virtual-key config the proxy reads on every request (through a short local cache).
@@ -89,6 +89,11 @@ export const keyRecordSchema = z.object({
   agentDayCapMicros: micros.nullable().default(null),
   /** The key that minted this session key. */
   parentKeyId: id.nullable().default(null),
+  /**
+   * A $0 session (`brake doctor --prove`): it does not count toward a plan's sessions, and its
+   * caps cannot be raised, so it can never spend.
+   */
+  probe: z.boolean().optional(),
 });
 
 export type OrgRecord = z.output<typeof orgRecordSchema>;
@@ -208,6 +213,40 @@ export class Registry {
 
 /** A session id as X-Brake-Session carries it. */
 export const SESSION_ID = /^[A-Za-z0-9_.-]{1,128}$/;
+
+/**
+ * The session a request spends in: a session key's own, or the one the client names in
+ * X-Brake-Session. `refusal` is the reason the proxy refuses the header.
+ */
+export function sessionFor(
+  key: KeyRecord,
+  header: unknown,
+): { session: string | undefined; refusal?: undefined } | { refusal: string } {
+  if (key.sessionId) return { session: key.sessionId };
+  if (header === undefined) return { session: undefined };
+  if (typeof header !== 'string' || !SESSION_ID.test(header)) {
+    return { refusal: 'Invalid X-Brake-Session.' };
+  }
+  // Sessions are client-named scopes; only keys with a session budget may open them, so a
+  // client cannot create unbounded per-session counters.
+  if (key.sessionCapMicros === null) {
+    return { refusal: 'This key has no session budget; drop X-Brake-Session.' };
+  }
+  return { session: header };
+}
+
+/** What a kill of any of these stops: a call by this key, in this session, to this provider. */
+export function killTargetsFor(
+  key: KeyRecord,
+  session: string | undefined,
+  provider?: string,
+): KillTarget[] {
+  const targets: KillTarget[] = [{ kind: 'org' }, { kind: 'key', id: key.id }];
+  if (provider !== undefined) targets.push({ kind: 'prov', name: provider });
+  if (session) targets.push({ kind: 'sess', id: session });
+  if (key.parentKeyId) targets.push({ kind: 'key', id: key.parentKeyId });
+  return targets;
+}
 
 /**
  * Caps a key's calls create on first use: its session's month budget and its agent's day cap.

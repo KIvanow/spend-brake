@@ -177,8 +177,9 @@ describe('brake doctor', () => {
       ),
     );
     expect(d.code).toBe(EXIT.ok);
+    expect(d.status('transport.tls.api')).toBeUndefined();
     for (const id of [
-      'transport.tls',
+      'transport.tls.proxy',
       'key.expiry',
       'key.fail-open',
       'providers.scope',
@@ -186,6 +187,59 @@ describe('brake doctor', () => {
     ]) {
       expect(d.status(id), id).toBe('warn');
     }
+  });
+
+  it('warns on each plain-HTTP URL under its own id', async () => {
+    const d = await doctor(
+      {
+        BRAKE_KEY: KEY,
+        BRAKE_URL: 'http://proxy.example.com',
+        BRAKE_API_URL: 'http://api.example.com',
+      },
+      healthy(me()),
+    );
+    const ids = d.report!.checks.map((c) => c.id);
+    expect(ids.filter((i) => i.startsWith('transport.tls'))).toEqual([
+      'transport.tls.proxy',
+      'transport.tls.api',
+    ]);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('only warns on a Google API key that may be for Gemini, but fails on a Maps key', async () => {
+    const gemini = `AIza${rand(35)}`;
+    const d = await doctor({ BRAKE_KEY: KEY, GOOGLE_API_KEY: gemini }, healthy(me()));
+    expect(d.status('google-keys.env')).toBe('warn');
+    expect(d.status('provider-keys.env')).toBe('pass');
+    expect(d.code).toBe(EXIT.ok);
+    expect(d.out).not.toContain(gemini);
+
+    const shaped = await doctor({ BRAKE_KEY: KEY, LLM_KEY: gemini }, healthy(me()));
+    expect(shaped.status('google-keys.env')).toBe('warn');
+
+    const maps = await doctor({ BRAKE_KEY: KEY, GOOGLE_MAPS_API_KEY: gemini }, healthy(me()));
+    expect(maps.status('provider-keys.env')).toBe('fail');
+    expect(maps.status('google-keys.env')).toBe('pass');
+  });
+
+  it('names the providers when every one of them is killed', async () => {
+    const d = await doctor(
+      { BRAKE_KEY: KEY },
+      healthy(me({ killed: true, killedProviders: ['tavily'] })),
+    );
+    const c = d.report!.checks.find((x) => x.id === 'key.killed') as {
+      fix?: string;
+      detail?: string;
+    };
+    expect(d.status('key.killed')).toBe('fail');
+    expect(c.detail).toContain('tavily');
+    expect(c.fix).toContain('brake unkill prov:tavily');
+
+    const key = await doctor(
+      { BRAKE_KEY: KEY },
+      healthy(me({ killed: true, killedProviders: [] })),
+    );
+    expect(key.report!.checks.find((x) => x.id === 'key.killed')!.detail).toContain('the org');
   });
 
   it('says what it could not check against an older server or an unreachable one', async () => {
@@ -364,6 +418,58 @@ describe('brake doctor', () => {
       expect(noMint.status('enforcement.exhausted-budget')).toBe('unknown');
     });
 
+    it('skips killed providers, and tries the next one the proxy refuses before the caps', async () => {
+      const refused = (c: Call) =>
+        c.url.includes('/google-maps/')
+          ? { status: 403, body: { error: 'killed', target: 'prov:google-maps' } }
+          : {
+              status: 402,
+              body: { error: 'budget_exceeded' },
+              headers: { 'x-brake-cost-micros': '0' },
+            };
+      const respond = (body: unknown) =>
+        healthy(body, (c) => {
+          if (c.url.endsWith('/v1/sessions')) return session;
+          if (c.method === 'DELETE') return { status: 200, body: { spentMicros: 0 } };
+          return refused(c);
+        });
+
+      // Killed since /v1/me: the proxy says so, and doctor moves on.
+      const late = await doctor({ BRAKE_KEY: KEY }, respond(minting), { args: ['--prove'] });
+      expect(late.status('enforcement.exhausted-budget')).toBe('pass');
+      expect(late.code).toBe(EXIT.ok);
+
+      // Known killed: never probed.
+      const known = await doctor(
+        { BRAKE_KEY: KEY },
+        respond({ ...minting, killedProviders: ['google-maps'] }),
+        { args: ['--prove'] },
+      );
+      expect(known.status('enforcement.exhausted-budget')).toBe('pass');
+      expect(known.f.calls.some((c) => c.url.includes('/google-maps/'))).toBe(false);
+
+      const unpriced = await doctor(
+        { BRAKE_KEY: KEY },
+        healthy(minting, (c) => {
+          if (c.url.endsWith('/v1/sessions')) return session;
+          if (c.method === 'DELETE') return { status: 200, body: { spentMicros: 0 } };
+          return c.url.includes('/google-maps/')
+            ? { status: 403, body: { error: 'unpriced_route' } }
+            : refused(c);
+        }),
+        { args: ['--prove'] },
+      );
+      expect(unpriced.status('enforcement.exhausted-budget')).toBe('pass');
+
+      const all = await doctor(
+        { BRAKE_KEY: KEY },
+        respond({ ...minting, killedProviders: ['google-maps', 'tavily'] }),
+        { args: ['--prove'] },
+      );
+      expect(all.status('enforcement.exhausted-budget')).toBe('unknown');
+      expect(all.f.calls.some((c) => c.url.endsWith('/v1/sessions'))).toBe(false);
+    });
+
     it('cannot prove anything with a key that may not mint sessions, or a session key', async () => {
       const plain = await doctor({ BRAKE_KEY: KEY }, healthy(me()), { args: ['--prove'] });
       expect(plain.status('enforcement.exhausted-budget')).toBe('unknown');
@@ -499,5 +605,13 @@ describe('brake doctor', () => {
         init?.signal?.addEventListener('abort', () => reject(new Error('timed out')));
       })) as typeof fetch;
     await expect(withTimeout(hanging, 20).fetch('http://api/readyz')).rejects.toThrow('timed out');
+
+    // The caller's own signal still aborts it, long before the deadline.
+    const mine = new AbortController();
+    const pending = withTimeout(hanging, 60_000).fetch('http://api/readyz', {
+      signal: mine.signal,
+    });
+    mine.abort();
+    await expect(pending).rejects.toThrow('timed out');
   });
 });

@@ -1,4 +1,10 @@
-import { SESSION_ID, type Scope, capTemplatesFor } from '@spend-brake/budget';
+import {
+  type Scope,
+  capTemplatesFor,
+  killLabel,
+  killTargetsFor,
+  sessionFor,
+} from '@spend-brake/budget';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { type Ctx, n } from '../common.js';
@@ -83,18 +89,10 @@ export function meRoutes(app: FastifyInstance, router: Router, ctx: Ctx): void {
     // A session the client names (X-Brake-Session), as the proxy charges it: only keys with a
     // session budget may name one, and its cap is that budget until the first call creates it.
     // A header the proxy would refuse is refused here too, so `brake doctor` sees it.
-    const named = key.sessionId ? undefined : req.headers['x-brake-session'];
-    if (named !== undefined && (typeof named !== 'string' || !SESSION_ID.test(named))) {
-      throw new ApiError(400, 'invalid_request', 'Invalid X-Brake-Session.');
-    }
-    if (named !== undefined && key.sessionCapMicros === null) {
-      throw new ApiError(
-        400,
-        'invalid_request',
-        'This key has no session budget; drop X-Brake-Session.',
-      );
-    }
-    const namedSession = named ?? null;
+    const named = sessionFor(key, req.headers['x-brake-session']);
+    if (named.refusal !== undefined) throw new ApiError(400, 'invalid_request', named.refusal);
+    const session = named.session;
+    const namedSession = key.sessionId ? null : (session ?? null);
     if (namedSession) scopes.push({ kind: 'sess', id: namedSession });
     if (key.parentKeyId) scopes.push({ kind: 'key', id: key.parentKeyId });
     if (key.agentId) scopes.push({ kind: 'agent', id: key.agentId });
@@ -108,18 +106,12 @@ export function meRoutes(app: FastifyInstance, router: Router, ctx: Ctx): void {
       scopes,
       org?.timeZone ?? 'UTC',
       ctx.now(),
-      capTemplatesFor(key, key.sessionId ?? namedSession),
+      capTemplatesFor(key, session ?? null),
     );
     const providers = Object.keys(key.credentials).sort();
     // A provider kill stops this key only for that provider; all of them stop it altogether.
     const killedProviders = providers.filter((p) => killed.includes(`prov:${p}`));
-    const mine = [
-      'org',
-      `key:${key.id}`,
-      ...(key.parentKeyId ? [`key:${key.parentKeyId}`] : []),
-      ...(key.sessionId ? [`sess:${key.sessionId}`] : []),
-      ...(namedSession ? [`sess:${namedSession}`] : []),
-    ];
+    const mine = killTargetsFor(key, session).map(killLabel);
     return {
       keyId: key.id,
       sessionId: key.sessionId,

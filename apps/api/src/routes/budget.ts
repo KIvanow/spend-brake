@@ -10,6 +10,7 @@ import {
   micros,
   n,
   raisesCap,
+  refuseProbeCapChange,
   scopeLabel,
   toKillTarget,
   toScope,
@@ -68,6 +69,7 @@ export function budgetRoutes(r: Router, ctx: Ctx): void {
           .limit(1);
         if (!key) throw notFound('Key');
       }
+      await refuseProbeCapChange(ctx, auth.orgId, params.scope);
       const items = [];
       const pending = [];
       for (const [kind, values] of [
@@ -144,6 +146,7 @@ export function budgetRoutes(r: Router, ctx: Ctx): void {
       pending: z.array(pendingView).optional(),
     }),
     handler: async ({ auth, params, query }) => {
+      await refuseProbeCapChange(ctx, auth.orgId, params.scope);
       const kinds: ('d' | 'm')[] = [];
       const pending = [];
       for (const kind of query.kind ? [query.kind] : (['d', 'm'] as const)) {

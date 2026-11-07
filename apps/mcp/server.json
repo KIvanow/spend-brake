@@ -33,7 +33,7 @@
         {
           "name": "BRAKE_API_URL",
           "description": "The Spend Brake admin API, for the budget tool, e.g. https://app.spendbrake.dev",
-          "isRequired": false,
+          "isRequired": true,
           "format": "string"
         }
       ]

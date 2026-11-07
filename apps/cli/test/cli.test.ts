@@ -1,7 +1,7 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished } from 'vitest';
 import { EXIT, durationSec, microsToUsd, usdToMicros } from '../src/io.js';
 import { run } from '../src/program.js';
 import { type Call, fake } from './fake.js';
@@ -234,10 +234,12 @@ describe('brake session', () => {
         };
 
   it('warns when the command could read a saved admin token', async () => {
-    const { mkdtempSync, mkdirSync, rmSync, writeFileSync } = await import('node:fs');
+    const { mkdirSync, writeFileSync } = await import('node:fs');
     const { tmpdir } = await import('node:os');
     const { join } = await import('node:path');
     const home = mkdtempSync(join(tmpdir(), 'brake-warn-'));
+    // It holds an admin-token config: removed whether or not the test passes.
+    onTestFinished(() => rmSync(home, { recursive: true, force: true }));
     mkdirSync(join(home, '.config', 'brake'), { recursive: true });
     writeFileSync(
       join(home, '.config', 'brake', 'config.json'),
@@ -251,7 +253,6 @@ describe('brake session', () => {
     const elsewhere = fake({ ...ENV, HOME: home, XDG_CONFIG_HOME: join(home, 'other') }, api);
     expect(await run(['session', '--', 'true'], elsewhere.io)).toBe(0);
     expect(elsewhere.err[0]).toContain(join(home, '.config', 'brake', 'config.json'));
-    rmSync(home, { recursive: true, force: true });
   });
 
   it('mints a key, runs the command with it, revokes it and passes the exit code through', async () => {
@@ -476,7 +477,12 @@ describe('brake init without Google', () => {
     '5',
     ...extra,
   ];
-  const home = () => mkdtempSync(join(tmpdir(), 'brake-init-'));
+  // Each holds the admin token init saves: removed after its test.
+  const home = () => {
+    const d = mkdtempSync(join(tmpdir(), 'brake-init-'));
+    onTestFinished(() => rmSync(d, { recursive: true, force: true }));
+    return d;
+  };
 
   it('sets up the org and caps and explains the next step', async () => {
     const f = fake(
@@ -528,5 +534,30 @@ describe('brake caps --pretty', () => {
     const f = fake(ADMIN, () => ({ status: 200, body: { scope: 'key:k1', deleted: ['d', 'm'] } }));
     expect(await run(['caps', 'rm', 'key:k1', '--pretty'], f.io)).toBe(0);
     expect(f.out.join('')).toBe('Removed the day and month cap of key:k1.\n');
+  });
+});
+
+describe('brake status', () => {
+  it('warns about a refused BRAKE_SESSION and still shows the key budget', async () => {
+    const f = fake({ ...ENV, BRAKE_SESSION: 'run-7' }, (c) =>
+      c.headers['x-brake-session']
+        ? {
+            status: 400,
+            body: {
+              error: 'invalid_request',
+              message: 'This key has no session budget; drop X-Brake-Session.',
+            },
+          }
+        : { status: 200, body: { keyId: 'k', sessionId: null, killed: false, scopes: [] } },
+    );
+    expect(await run(['status'], f.io)).toBe(EXIT.ok);
+    expect(f.calls).toHaveLength(2);
+    expect(f.calls[1]!.headers['x-brake-session']).toBeUndefined();
+    expect(f.err.join('')).toContain('BRAKE_SESSION is refused: This key has no session budget');
+    expect(JSON.parse(f.out.join(''))).toMatchObject({ keyId: 'k' });
+
+    // Without BRAKE_SESSION, a 400 is an error as before.
+    const plain = fake(ENV, () => ({ status: 400, body: { message: 'nope' } }));
+    expect(await run(['status'], plain.io)).toBe(EXIT.error);
   });
 });

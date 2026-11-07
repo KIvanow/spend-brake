@@ -142,32 +142,33 @@ See [checking a workload](../agents/#check-the-workload-with-brake-doctor) for t
 ## brake mcp
 
 An MCP server on stdio with capped `tavily_search` and `exa_search` tools and a read-only
-`brake_budget` tool (preview). It reads `BRAKE_KEY`, `BRAKE_URL` and `BRAKE_API_URL`;
+`brake_budget` tool (preview). It reads `BRAKE_KEY`, `BRAKE_URL` and `BRAKE_API_URL` (set all
+three: the budget tool otherwise asks `http://localhost:8081`);
 `--tools tavily,exa` picks the providers. The same server is published as `@spend-brake/mcp`. Setup: [MCP clients](../agents/#mcp-clients-preview).
 
 ## Admin commands
 
 These use the admin token (`BRAKE_ADMIN_TOKEN` or the saved one).
 
-| Command                                                                        | What                                                                                                                |
-| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
-| `brake keys list`                                                              | Virtual keys                                                                                                        |
-| `brake keys create --name <n> --credential <provider=credId...>`               | Create a key; also `--env`, `--agent`, `--skus`, `--session-cap`, `--can-mint-sessions`, `--expires`, `--countries` |
-| `brake keys show <id>` / `brake keys revoke <id>`                              | Show or revoke a key                                                                                                |
-| `brake custom-apis list` / `brake custom-apis show <id>`                       | Your [custom APIs](../custom-apis/)                                                                                 |
-| `brake custom-apis add <file.json>`                                            | Add a custom API from a JSON definition                                                                             |
-| `brake custom-apis update <id> <file.json>` / `brake custom-apis delete <id>`  | Replace or delete one (delete is refused while keys use it)                                                         |
-| `brake caps list`                                                              | Caps                                                                                                                |
-| `brake caps set <scope> --day 5 --month 50`                                    | Set caps; also `--soft-day`, `--soft-month`                                                                         |
-| `brake caps rm <scope> [--kind d\|m]`                                          | Remove caps                                                                                                         |
-| `brake kill <target> [--reason <text>]`                                        | Stop all spend for `org`, `key:<id>`, `prov:<name>` or `sess:<id>`                                                  |
-| `brake unkill <target>`                                                        | Lift a kill                                                                                                         |
-| `brake status [--scope <scope...>]`                                            | Remaining budget: your session and key with `BRAKE_KEY`, or every scope (admin)                                     |
-| `brake spend --group-by key,sku --days 30`                                     | Spend from the ledger; also `--from`, `--to`                                                                        |
-| `brake estimate [--days 30]`                                                   | What your Google usage would cost on Geoapify, Stadia Maps, Open Places API, Mapbox and HERE                        |
-| `brake license install <file>` / `brake license status`                        | Business / Enterprise license (owner token of the licensed org)                                                     |
-| `brake reconcile set --table <project.dataset.table> --service-account <file>` | Compare the ledger with Google's billing export daily (Business / Enterprise); also `--project`                     |
-| `brake reconcile status` / `brake reconcile report`                            | Reconciliation settings and the daily report                                                                        |
+| Command                                                                        | What                                                                                                                     |
+| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `brake keys list`                                                              | Virtual keys                                                                                                             |
+| `brake keys create --name <n> --credential <provider=credId...>`               | Create a key; also `--env`, `--agent`, `--skus`, `--session-cap`, `--can-mint-sessions`, `--expires`, `--countries`      |
+| `brake keys show <id>` / `brake keys revoke <id>`                              | Show or revoke a key                                                                                                     |
+| `brake custom-apis list` / `brake custom-apis show <id>`                       | Your [custom APIs](../custom-apis/)                                                                                      |
+| `brake custom-apis add <file.json>`                                            | Add a custom API from a JSON definition                                                                                  |
+| `brake custom-apis update <id> <file.json>` / `brake custom-apis delete <id>`  | Replace or delete one (delete is refused while keys use it)                                                              |
+| `brake caps list`                                                              | Caps                                                                                                                     |
+| `brake caps set <scope> --day 5 --month 50`                                    | Set caps; also `--soft-day`, `--soft-month`                                                                              |
+| `brake caps rm <scope> [--kind d\|m]`                                          | Remove caps                                                                                                              |
+| `brake kill <target> [--reason <text>]`                                        | Stop all spend for `org`, `key:<id>`, `prov:<name>` or `sess:<id>`                                                       |
+| `brake unkill <target>`                                                        | Lift a kill                                                                                                              |
+| `brake status [--scope <scope...>]`                                            | Remaining budget: your session and key with `BRAKE_KEY` (a refused `BRAKE_SESSION` is a warning), or every scope (admin) |
+| `brake spend --group-by key,sku --days 30`                                     | Spend from the ledger; also `--from`, `--to`                                                                             |
+| `brake estimate [--days 30]`                                                   | What your Google usage would cost on Geoapify, Stadia Maps, Open Places API, Mapbox and HERE                             |
+| `brake license install <file>` / `brake license status`                        | Business / Enterprise license (owner token of the licensed org)                                                          |
+| `brake reconcile set --table <project.dataset.table> --service-account <file>` | Compare the ledger with Google's billing export daily (Business / Enterprise); also `--project`                          |
+| `brake reconcile status` / `brake reconcile report`                            | Reconciliation settings and the daily report                                                                             |
 
 Cap scopes are `org`, `key:<id>`, `sku:<provider>:<sku>`, `env:<name>`, `agent:<id>` and
 `sess:<id>`.

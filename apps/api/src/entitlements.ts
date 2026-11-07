@@ -29,9 +29,6 @@ export async function entitlementsOf(ctx: Ctx, orgId: string): Promise<Entitleme
   return row ?? null;
 }
 
-/** A $0 session this short (brake doctor --prove) neither needs nor uses up the plan's sessions. */
-export const PROBE_TTL_SEC = 60;
-
 const monthStart = (now: Date) => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 
 /** `what`: the thing counted, singular and plural ("key", "keys"). */
@@ -101,9 +98,8 @@ export async function requireCapacity(
           eq(virtualKeys.orgId, orgId),
           gte(virtualKeys.createdAt, monthStart(ctx.now())),
           sql`${virtualKeys.config}->>'sessionId' is not null`,
-          // Probes ($0, a minute at most) can spend nothing.
-          // A NULL in either column is not a probe: coalesce keeps the row counted.
-          sql`not coalesce(${virtualKeys.config}->>'sessionCapMicros' = '0' and ${virtualKeys.expiresAt} <= ${virtualKeys.createdAt} + make_interval(secs => ${PROBE_TTL_SEC}), false)`,
+          // Probes ($0, caps locked) can spend nothing. No flag is no probe.
+          sql`coalesce(${virtualKeys.config}->>'probe', 'false') <> 'true'`,
         ),
       );
     if (Number(row?.n ?? 0) >= e.agentSessionsPerMonth) {

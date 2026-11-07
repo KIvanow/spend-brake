@@ -578,7 +578,7 @@ describe('sign-up and checkout', () => {
 });
 
 describe('agent sessions', () => {
-  it('count toward the plan, except $0 probes of a minute (brake doctor --prove)', async () => {
+  it('count toward the plan, except $0 probes (brake doctor --prove), whose caps are locked', async () => {
     const { ownerToken: t } = await signup('free', '203.0.113.78');
     const cred = (await credential(t, 'mapbox')).json<{ id: string }>().id;
     const parentKeyId = (await newKey(t, cred)).json<{ id: string }>().id;
@@ -593,9 +593,32 @@ describe('agent sessions', () => {
     for (let i = 0; i < 20; i++)
       expect((await mint({ budgetMicros: '1000' })).statusCode).toBe(201);
     expect((await mint({ budgetMicros: '1000' })).json()).toMatchObject({ error: 'plan_limit' });
-    expect((await mint({ ...probe, ttlSec: 61 })).json()).toMatchObject({ error: 'plan_limit' });
+    // Any $0 session is a probe, whatever its lifetime: it can never spend.
     expect((await mint(probe)).statusCode).toBe(201);
-    expect((await mint(probe)).statusCode).toBe(201);
+    const long = await mint({ ...probe, ttlSec: 7 * 24 * 3600 });
+    expect(long.statusCode).toBe(201);
+
+    // Raising (or removing) a probe's caps would let it spend outside the plan: refused.
+    const { keyId, sessionId } = long.json<{ keyId: string; sessionId: string }>();
+    for (const scope of [`key:${keyId}`, `sess:${sessionId}`]) {
+      const raise = await api.inject({
+        method: 'PUT',
+        url: `/v1/caps/${scope}`,
+        headers: bearer(t),
+        payload: { month: { hard: 1_000_000 } },
+      });
+      expect(raise.statusCode, scope).toBe(409);
+      expect(raise.json()).toMatchObject({ error: 'probe_session' });
+      const drop = await api.inject({
+        method: 'DELETE',
+        url: `/v1/caps/${scope}`,
+        headers: bearer(t),
+      });
+      expect(drop.json()).toMatchObject({ error: 'probe_session' });
+    }
+    // The billing page counts them as the API does.
+    const usage = await billing.inject({ url: '/v1/billing', headers: bearer(t) });
+    expect(usage.json()).toMatchObject({ usage: { agentSessionsThisMonth: 20 } });
   });
 
   it('refuses even a $0 probe while a payment has failed', async () => {

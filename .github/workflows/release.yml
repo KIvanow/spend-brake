@@ -228,23 +228,35 @@ jobs:
       - name: Publish @spend-brake/cli
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
           if [ -z "$NODE_AUTH_TOKEN" ]; then
             echo "::warning::NPM_TOKEN is not set; skipping the npm release"
+            exit 0
+          fi
+          # A re-run after a later step failed: this version is already out, and npm never
+          # takes the same version twice.
+          if npm view "@spend-brake/cli@$VERSION" version >/dev/null 2>&1; then
+            echo "@spend-brake/cli@$VERSION is already published; skipping"
             exit 0
           fi
           cd apps/cli && npm publish --provenance --access public
       - name: Publish @spend-brake/mcp
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
           if [ -z "$NODE_AUTH_TOKEN" ]; then
             echo "::warning::NPM_TOKEN is not set; skipping the npm release"
             exit 0
           fi
+          if npm view "@spend-brake/mcp@$VERSION" version >/dev/null 2>&1; then
+            echo "@spend-brake/mcp@$VERSION is already published; skipping"
+            exit 0
+          fi
           # npm does not resolve pnpm's workspace: protocol: pin the CLI published above.
           cd apps/mcp
-          npm pkg set "dependencies.@spend-brake/cli=${{ needs.version.outputs.version }}"
+          npm pkg set "dependencies.@spend-brake/cli=$VERSION"
           npm publish --provenance --access public
 
   release:

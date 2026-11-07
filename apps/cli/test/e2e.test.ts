@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { randomBytes } from 'node:crypto';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -233,6 +233,7 @@ describe('brake doctor end to end', () => {
       soft: null,
     });
     const home = mkdtempSync(join(tmpdir(), 'brake-doctor-e2e-'));
+    onTestFinished(() => rmSync(home, { recursive: true, force: true }));
     const before = googleCalls;
     const r = await brake(
       ['doctor', '--prove'],
