@@ -443,6 +443,22 @@ describe('brake license', () => {
     expect(f.out.at(-1)).toContain('active  business  acme');
     expect(await run(['license', 'install', '/no/such/file'], f.io)).toBe(EXIT.usage);
   });
+
+  it('says to use the owner token init printed when the saved admin token is refused', async () => {
+    const { mkdtempSync, writeFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const file = join(mkdtempSync(join(tmpdir(), 'lic-')), 'acme.license');
+    writeFileSync(file, '{"format":"spend-brake-license/1","payload":"e30","signature":"AA"}\n');
+    const f = fake({ ...ENV, BRAKE_ADMIN_TOKEN: `sbt_${'a'.repeat(32)}` }, () => ({
+      status: 403,
+      body: { error: 'forbidden', message: 'This needs the owner role.' },
+    }));
+    expect(await run(['license', 'install', file], f.io)).toBe(EXIT.error);
+    expect(f.err.join('')).toContain(
+      `owner token \`brake init\` printed: BRAKE_ADMIN_TOKEN=<owner token> brake license install ${file}`,
+    );
+  });
 });
 
 describe('brake custom-apis', () => {

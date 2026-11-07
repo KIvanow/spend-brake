@@ -382,7 +382,20 @@ export function adminCommands(program: Command, io: Io, done: (code: number) => 
       } catch {
         throw new CliError(`cannot read ${file}`, EXIT.usage);
       }
-      print(io, await apiCall(io, 'POST', '/v1/license', { license: text }), pretty(cmd));
+      let installed: unknown;
+      try {
+        installed = await apiCall(io, 'POST', '/v1/license', { license: text });
+      } catch (err) {
+        // The saved config holds an admin token; installing takes the owner token init printed.
+        if (err instanceof CliError && /owner role/.test(err.message)) {
+          throw new CliError(
+            `${err.message} Run it with the owner token \`brake init\` printed: BRAKE_ADMIN_TOKEN=<owner token> brake license install ${file}`,
+            err.code,
+          );
+        }
+        throw err;
+      }
+      print(io, installed, pretty(cmd));
       done(EXIT.ok);
     });
   leaf(lic, 'status').action(async (_o: unknown, cmd: Command) => {
