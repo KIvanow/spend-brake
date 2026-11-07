@@ -1,7 +1,7 @@
 import { createHash, randomInt } from 'node:crypto';
 import { z } from 'zod';
-import { DEFAULT_LOOP_POLICY } from './engine.js';
-import { assertOrgId } from './keys.js';
+import { type CapTemplate, DEFAULT_LOOP_POLICY } from './engine.js';
+import { type Scope, assertOrgId } from './keys.js';
 import type { ValkeyClient } from './scripts.js';
 
 // Org and virtual-key config the proxy reads on every request (through a short local cache).
@@ -204,4 +204,27 @@ export class Registry {
       JSON.stringify({ ...key, status: 'revoked' }),
     );
   }
+}
+
+/** A session id as X-Brake-Session carries it. */
+export const SESSION_ID = /^[A-Za-z0-9_.-]{1,128}$/;
+
+/**
+ * Caps a key's calls create on first use: its session's month budget and its agent's day cap.
+ * The proxy reserves with them, and status readers apply them to scopes not created yet.
+ */
+export function capTemplatesFor(key: KeyRecord, session: string | null): CapTemplate[] {
+  const templates: CapTemplate[] = [];
+  if (session && key.sessionCapMicros) {
+    const scope: Scope = { kind: 'sess', id: session };
+    templates.push({ scope, kind: 'm', hard: BigInt(key.sessionCapMicros) });
+  }
+  if (key.agentId && key.agentDayCapMicros) {
+    templates.push({
+      scope: { kind: 'agent', id: key.agentId },
+      kind: 'd',
+      hard: BigInt(key.agentDayCapMicros),
+    });
+  }
+  return templates;
 }

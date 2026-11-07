@@ -234,7 +234,7 @@ describe('brake session', () => {
         };
 
   it('warns when the command could read a saved admin token', async () => {
-    const { mkdtempSync, mkdirSync, writeFileSync } = await import('node:fs');
+    const { mkdtempSync, mkdirSync, rmSync, writeFileSync } = await import('node:fs');
     const { tmpdir } = await import('node:os');
     const { join } = await import('node:path');
     const home = mkdtempSync(join(tmpdir(), 'brake-warn-'));
@@ -246,6 +246,12 @@ describe('brake session', () => {
     const f = fake({ ...ENV, HOME: home }, api);
     expect(await run(['session', '--', 'true'], f.io)).toBe(0);
     expect(f.err[0]).toContain('holds an admin token the command can read');
+
+    // Another XDG_CONFIG_HOME hides the default config from brake, not from the command.
+    const elsewhere = fake({ ...ENV, HOME: home, XDG_CONFIG_HOME: join(home, 'other') }, api);
+    expect(await run(['session', '--', 'true'], elsewhere.io)).toBe(0);
+    expect(elsewhere.err[0]).toContain(join(home, '.config', 'brake', 'config.json'));
+    rmSync(home, { recursive: true, force: true });
   });
 
   it('mints a key, runs the command with it, revokes it and passes the exit code through', async () => {

@@ -9,6 +9,10 @@ export interface Io {
   stderr: (s: string) => void;
   fetch: typeof fetch;
   spawn: (cmd: string, args: string[], opts: SpawnOptions) => Child;
+  /** Protocol input for `brake mcp`. */
+  stdin?: NodeJS.ReadableStream;
+  /** The working directory `brake doctor` scans. */
+  cwd?: () => string;
   /** Ask the user (init wizard); absent when not interactive. */
   prompt?: (question: string, opts?: { secret?: boolean; default?: string }) => Promise<string>;
 }
@@ -90,6 +94,51 @@ export function config(io: Io) {
     key: io.env.BRAKE_KEY,
     session: io.env.BRAKE_SESSION,
     adminToken: io.env.BRAKE_ADMIN_TOKEN ?? saved.adminToken,
+  };
+}
+
+/**
+ * Saved brake configs this user can read: the one brake would use now, and the default one,
+ * which a different XDG_CONFIG_HOME hides from brake but not from the agent.
+ */
+export function savedConfigs(io: Io): {
+  looked: string[];
+  found: { path: string; cfg: SavedConfig }[];
+} {
+  const paths = new Set<string>();
+  const current = configPath(io);
+  if (current) paths.add(current);
+  if (io.env.HOME) paths.add(join(io.env.HOME, '.config', 'brake', 'config.json'));
+  const found: { path: string; cfg: SavedConfig }[] = [];
+  for (const path of paths) {
+    try {
+      if (existsSync(path)) {
+        found.push({ path, cfg: JSON.parse(readFileSync(path, 'utf8')) as SavedConfig });
+      }
+    } catch {
+      // unreadable or not JSON: brake could not use it either
+    }
+  }
+  return { looked: [...paths], found };
+}
+
+/** The key, and the session it spends in when the client names one (proxy and /v1/me alike). */
+export function keyHeaders(cfg: {
+  key: string | undefined;
+  session: string | undefined;
+}): Record<string, string> {
+  return {
+    'x-brake-key': cfg.key ?? '',
+    ...(cfg.session ? { 'x-brake-session': cfg.session } : {}),
+  };
+}
+
+/** The same Io, with every request (and its body) given up after `ms`. */
+export function withTimeout(io: Io, ms: number): Io {
+  return {
+    ...io,
+    fetch: (input: string | URL | Request, init?: RequestInit) =>
+      io.fetch(input, { ...init, signal: AbortSignal.timeout(ms) }),
   };
 }
 

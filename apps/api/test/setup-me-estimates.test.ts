@@ -107,6 +107,101 @@ describe('GET /v1/me', () => {
     ).toBe(401);
     expect((await env.app.inject({ url: '/v1/me' })).statusCode).toBe(401);
   });
+
+  it("shows a key its own policy and its providers' unpriced-route policy", async () => {
+    const org = await newOrg(env);
+    const call = (method: 'GET' | 'POST' | 'PUT', url: string, payload?: object) =>
+      env.app.inject({ method, url, headers: bearer(org.admin), ...(payload ? { payload } : {}) });
+    const cred = async (provider: string) =>
+      (await call('POST', '/v1/providers/credentials', { provider, name: 'c', secret: 's' })).json<{
+        id: string;
+      }>().id;
+    const [acme, zeta] = [await cred('acme'), await cred('zeta')];
+    const put = await env.app.inject({
+      method: 'PUT',
+      url: '/v1/org',
+      headers: bearer(org.owner),
+      payload: {
+        providers: {
+          acme: { unpricedPolicy: 'allow-with-default-price', defaultPriceMicros: 1000 },
+        },
+      },
+    });
+    expect(put.statusCode).toBe(200);
+    const key = (
+      await call('POST', '/v1/keys', {
+        name: 'k',
+        credentials: { acme, zeta },
+        canMintSessions: true,
+      })
+    ).json<{ token: string }>();
+    const me = await env.app.inject({ url: '/v1/me', headers: { 'x-brake-key': key.token } });
+    expect(me.json<{ policy: unknown }>().policy).toEqual({
+      providers: ['acme', 'zeta'],
+      skus: null,
+      canMintSessions: true,
+      expiresAt: null,
+      failOpenMicros: null,
+      unpriced: {
+        acme: { policy: 'allow-with-default-price', defaultPriceMicros: 1000 },
+        zeta: { policy: 'deny', defaultPriceMicros: null },
+      },
+    });
+    // Credential ids stay private.
+    expect(me.body).not.toContain(acme);
+  });
+
+  it('shows the budget of a session the client names, for keys with a session budget', async () => {
+    const org = await newOrg(env);
+    const call = (method: 'GET' | 'POST', url: string, payload?: object) =>
+      env.app.inject({ method, url, headers: bearer(org.admin), ...(payload ? { payload } : {}) });
+    const cred = (
+      await call('POST', '/v1/providers/credentials', { provider: 'acme', name: 'c', secret: 's' })
+    ).json<{ id: string }>().id;
+    const key = async (sessionCapMicros: number | null) =>
+      (
+        await call('POST', '/v1/keys', { name: 'k', credentials: { acme: cred }, sessionCapMicros })
+      ).json<{ token: string }>().token;
+    const me = async (token: string) =>
+      (
+        await env.app.inject({
+          url: '/v1/me',
+          headers: { 'x-brake-key': token, 'x-brake-session': 'run-7' },
+        })
+      ).json<{ scopes: { scope: string; window: string; hard: number | null }[] }>();
+
+    // Before the first call the session cap is the key's session budget.
+    const sess = (await me(await key(2_000_000))).scopes.filter((s) => s.scope === 'sess:run-7');
+    expect(sess.find((s) => s.window.startsWith('m:'))).toMatchObject({ hard: 2_000_000 });
+    // Without a session budget the proxy refuses the header, so it is not a scope here either.
+    expect((await me(await key(null))).scopes.some((s) => s.scope === 'sess:run-7')).toBe(false);
+  });
+
+  it("shows a session's agent day cap before the first call creates it, as the proxy would", async () => {
+    const org = await newOrg(env);
+    const call = (url: string, payload: object) =>
+      env.app.inject({ method: 'POST', url, headers: bearer(org.admin), payload });
+    const cred = (
+      await call('/v1/providers/credentials', { provider: 'acme', name: 'c', secret: 's' })
+    ).json<{ id: string }>().id;
+    const parent = (await call('/v1/keys', { name: 'p', credentials: { acme: cred } })).json<{
+      id: string;
+    }>();
+    const session = (
+      await call('/v1/sessions', {
+        parentKeyId: parent.id,
+        budgetMicros: '3000000',
+        dayBudgetMicros: '1000000',
+        agentId: 'bot',
+      })
+    ).json<{ token: string }>();
+    const me = (
+      await env.app.inject({ url: '/v1/me', headers: { 'x-brake-key': session.token } })
+    ).json<{ scopes: { scope: string; window: string; hard: number | null }[] }>();
+    const agent = me.scopes.filter((s) => s.scope === 'agent:bot');
+    expect(agent.find((s) => s.window.startsWith('d:'))).toMatchObject({ hard: 1_000_000 });
+    expect(agent.find((s) => s.window.startsWith('m:'))).toMatchObject({ hard: null });
+  });
 });
 
 describe('Google key restriction check', () => {

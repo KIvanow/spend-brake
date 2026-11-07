@@ -1,0 +1,769 @@
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+import type { Command } from 'commander';
+import {
+  EXIT,
+  type Io,
+  config,
+  keyHeaders,
+  microsToUsd,
+  savedConfigs,
+  withTimeout,
+} from '../io.js';
+import { type ProxyRequest, proxyCall } from '../proxy.js';
+
+type Status = 'pass' | 'warn' | 'fail' | 'unknown';
+
+export interface Check {
+  id: string;
+  status: Status;
+  title: string;
+  detail?: string;
+  fix?: string;
+}
+
+interface Me {
+  keyId: string;
+  sessionId: string | null;
+  killed: boolean;
+  scopes: { scope: string; window: string; hard: number | null; remaining: number | null }[];
+  /** Servers before 0.3.0 do not send it. */
+  policy?: {
+    providers: string[];
+    skus: string[] | null;
+    canMintSessions: boolean;
+    expiresAt: string | null;
+    failOpenMicros: number | null;
+    unpriced: Record<string, { policy: string; defaultPriceMicros: number | null }>;
+  };
+}
+
+/** What a client cannot see, printed with every report: doctor never promises protection. */
+export const NOT_VERIFIED = [
+  "That the agent's HTTP clients go through the proxy: a route to a provider that bypasses Spend Brake is not capped.",
+  'Credentials outside the environment, the saved brake config and ./.env* files (other files, keychains, browser profiles, cloud metadata).',
+  "Network egress: only a firewall or egress policy that blocks the providers' own hosts makes the proxy the only way out.",
+  'The org-wide cap and environment caps, which a virtual key cannot read.',
+  "That catalog prices match the provider's invoice.",
+  'Spend from other keys, users or machines in the same org.',
+];
+
+/** Environment variables that usually hold a provider's own key. */
+const PROVIDER_KEY_VARS = [
+  'TAVILY_API_KEY',
+  'EXA_API_KEY',
+  'BRAVE_API_KEY',
+  'BRAVE_SEARCH_API_KEY',
+  'SERPAPI_API_KEY',
+  'SERPAPI_KEY',
+  'GOOGLE_MAPS_KEY',
+  'GOOGLE_MAPS_API_KEY',
+  'GOOGLE_API_KEY',
+  'MAPBOX_TOKEN',
+  'MAPBOX_ACCESS_TOKEN',
+  'HERE_API_KEY',
+  'TWILIO_AUTH_TOKEN',
+];
+
+const ADMIN_TOKEN = /^sbt_[0-9A-Za-z]{32}$/;
+const VIRTUAL_KEY = /^sb_live_[0-9A-Za-z]{22}$/;
+/** Values that look like a provider key whatever the variable is called. */
+const PROVIDER_KEY_SHAPES: [string, RegExp][] = [
+  ['Tavily', /^tvly-[0-9A-Za-z-]{16,}$/],
+  ['Google', /^AIza[0-9A-Za-z_-]{35}$/],
+  ['Mapbox secret', /^sk\.eyJ[0-9A-Za-z._-]+$/],
+];
+
+type Found = { name: string; kind: 'admin' | 'provider' | 'virtual'; what: string };
+
+/** Example values (`.env.example`, docs): `your_tavily_api_key_here`, `tvly-xxxxxxxxxxxxxxxx`. */
+const PLACEHOLDER =
+  /your[_-]|[_-]here$|change[_-]?me|placeholder|example|dummy|redacted|^<.*>$|\.\.\.|(.)\1{7,}/i;
+
+/** Classify one variable without keeping its value. `strict` is for files: no placeholders. */
+function classify(name: string, value: string, key: string | undefined, strict: boolean) {
+  const v = value.trim();
+  if (!v || PLACEHOLDER.test(v)) return null;
+  if (name === 'BRAKE_ADMIN_TOKEN' || ADMIN_TOKEN.test(v)) {
+    return { name, kind: 'admin', what: 'admin token' } as Found;
+  }
+  if (VIRTUAL_KEY.test(v)) {
+    return v === key ? null : ({ name, kind: 'virtual', what: 'virtual key' } as Found);
+  }
+  for (const [label, re] of PROVIDER_KEY_SHAPES) {
+    if (re.test(v)) return { name, kind: 'provider', what: `${label} key` } as Found;
+  }
+  if (PROVIDER_KEY_VARS.includes(name) && (!strict || /^[0-9A-Za-z._-]{16,}$/.test(v))) {
+    return { name, kind: 'provider', what: 'provider key' } as Found;
+  }
+  return null;
+}
+
+/** A dotenv value: the inside of a quoted value, or an unquoted one without its `# comment`. */
+export function dotenvValue(raw: string): string {
+  const v = raw.trim();
+  const q = v[0];
+  if (q === '"' || q === "'") {
+    const end = v.indexOf(q, 1);
+    return end === -1 ? v.slice(1) : v.slice(1, end);
+  }
+  return v.replace(/(^|\s)#.*$/, '').trim();
+}
+
+/** Bigger files are not read, and are reported as not checked. */
+const MAX_DOTENV_BYTES = 10_000_000;
+
+/** `.env*` files in the working directory, as name/value pairs, and the ones too big to read. */
+function dotenvFiles(dir: string): {
+  files: { file: string; vars: [string, string][] }[];
+  skipped: string[];
+} {
+  const files: { file: string; vars: [string, string][] }[] = [];
+  const skipped: string[] = [];
+  let names: string[];
+  try {
+    names = readdirSync(dir).filter((f) => /^\.env/.test(f));
+  } catch {
+    return { files, skipped };
+  }
+  for (const f of names.sort()) {
+    const path = join(dir, f);
+    try {
+      const st = statSync(path);
+      if (!st.isFile()) continue;
+      if (st.size > MAX_DOTENV_BYTES) {
+        skipped.push(path);
+        continue;
+      }
+      const vars: [string, string][] = [];
+      for (const line of readFileSync(path, 'utf8').split(/\r?\n/)) {
+        const m = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/.exec(line);
+        if (m) vars.push([m[1]!, dotenvValue(m[2]!)]);
+      }
+      files.push({ file: path, vars });
+    } catch {
+      // unreadable: not reachable by this user either
+    }
+  }
+  return { files, skipped };
+}
+
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/** Checks that need nothing but this process: what the workload could read. */
+export function localChecks(io: Io, cwd: string): Check[] {
+  const checks: Check[] = [];
+  const cfg = config(io);
+
+  checks.push(
+    cfg.key
+      ? { id: 'key.present', status: 'pass', title: 'BRAKE_KEY is set' }
+      : {
+          id: 'key.present',
+          status: 'fail',
+          title: 'BRAKE_KEY is not set',
+          detail: 'Without a virtual key nothing this workload calls goes through the proxy.',
+          fix: 'Export BRAKE_KEY, or run the workload inside `brake session`.',
+        },
+  );
+
+  const env = Object.entries(io.env)
+    .filter((e): e is [string, string] => e[1] !== undefined)
+    .map(([k, v]) => classify(k, v, cfg.key, false))
+    .filter((f): f is Found => f !== null);
+  const names = (kind: Found['kind']) =>
+    env
+      .filter((f) => f.kind === kind)
+      .map((f) => `${f.name} (${f.what})`)
+      .join(', ');
+
+  checks.push(
+    names('admin')
+      ? {
+          id: 'admin-token.env',
+          status: 'fail',
+          title: 'An admin token is in the environment',
+          detail: `${names('admin')}. With it the workload can raise or remove its own caps.`,
+          fix: 'Unset it for the workload; `brake session` drops BRAKE_ADMIN_TOKEN, other names it cannot know.',
+        }
+      : { id: 'admin-token.env', status: 'pass', title: 'No admin token in the environment' },
+  );
+
+  const configs = savedConfigs(io);
+  const withToken = configs.found.filter((c) => c.cfg.adminToken).map((c) => c.path);
+  checks.push(
+    withToken.length
+      ? {
+          id: 'admin-token.config',
+          status: 'fail',
+          title: 'The saved admin token is readable',
+          detail: `${withToken.join(', ')} holds an admin token this user can read, so the workload can lift its own caps.`,
+          fix: 'Run the workload as another OS user than the one that ran `brake init`. Pointing XDG_CONFIG_HOME elsewhere only hides the file from brake, not from the agent.',
+        }
+      : {
+          id: 'admin-token.config',
+          status: 'pass',
+          title: 'No readable saved admin token',
+          detail: configs.looked.length
+            ? `Looked at ${configs.looked.join(' and ')}; copies elsewhere are not checked.`
+            : 'No config path to look at (HOME is unset).',
+        },
+  );
+
+  checks.push(
+    names('provider')
+      ? {
+          id: 'provider-keys.env',
+          status: 'fail',
+          title: 'A provider key is in the environment',
+          detail: `${names('provider')}. With it the workload can call the provider directly, around the proxy and its caps.`,
+          fix: "Store the provider key in Spend Brake (it never needs to reach the agent) and unset it in the workload's environment.",
+        }
+      : {
+          id: 'provider-keys.env',
+          status: 'pass',
+          title: 'No provider keys in the environment',
+          detail: `Looked for ${PROVIDER_KEY_VARS.length} known variable names and key-shaped values.`,
+        },
+  );
+
+  checks.push(
+    names('virtual')
+      ? {
+          id: 'virtual-keys.env',
+          status: 'warn',
+          title: 'Another virtual key is in the environment',
+          detail: `${names('virtual')}. Doctor checks the caps of BRAKE_KEY only; the workload may use this one instead.`,
+          fix: 'Give the workload one virtual key.',
+        }
+      : {
+          id: 'virtual-keys.env',
+          status: 'pass',
+          title: 'No other virtual keys in the environment',
+        },
+  );
+
+  const scan = dotenvFiles(cwd);
+  const files = scan.files.map(({ file, vars }) => ({
+    file,
+    found: vars
+      .map(([k, v]) => classify(k, v, cfg.key, true))
+      .filter((f): f is Found => f !== null),
+  }));
+  const hits = files.filter((f) => f.found.length > 0);
+  const severe = hits.some((f) => f.found.some((x) => x.kind !== 'virtual'));
+  const notRead = scan.skipped.length
+    ? ` Not read (over ${MAX_DOTENV_BYTES / 1_000_000} MB): ${scan.skipped.join(', ')}.`
+    : '';
+  checks.push(
+    hits.length
+      ? {
+          id: 'files.cwd',
+          status: severe ? 'fail' : 'warn',
+          title: 'Secrets in .env files the workload can read',
+          detail:
+            hits
+              .map((h) => `${h.file}: ${h.found.map((x) => `${x.name} (${x.what})`).join(', ')}`)
+              .join('; ') + notRead,
+          fix: 'Move the secrets out of the workspace the agent works in.',
+        }
+      : scan.skipped.length
+        ? {
+            id: 'files.cwd',
+            status: 'unknown',
+            title: 'Some .env files in the working directory were not checked',
+            detail: `Looked at ${plural(files.length, 'file')} in ${cwd}.${notRead}`,
+          }
+        : {
+            id: 'files.cwd',
+            status: 'pass',
+            title: 'No secrets in .env files in the working directory',
+            detail: `Looked at ${plural(files.length, 'file')} in ${cwd} (not subfolders).`,
+          },
+  );
+
+  for (const [name, url] of [
+    ['proxy', cfg.proxyUrl],
+    ['admin API', cfg.apiUrl],
+  ] as const) {
+    let host = '';
+    try {
+      const u = new URL(url);
+      host = u.protocol === 'http:' ? u.hostname : '';
+    } catch {
+      // reported by the reachability check
+    }
+    if (host && !['localhost', '127.0.0.1', '[::1]', '::1'].includes(host)) {
+      checks.push({
+        id: 'transport.tls',
+        status: 'warn',
+        title: `The ${name} URL is plain HTTP`,
+        detail: `${url}: the virtual key travels unencrypted.`,
+        fix: 'Use https://, or reach the service over a private network only.',
+      });
+    }
+  }
+  return checks;
+}
+
+/** Every request doctor makes, and its body, gets this long before it is reported as unanswered. */
+const TIMEOUT_MS = 10_000;
+
+async function ready(io: Io, base: string): Promise<{ ok: boolean; detail: string }> {
+  try {
+    const res = await io.fetch(`${base}/readyz`);
+    const body = await res.text();
+    return {
+      ok: res.ok,
+      detail: `${base}/readyz answered HTTP ${res.status} ${body.slice(0, 200)}`,
+    };
+  } catch (err) {
+    return { ok: false, detail: `cannot reach ${base}: ${(err as Error).message}` };
+  }
+}
+
+/** A cheap priced request per provider, refused by a $0 cap before the provider is called. */
+const PROBES: Record<string, ProxyRequest> = {
+  tavily: {
+    method: 'POST',
+    path: '/tavily/search',
+    body: { query: 'spend brake doctor probe', search_depth: 'basic', max_results: 1 },
+  },
+  exa: {
+    method: 'POST',
+    path: '/exa/search',
+    body: { query: 'spend brake doctor probe', type: 'lite', numResults: 1 },
+  },
+  brave: { method: 'GET', path: '/brave/res/v1/web/search', query: { q: 'spend brake' } },
+  serpapi: {
+    method: 'GET',
+    path: '/serpapi/search.json',
+    query: { engine: 'google', q: 'spend brake' },
+  },
+  'google-maps': {
+    method: 'GET',
+    path: '/google-maps/maps/api/geocode/json',
+    query: { address: 'Sofia' },
+  },
+};
+
+/**
+ * Mint a $0 session from the key and send one priced request with it: the proxy must refuse it
+ * with budget_exceeded, before it loads the credential or contacts the provider.
+ */
+async function prove(io: Io, me: Me | null): Promise<Check> {
+  const id = 'enforcement.exhausted-budget';
+  const title = 'An exhausted budget stops forwarding';
+  const cfg = config(io);
+  if (!me) return { id, status: 'unknown', title, detail: 'The key could not be checked.' };
+  if (me.sessionId) {
+    return {
+      id,
+      status: 'unknown',
+      title,
+      detail: 'This is a session key, and session keys cannot mint the $0 probe session.',
+      fix: 'Run `brake doctor --prove` with the parent key.',
+    };
+  }
+  if (me.policy && !me.policy.canMintSessions) {
+    return {
+      id,
+      status: 'unknown',
+      title,
+      detail: 'The key may not mint sessions, so doctor cannot make a $0 budget to test.',
+      fix: 'Run `brake doctor --prove` with a key created with --can-mint-sessions.',
+    };
+  }
+  const providers = (me.policy?.providers ?? Object.keys(PROBES)).filter((p) => p in PROBES);
+  if (providers.length === 0) {
+    return {
+      id,
+      status: 'unknown',
+      title,
+      detail: `Doctor has a probe for ${Object.keys(PROBES).join(', ')}; this key calls none of them.`,
+    };
+  }
+
+  let res: Response;
+  let minted: { keyId?: string; token?: string; message?: string };
+  try {
+    res = await io.fetch(`${cfg.apiUrl}/v1/sessions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-brake-key': cfg.key! },
+      body: JSON.stringify({
+        budgetMicros: '0',
+        dayBudgetMicros: '0',
+        agentId: 'brake-doctor',
+        ttlSec: 60,
+        name: 'brake doctor probe',
+      }),
+    });
+    minted = (await res.json().catch(() => ({}))) as typeof minted;
+  } catch (err) {
+    return {
+      id,
+      status: 'unknown',
+      title,
+      detail: `Could not mint the $0 probe session: ${(err as Error).message}`,
+    };
+  }
+  if (res.status !== 201 || !minted.token || !minted.keyId) {
+    return {
+      id,
+      status: 'unknown',
+      title,
+      detail: `Could not mint the $0 probe session: ${minted.message ?? `HTTP ${res.status}`}`,
+    };
+  }
+
+  const probeIo: Io = {
+    ...io,
+    env: { ...io.env, BRAKE_KEY: minted.token, BRAKE_SESSION: undefined },
+  };
+  let result: Check | null = null;
+  try {
+    for (const p of providers) {
+      let r;
+      try {
+        r = await proxyCall(probeIo, PROBES[p]!);
+      } catch (err) {
+        result = {
+          id,
+          status: 'unknown',
+          title,
+          detail: `The ${p} probe did not get an answer: ${(err as Error).message}`,
+        };
+        break;
+      }
+      const e = (r.data ?? {}) as { error?: string };
+      // Not this key's provider, or not one this proxy serves: try the next.
+      if (r.status === 403 && e.error === 'sku_not_allowed') continue;
+      if (r.status === 404 && e.error === 'unknown_route') continue;
+      if (r.costMicros !== null && r.costMicros > 0) {
+        result = {
+          id,
+          status: 'fail',
+          title,
+          detail: `The proxy charged ${r.cost} for a priced ${p} request on a $0 session (HTTP ${r.status}).`,
+          fix: 'Report this: caps are not being enforced on this install.',
+        };
+      } else if (r.status === 402 && e.error === 'budget_exceeded') {
+        result = {
+          id,
+          status: 'pass',
+          title,
+          detail: `A priced ${p} request on a $0 session was refused before forwarding (402 budget_exceeded, cost $0, request ${r.requestId ?? 'unknown'}).`,
+        };
+      } else if (r.ok) {
+        result = {
+          id,
+          status: 'fail',
+          title,
+          detail: `The proxy FORWARDED a priced ${p} request on a $0 session (HTTP ${r.status}, cost ${r.cost ?? 'unknown'}).`,
+          fix: 'Report this: caps are not being enforced on this install.',
+        };
+      } else {
+        result = {
+          id,
+          status: 'unknown',
+          title,
+          detail:
+            `The ${p} probe got HTTP ${r.status} ${e.error ?? ''}, not a budget refusal.`.trim(),
+        };
+      }
+      break;
+    }
+  } finally {
+    let end: { spentMicros?: number } = {};
+    try {
+      const r = await io.fetch(`${cfg.apiUrl}/v1/sessions/${minted.keyId}`, {
+        method: 'DELETE',
+        headers: { 'x-brake-key': minted.token },
+      });
+      end = (await r.json()) as { spentMicros?: number };
+    } catch {
+      // the session expires in 60 s anyway
+    }
+    if (end.spentMicros) {
+      result = {
+        id,
+        status: 'fail',
+        title,
+        detail: `The $0 probe session spent ${microsToUsd(end.spentMicros)}.`,
+        fix: 'Report this: caps are not being enforced on this install.',
+      };
+    }
+  }
+  return (
+    result ?? {
+      id,
+      status: 'unknown',
+      title,
+      detail: 'The key may not call any provider doctor has a probe for.',
+    }
+  );
+}
+
+/** Checks against the running proxy and API, from the key's point of view. */
+export async function remoteChecks(
+  io: Io,
+  opts: { prove: boolean },
+): Promise<{ checks: Check[]; me: Me | null }> {
+  const cfg = config(io);
+  const checks: Check[] = [];
+  const proxy = await ready(io, cfg.proxyUrl);
+  const api = await ready(io, cfg.apiUrl);
+  checks.push(
+    {
+      id: 'proxy.reachable',
+      status: proxy.ok ? 'pass' : 'fail',
+      title: 'The proxy is ready',
+      detail: proxy.detail,
+    },
+    {
+      id: 'api.reachable',
+      status: api.ok ? 'pass' : 'fail',
+      title: 'The admin API is ready',
+      detail: api.detail,
+    },
+  );
+  if (!cfg.key) return { checks, me: null };
+  if (!api.ok) {
+    checks.push({
+      id: 'key.valid',
+      status: 'unknown',
+      title: 'Could not check BRAKE_KEY',
+      detail: 'The admin API is not ready, so the key, its caps and its policy were not checked.',
+    });
+    return { checks, me: null };
+  }
+
+  let me: Me | null = null;
+  try {
+    const res = await io.fetch(`${cfg.apiUrl}/v1/me`, { headers: keyHeaders(cfg) });
+    if (res.ok) me = (await res.json()) as Me;
+    else if (res.status === 401 || res.status === 403)
+      checks.push({
+        id: 'key.valid',
+        status: 'fail',
+        title: 'BRAKE_KEY is not a working key',
+        detail: `GET /v1/me answered HTTP ${res.status}: the key is unknown, revoked, expired or not allowed from this IP.`,
+      });
+    else
+      checks.push({
+        id: 'key.valid',
+        status: 'unknown',
+        title: 'Could not check BRAKE_KEY',
+        detail: `GET /v1/me answered HTTP ${res.status}; the key, its caps and its policy were not checked.`,
+      });
+  } catch (err) {
+    checks.push({
+      id: 'key.valid',
+      status: 'unknown',
+      title: 'Could not check BRAKE_KEY',
+      detail: (err as Error).message,
+    });
+  }
+  if (!me) return { checks, me };
+
+  checks.push({
+    id: 'key.valid',
+    status: 'pass',
+    title: 'BRAKE_KEY works',
+    detail: `Key ${me.keyId}${me.sessionId ? `, session ${me.sessionId}` : ''}.`,
+  });
+  checks.push(
+    me.killed
+      ? {
+          id: 'key.killed',
+          status: 'fail',
+          title: 'Spending is switched off for this key',
+          detail: 'The key, its parent, its session or the org is killed: every call is refused.',
+          fix: 'Expected after a kill; resume it with `brake unkill` when ready.',
+        }
+      : { id: 'key.killed', status: 'pass', title: 'Spending is switched on' },
+  );
+  // A session the client names (X-Brake-Session) is no limit: the client can pick a fresh name,
+  // or send none. Only a session key's own session binds it.
+  const named = (s: Me['scopes'][number]) => !me.sessionId && s.scope.startsWith('sess:');
+  const capped = me.scopes.filter((s) => s.hard !== null && !named(s));
+  const namedOnly = !capped.length && me.scopes.some((s) => s.hard !== null && named(s));
+  checks.push(
+    capped.length
+      ? {
+          id: 'key.capped',
+          status: 'pass',
+          title: 'A hard cap applies to this key',
+          detail: capped
+            .map(
+              (s) =>
+                `${s.scope} ${s.window}: cap ${microsToUsd(s.hard!, 2)}, remaining ${microsToUsd(s.remaining ?? 0, 2)}`,
+            )
+            .join('; '),
+        }
+      : namedOnly
+        ? {
+            id: 'key.capped',
+            status: 'fail',
+            title: 'Only a per-session budget caps this key, and the client names the session',
+            detail:
+              'A client can send a new X-Brake-Session for a fresh budget each time, or none, so nothing bounds its total. An org cap may exist, but a key cannot read it.',
+            fix: 'Cap the key itself: `brake caps set key:<id> --day 5 --month 50`, or give the workload session keys (`brake session`).',
+          }
+        : {
+            id: 'key.capped',
+            status: 'fail',
+            title: 'No cap that doctor can see applies to this key',
+            detail:
+              'The key, its session, its parent and its agent have no hard cap. An org cap may exist, but a key cannot read it.',
+            fix: 'Set a cap: `brake caps set key:<id> --day 5`, or run the workload in `brake session`.',
+          },
+  );
+
+  const p = me.policy;
+  if (!p) {
+    checks.push({
+      id: 'key.policy',
+      status: 'unknown',
+      title: "The server does not report the key's policy",
+      detail: 'Providers, unpriced-route policy, expiry and fail-open could not be checked.',
+      fix: 'Upgrade the Spend Brake server to 0.3.0 or later.',
+    });
+  } else {
+    if (!me.sessionId && p.expiresAt === null) {
+      checks.push({
+        id: 'key.expiry',
+        status: 'warn',
+        title: 'The key never expires',
+        detail: 'A leaked key keeps working until someone revokes it.',
+        fix: 'Give agents session keys (`brake session`) or keys with an expiry.',
+      });
+    }
+    if (p.failOpenMicros) {
+      checks.push({
+        id: 'key.fail-open',
+        status: 'warn',
+        title: 'The key fails open',
+        detail: `While the budget store is down, the proxy forwards up to ${microsToUsd(p.failOpenMicros, 2)} a day for it without checking caps.`,
+        fix: 'Set failOpenMicros to null for agent keys.',
+      });
+    }
+    checks.push({
+      id: 'providers.scope',
+      status: p.providers.length > 5 ? 'warn' : 'pass',
+      title: `The key may call ${plural(p.providers.length, 'provider')}`,
+      detail: p.providers.join(', ') || 'none',
+      ...(p.providers.length > 5
+        ? { fix: 'Give the workload a key with only the providers it needs.' }
+        : {}),
+    });
+    if (p.skus) {
+      checks.push({
+        id: 'providers.skus',
+        status: 'pass',
+        title: 'The key is limited to some SKUs',
+        detail: p.skus.join(', '),
+      });
+    }
+    // The proxy forwards an unpriced route only with a default price; without one it refuses.
+    const open = Object.entries(p.unpriced).filter(
+      ([, u]) => u.policy !== 'deny' && u.defaultPriceMicros !== null,
+    );
+    const free = open.filter(([, u]) => u.defaultPriceMicros === 0);
+    const priced = open.filter(([, u]) => u.defaultPriceMicros !== 0);
+    if (free.length) {
+      checks.push({
+        id: 'providers.unpriced-free',
+        status: 'fail',
+        title: 'Unpriced routes cost nothing against the caps',
+        detail: `${free.map(([prov]) => prov).join(', ')}: unpriced calls are charged $0, so until a cap is already used up they are forwarded without limit.`,
+        fix: 'Set unpricedPolicy to deny, or a defaultPriceMicros above what the provider charges (PUT /v1/org).',
+      });
+    }
+    if (priced.length) {
+      checks.push({
+        id: 'providers.unpriced',
+        status: 'warn',
+        title: 'Unpriced routes are forwarded for some providers',
+        detail: priced
+          .map(
+            ([prov, u]) =>
+              `${prov}: charged ${microsToUsd(u.defaultPriceMicros!)} a call, which may be less than the provider bills`,
+          )
+          .join('; '),
+        fix: 'Set unpricedPolicy to deny for these providers (PUT /v1/org).',
+      });
+    }
+    if (!open.length) {
+      checks.push({
+        id: 'providers.unpriced',
+        status: 'pass',
+        title: 'Routes with no known price are refused',
+      });
+    }
+  }
+
+  if (opts.prove) {
+    checks.push(
+      proxy.ok
+        ? await prove(io, me)
+        : {
+            id: 'enforcement.exhausted-budget',
+            status: 'unknown',
+            title: 'An exhausted budget stops forwarding',
+            detail:
+              'Skipped: the proxy is not ready, and a fail-open key may forward while it is degraded.',
+          },
+    );
+  }
+  return { checks, me };
+}
+
+const LABEL: Record<Status, string> = { pass: 'ok  ', warn: 'WARN', fail: 'FAIL', unknown: '??  ' };
+
+export function doctorCommand(program: Command, io: Io, done: (code: number) => void): void {
+  program
+    .command('doctor')
+    .description(
+      'Check what can let this workload spend past its caps; run it where the agent runs',
+    )
+    .option(
+      '--prove',
+      'mint a $0 session and show the proxy refuses a priced call (spends nothing)',
+    )
+    .option('--pretty', 'human-readable output instead of JSON')
+    .action(async (o: { prove?: boolean }, cmd: Command) => {
+      const pretty = Boolean(cmd.optsWithGlobals<{ pretty?: boolean }>().pretty);
+      const local = localChecks(io, io.cwd?.() ?? process.cwd());
+      const { checks: remote } = await remoteChecks(withTimeout(io, TIMEOUT_MS), {
+        prove: Boolean(o.prove),
+      });
+      const checks = [...local, ...remote];
+      const summary = { pass: 0, warn: 0, fail: 0, unknown: 0 };
+      for (const c of checks) summary[c.status]++;
+      const ok = summary.fail === 0;
+      if (!pretty) {
+        io.stdout(`${JSON.stringify({ ok, summary, checks, notVerified: NOT_VERIFIED })}\n`);
+      } else {
+        const lines = [
+          `brake doctor: ${summary.fail} failed, ${plural(summary.warn, 'warning')}, ${summary.pass} passed, ${summary.unknown} could not be checked`,
+          '',
+        ];
+        for (const c of checks) {
+          lines.push(`${LABEL[c.status]}  ${c.title}`);
+          if (c.detail && c.status !== 'pass') lines.push(`      ${c.detail}`);
+          if (c.fix && c.status !== 'pass') lines.push(`      fix: ${c.fix}`);
+        }
+        lines.push('', 'Not verified (doctor cannot see these):');
+        for (const n of NOT_VERIFIED) lines.push(`  - ${n}`);
+        lines.push(
+          '',
+          ok
+            ? 'No failed checks in what doctor can verify. This is not a guarantee that every spend is capped.'
+            : 'Fix the failed checks above; until then doctor cannot vouch for this workload.',
+        );
+        io.stdout(`${lines.join('\n')}\n`);
+      }
+      done(ok ? EXIT.ok : EXIT.error);
+    });
+}

@@ -4,10 +4,9 @@ import {
   EXIT,
   type Io,
   config,
-  configPath,
   durationSec,
   microsToUsd,
-  readSavedConfig,
+  savedConfigs,
   usdToMicros,
 } from '../io.js';
 
@@ -91,9 +90,10 @@ export function sessionCommand(
           );
         }
 
-        if (readSavedConfig(io).adminToken) {
+        // The default path too: another XDG_CONFIG_HOME hides it from brake, not from the agent.
+        for (const { path } of savedConfigs(io).found.filter((c) => c.cfg.adminToken)) {
           io.stderr(
-            `brake: warning: ${configPath(io)} holds an admin token the command can read. Run agents as another user (or with XDG_CONFIG_HOME elsewhere) so they cannot lift their own caps.\n`,
+            `brake: warning: ${path} holds an admin token the command can read. Run agents as another OS user so they cannot lift their own caps.\n`,
           );
         }
 

@@ -4,11 +4,8 @@ Hard dollar caps for every paid API your agents touch, from the shell. Coding ag
 shell commands, so a capped command needs no extra protocol.
 
 ```sh
-pnpm install && pnpm --filter @spend-brake/cli build   # from the repo root
-node apps/cli/dist/brake.cjs --help                   # or the single executable: dist/brake
+npx @spend-brake/cli --help        # or: npm install -g @spend-brake/cli
 ```
-
-Build it from source for now; a published package (`npx @spend-brake/cli`) is coming.
 
 ## Agent sessions
 
@@ -33,6 +30,37 @@ summary (`{"brakeSession":{"spent":"$0.0120",...}}`) on stderr. The exit code is
 - The session key expires after `--ttl` (default 12 h) even if `brake` is killed.
 
 Minting needs `BRAKE_KEY` with `canMintSessions`, or `BRAKE_ADMIN_TOKEN` plus `--parent-key <id>`.
+
+## Check a workload
+
+```sh
+brake session -- brake doctor --pretty   # run where the agent runs
+brake doctor --prove                     # a $0 session must stop a priced call; spends nothing
+```
+
+`brake doctor` fails on an uncapped, killed or revoked key, an admin token the workload can
+read, and raw provider keys in the environment or `./.env*` files; it warns on fail-open keys,
+plain HTTP, keys that never expire and forwarded unpriced routes. It always lists what it cannot
+verify.
+
+## MCP server (preview)
+
+`brake mcp` is a stdio MCP server with capped `tavily_search` and `exa_search` tools and a
+read-only `brake_budget` tool, also published on its own as
+[`@spend-brake/mcp`](https://www.npmjs.com/package/@spend-brake/mcp). Replace a Tavily or Exa MCP
+server entry with:
+
+```json
+{
+  "command": "npx",
+  "args": ["-y", "@spend-brake/mcp"],
+  "env": {
+    "BRAKE_KEY": "sb_live_…",
+    "BRAKE_URL": "https://proxy.spendbrake.dev",
+    "BRAKE_API_URL": "https://app.spendbrake.dev"
+  }
+}
+```
 
 ## Capped calls
 

@@ -84,7 +84,70 @@ the org settings (`loop` in `PUT /v1/org`: `identical`, `windowSec`, `perMinute`
 
 ## Keep the admin token away from the agent
 
-Run the agent as a different OS user than the one that ran `brake init` (or with
-`XDG_CONFIG_HOME` pointing elsewhere). The agent must not be able to read the saved admin token
-in `~/.config/brake/config.json`, or it could lift its own caps. `brake session` warns when it
-can.
+Run the agent as a different OS user than the one that ran `brake init`. The agent must not be
+able to read the saved admin token in `~/.config/brake/config.json`, or it could lift its own
+caps. Pointing `XDG_CONFIG_HOME` elsewhere is not enough: it hides the file from `brake`, not from
+an agent running as the same user. `brake session` warns when the agent can read the token.
+
+## Check the workload with brake doctor
+
+A cap only holds for the calls that go through the proxy with a capped key. `brake doctor`
+looks for the usual ways around that, from the agent's own point of view, so run it as the
+agent's user, in its working directory and environment:
+
+```sh
+brake session -- brake doctor --pretty     # what a session hands the agent
+brake doctor --prove --pretty              # with a key that may mint sessions
+```
+
+It fails on a missing, revoked, killed or uncapped key (a budget per `X-Brake-Session` alone is
+no cap: the client names the session, so it can start a fresh one), unpriced routes charged $0,
+an admin token the agent can read (in the environment or the saved config), and raw provider
+keys (`TAVILY_API_KEY`, `AIza…`, …) in the environment or in `./.env*` files, which let the
+agent call the provider directly; placeholders such as `your_key_here` are skipped. It warns
+on a second virtual key, plain HTTP to a remote host, fail-open keys, keys that never expire,
+keys with many providers, and providers whose unpriced routes are forwarded at a default price.
+Secrets are named, never printed.
+
+`--prove` mints a $0, 60-second session from the key and sends one priced request with it. The
+proxy must refuse it with `402 budget_exceeded` before it contacts the provider; the session is
+then ended, having spent nothing. Such a session does not count toward a plan's agent sessions,
+so `--prove` can run on every deploy. The repository runs the same probe against a counting
+mock provider and checks it receives no request (`apps/cli/test/e2e.test.ts`).
+
+Doctor exits 1 when a check fails. A clean report is not a guarantee: it always lists what a
+client cannot see, such as HTTP clients that skip the proxy, credentials kept elsewhere, the
+org-wide cap, and network egress. Blocking the providers' own hosts at the firewall is what
+makes the proxy the only way out.
+
+## MCP clients (preview)
+
+Agents that search through an MCP server can use Spend Brake's,
+[`@spend-brake/mcp`](https://www.npmjs.com/package/@spend-brake/mcp), instead of the Tavily or Exa
+server. It offers `tavily_search`, `exa_search` and a read-only `brake_budget`, and sends every
+search through the proxy with the virtual key, so the provider key never reaches the agent.
+Replace the existing entry:
+
+```json
+{
+  "mcpServers": {
+    "search": {
+      "command": "npx",
+      "args": ["-y", "@spend-brake/mcp"],
+      "env": {
+        "BRAKE_KEY": "sb_live_…",
+        "BRAKE_URL": "https://proxy.spendbrake.dev",
+        "BRAKE_API_URL": "https://app.spendbrake.dev"
+      }
+    }
+  }
+}
+```
+
+and remove `TAVILY_API_KEY` / `EXA_API_KEY` from the agent's configuration. For a budget per
+MCP connection, start it in a session: `"args": ["-y", "@spend-brake/cli", "session",
+"--budget", "2", "--", "npx", "-y", "@spend-brake/mcp"]`. `--tools tavily` (or `exa`)
+offers one provider only. With the CLI installed, `brake mcp` is the same server.
+
+Each result carries its `cost` and the `remaining` budget. When a cap stops a search the tool
+answers with an error that starts with `STOP.` and tells the model not to retry.
