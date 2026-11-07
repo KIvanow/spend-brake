@@ -1,7 +1,15 @@
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Command } from 'commander';
-import { EXIT, type Io, type SavedConfig, config, configPath, microsToUsd } from '../io.js';
+import {
+  EXIT,
+  type Io,
+  config,
+  keyHeaders,
+  microsToUsd,
+  savedConfigs,
+  withTimeout,
+} from '../io.js';
 import { type ProxyRequest, proxyCall } from '../proxy.js';
 
 type Status = 'pass' | 'warn' | 'fail' | 'unknown';
@@ -68,10 +76,14 @@ const PROVIDER_KEY_SHAPES: [string, RegExp][] = [
 
 type Found = { name: string; kind: 'admin' | 'provider' | 'virtual'; what: string };
 
+/** Example values (`.env.example`, docs): `your_tavily_api_key_here`, `tvly-xxxxxxxxxxxxxxxx`. */
+const PLACEHOLDER =
+  /your[_-]|[_-]here$|change[_-]?me|placeholder|example|dummy|redacted|^<.*>$|\.\.\.|(.)\1{7,}/i;
+
 /** Classify one variable without keeping its value. `strict` is for files: no placeholders. */
 function classify(name: string, value: string, key: string | undefined, strict: boolean) {
   const v = value.trim();
-  if (!v) return null;
+  if (!v || PLACEHOLDER.test(v)) return null;
   if (name === 'BRAKE_ADMIN_TOKEN' || ADMIN_TOKEN.test(v)) {
     return { name, kind: 'admin', what: 'admin token' } as Found;
   }
@@ -124,7 +136,7 @@ function dotenvFiles(dir: string): {
         continue;
       }
       const vars: [string, string][] = [];
-      for (const line of readFileSync(path, 'utf8').split('\n')) {
+      for (const line of readFileSync(path, 'utf8').split(/\r?\n/)) {
         const m = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/.exec(line);
         if (m) vars.push([m[1]!, dotenvValue(m[2]!)]);
       }
@@ -134,28 +146,6 @@ function dotenvFiles(dir: string): {
     }
   }
   return { files, skipped };
-}
-
-/**
- * Saved brake configs this user can read: the one brake would use now, and the default one,
- * which a different XDG_CONFIG_HOME hides from brake but not from the agent.
- */
-function savedConfigs(io: Io): { looked: string[]; found: { path: string; cfg: SavedConfig }[] } {
-  const paths = new Set<string>();
-  const current = configPath(io);
-  if (current) paths.add(current);
-  if (io.env.HOME) paths.add(join(io.env.HOME, '.config', 'brake', 'config.json'));
-  const found: { path: string; cfg: SavedConfig }[] = [];
-  for (const path of paths) {
-    try {
-      if (existsSync(path)) {
-        found.push({ path, cfg: JSON.parse(readFileSync(path, 'utf8')) as SavedConfig });
-      }
-    } catch {
-      // unreadable or not JSON: brake could not use it either
-    }
-  }
-  return { looked: [...paths], found };
 }
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -318,25 +308,6 @@ export function localChecks(io: Io, cwd: string): Check[] {
 
 /** Every request doctor makes, and its body, gets this long before it is reported as unanswered. */
 const TIMEOUT_MS = 10_000;
-
-export function withTimeout(io: Io, ms: number): Io {
-  return {
-    ...io,
-    fetch: (input: string | URL | Request, init?: RequestInit) =>
-      io.fetch(input, { ...init, signal: AbortSignal.timeout(ms) }),
-  };
-}
-
-/** The key, and the session it spends in when the client names one. */
-export function meHeaders(cfg: {
-  key: string | undefined;
-  session: string | undefined;
-}): Record<string, string> {
-  return {
-    'x-brake-key': cfg.key ?? '',
-    ...(cfg.session ? { 'x-brake-session': cfg.session } : {}),
-  };
-}
 
 async function ready(io: Io, base: string): Promise<{ ok: boolean; detail: string }> {
   try {
@@ -569,7 +540,7 @@ export async function remoteChecks(
 
   let me: Me | null = null;
   try {
-    const res = await io.fetch(`${cfg.apiUrl}/v1/me`, { headers: meHeaders(cfg) });
+    const res = await io.fetch(`${cfg.apiUrl}/v1/me`, { headers: keyHeaders(cfg) });
     if (res.ok) me = (await res.json()) as Me;
     else if (res.status === 401 || res.status === 403)
       checks.push({
@@ -612,7 +583,11 @@ export async function remoteChecks(
         }
       : { id: 'key.killed', status: 'pass', title: 'Spending is switched on' },
   );
-  const capped = me.scopes.filter((s) => s.hard !== null);
+  // A session the client names (X-Brake-Session) is no limit: the client can pick a fresh name,
+  // or send none. Only a session key's own session binds it.
+  const named = (s: Me['scopes'][number]) => !me.sessionId && s.scope.startsWith('sess:');
+  const capped = me.scopes.filter((s) => s.hard !== null && !named(s));
+  const namedOnly = !capped.length && me.scopes.some((s) => s.hard !== null && named(s));
   checks.push(
     capped.length
       ? {
@@ -626,14 +601,23 @@ export async function remoteChecks(
             )
             .join('; '),
         }
-      : {
-          id: 'key.capped',
-          status: 'fail',
-          title: 'No cap that doctor can see applies to this key',
-          detail:
-            'The key, its session, its parent and its agent have no hard cap. An org cap may exist, but a key cannot read it.',
-          fix: 'Set a cap: `brake caps set key:<id> --day 5`, or run the workload in `brake session`.',
-        },
+      : namedOnly
+        ? {
+            id: 'key.capped',
+            status: 'fail',
+            title: 'Only a per-session budget caps this key, and the client names the session',
+            detail:
+              'A client can send a new X-Brake-Session for a fresh budget each time, or none, so nothing bounds its total. An org cap may exist, but a key cannot read it.',
+            fix: 'Cap the key itself: `brake caps set key:<id> --day 5 --month 50`, or give the workload session keys (`brake session`).',
+          }
+        : {
+            id: 'key.capped',
+            status: 'fail',
+            title: 'No cap that doctor can see applies to this key',
+            detail:
+              'The key, its session, its parent and its agent have no hard cap. An org cap may exist, but a key cannot read it.',
+            fix: 'Set a cap: `brake caps set key:<id> --day 5`, or run the workload in `brake session`.',
+          },
   );
 
   const p = me.policy;
@@ -681,27 +665,42 @@ export async function remoteChecks(
         detail: p.skus.join(', '),
       });
     }
-    const open = Object.entries(p.unpriced).filter(([, u]) => u.policy !== 'deny');
-    checks.push(
-      open.length
-        ? {
-            id: 'providers.unpriced',
-            status: 'warn',
-            title: 'Unpriced routes are forwarded for some providers',
-            detail: open
-              .map(
-                ([prov, u]) =>
-                  `${prov}: billed at ${u.defaultPriceMicros === null ? 'no' : microsToUsd(u.defaultPriceMicros)} per call, which may be less than the provider charges`,
-              )
-              .join('; '),
-            fix: 'Set unpricedPolicy to deny for these providers (PUT /v1/org).',
-          }
-        : {
-            id: 'providers.unpriced',
-            status: 'pass',
-            title: 'Routes with no known price are refused',
-          },
+    // The proxy forwards an unpriced route only with a default price; without one it refuses.
+    const open = Object.entries(p.unpriced).filter(
+      ([, u]) => u.policy !== 'deny' && u.defaultPriceMicros !== null,
     );
+    const free = open.filter(([, u]) => u.defaultPriceMicros === 0);
+    const priced = open.filter(([, u]) => u.defaultPriceMicros !== 0);
+    if (free.length) {
+      checks.push({
+        id: 'providers.unpriced-free',
+        status: 'fail',
+        title: 'Unpriced routes cost nothing against the caps',
+        detail: `${free.map(([prov]) => prov).join(', ')}: unpriced calls are charged $0, so until a cap is already used up they are forwarded without limit.`,
+        fix: 'Set unpricedPolicy to deny, or a defaultPriceMicros above what the provider charges (PUT /v1/org).',
+      });
+    }
+    if (priced.length) {
+      checks.push({
+        id: 'providers.unpriced',
+        status: 'warn',
+        title: 'Unpriced routes are forwarded for some providers',
+        detail: priced
+          .map(
+            ([prov, u]) =>
+              `${prov}: charged ${microsToUsd(u.defaultPriceMicros!)} a call, which may be less than the provider bills`,
+          )
+          .join('; '),
+        fix: 'Set unpricedPolicy to deny for these providers (PUT /v1/org).',
+      });
+    }
+    if (!open.length) {
+      checks.push({
+        id: 'providers.unpriced',
+        status: 'pass',
+        title: 'Routes with no known price are refused',
+      });
+    }
   }
 
   if (opts.prove) {

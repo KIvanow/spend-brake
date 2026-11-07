@@ -1,14 +1,28 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { randomInt } from 'node:crypto';
+import { mkdirSync, mkdtempSync, rmSync, truncateSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
-import { dotenvValue, withTimeout } from '../src/commands/doctor.js';
-import { EXIT } from '../src/io.js';
+import { afterAll, describe, expect, it } from 'vitest';
+import { dotenvValue } from '../src/commands/doctor.js';
+import { EXIT, withTimeout } from '../src/io.js';
 import { run } from '../src/program.js';
 import { type Call, fake } from './fake.js';
 
-const KEY = `sb_live_${'k'.repeat(22)}`;
-const ADMIN = `sbt_${'a'.repeat(32)}`;
+const B62 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+/** Random like a real secret: doctor skips placeholders such as `xxxxxxxx`. */
+const rand = (n: number) => Array.from({ length: n }, () => B62[randomInt(62)]).join('');
+const KEY = `sb_live_${rand(22)}`;
+const ADMIN = `sbt_${rand(32)}`;
+
+const dirs: string[] = [];
+const tmp = (prefix: string) => {
+  const d = mkdtempSync(join(tmpdir(), prefix));
+  dirs.push(d);
+  return d;
+};
+afterAll(() => {
+  for (const d of dirs) rmSync(d, { recursive: true, force: true });
+});
 
 const me = (over: Record<string, unknown> = {}, policy: Record<string, unknown> | null = {}) => ({
   keyId: 'key_1',
@@ -56,8 +70,8 @@ async function doctor(
   respond: Responder,
   opts: { args?: string[]; cwd?: string; home?: string } = {},
 ) {
-  const home = opts.home ?? mkdtempSync(join(tmpdir(), 'brake-doctor-'));
-  const cwd = opts.cwd ?? mkdtempSync(join(tmpdir(), 'brake-doctor-cwd-'));
+  const home = opts.home ?? tmp('brake-doctor-');
+  const cwd = opts.cwd ?? tmp('brake-doctor-cwd-');
   const f = fake(
     {
       BRAKE_URL: 'https://proxy',
@@ -103,26 +117,29 @@ describe('brake doctor', () => {
   });
 
   it('finds cap-raising and bypass credentials without printing them', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'brake-doctor-'));
+    const home = tmp('brake-doctor-');
     mkdirSync(join(home, '.config', 'brake'), { recursive: true });
     writeFileSync(
       join(home, '.config', 'brake', 'config.json'),
       JSON.stringify({ adminToken: ADMIN }),
     );
-    const cwd = mkdtempSync(join(tmpdir(), 'brake-doctor-cwd-'));
+    const cwd = tmp('brake-doctor-cwd-');
     writeFileSync(
       join(cwd, '.env.local'),
       `# keys\nexport EXA_API_KEY="0123456789abcdef0123"\nNOTE=hello\n`,
     );
-    writeFileSync(join(cwd, '.env.example'), 'TAVILY_API_KEY=your-key-here\n');
-    const tavily = `tvly-${'x'.repeat(24)}`;
+    writeFileSync(
+      join(cwd, '.env.example'),
+      'TAVILY_API_KEY=your_tavily_api_key_here\nSEARCH=tvly-xxxxxxxxxxxxxxxx\nEXA_API_KEY=<exa key>\n',
+    );
+    const tavily = `tvly-${rand(24)}`;
     const d = await doctor(
       {
         BRAKE_KEY: KEY,
         SOME_TOKEN: ADMIN,
         SEARCH: tavily,
         GOOGLE_MAPS_KEY: 'whatever',
-        OTHER_KEY: `sb_live_${'o'.repeat(22)}`,
+        OTHER_KEY: `sb_live_${rand(22)}`,
       },
       healthy(me()),
       { home, cwd },
@@ -198,7 +215,7 @@ describe('brake doctor', () => {
     const minting = me({}, { canMintSessions: true, providers: ['google-maps', 'tavily'] });
     const session = {
       status: 201,
-      body: { keyId: 'key_probe', token: `sb_live_${'p'.repeat(22)}` },
+      body: { keyId: 'key_probe', token: `sb_live_${rand(22)}` },
     };
 
     it('mints a $0 session, sees a priced call refused, and ends the session', async () => {
@@ -312,19 +329,21 @@ describe('brake doctor', () => {
   });
 
   it('finds a quoted key followed by a comment, and does not pass files it could not read', async () => {
-    const cwd = mkdtempSync(join(tmpdir(), 'brake-doctor-cwd-'));
+    const cwd = tmp('brake-doctor-cwd-');
     writeFileSync(join(cwd, '.env'), 'EXA_API_KEY="0123456789abcdef0123" # prod\n');
     const found = await doctor({ BRAKE_KEY: KEY }, healthy(me()), { cwd });
     expect(found.status('files.cwd')).toBe('fail');
 
-    const big = mkdtempSync(join(tmpdir(), 'brake-doctor-cwd-'));
-    writeFileSync(join(big, '.env.dump'), Buffer.alloc(10_000_001, 'a'));
+    const big = tmp('brake-doctor-cwd-');
+    // Sparse: the size is what counts, nothing is written.
+    writeFileSync(join(big, '.env.dump'), '');
+    truncateSync(join(big, '.env.dump'), 10_000_001);
     const skipped = await doctor({ BRAKE_KEY: KEY }, healthy(me()), { cwd: big });
     expect(skipped.status('files.cwd')).toBe('unknown');
   });
 
   it('finds the default saved config even when XDG_CONFIG_HOME points elsewhere', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'brake-doctor-'));
+    const home = tmp('brake-doctor-');
     mkdirSync(join(home, '.config', 'brake'), { recursive: true });
     writeFileSync(
       join(home, '.config', 'brake', 'config.json'),
@@ -352,6 +371,63 @@ describe('brake doctor', () => {
     const d = await doctor({ BRAKE_KEY: KEY, BRAKE_SESSION: 'run-7' }, healthy(me()));
     const meCall = d.f.calls.find((c) => c.url.endsWith('/v1/me'))!;
     expect(meCall.headers['x-brake-session']).toBe('run-7');
+  });
+
+  it('reads .env files with Windows line endings', async () => {
+    const cwd = tmp('brake-doctor-cwd-');
+    writeFileSync(join(cwd, '.env'), `NOTE=hi\r\nEXA_API_KEY=${rand(24)}\r\n`);
+    const d = await doctor({ BRAKE_KEY: KEY }, healthy(me()), { cwd });
+    expect(d.status('files.cwd')).toBe('fail');
+  });
+
+  it('does not count a session the client names as a cap on the key', async () => {
+    const sess = (id: string) => ({
+      scope: `sess:${id}`,
+      window: 'm:2026-11',
+      spent: 0,
+      held: 0,
+      hard: 2_000_000,
+      remaining: 2_000_000,
+    });
+    const named = await doctor(
+      { BRAKE_KEY: KEY, BRAKE_SESSION: 'run-7' },
+      healthy(me({ scopes: [sess('run-7')] })),
+    );
+    expect(named.status('key.capped')).toBe('fail');
+    expect(named.code).toBe(EXIT.error);
+    // A session key's own session does bind it.
+    const own = await doctor(
+      { BRAKE_KEY: KEY },
+      healthy(me({ sessionId: 'sess_1', scopes: [sess('sess_1')] })),
+    );
+    expect(own.status('key.capped')).toBe('pass');
+  });
+
+  it('fails unpriced routes charged $0, and passes ones the proxy refuses for want of a price', async () => {
+    const free = await doctor(
+      { BRAKE_KEY: KEY },
+      healthy(
+        me(
+          {},
+          { unpriced: { tavily: { policy: 'allow-with-default-price', defaultPriceMicros: 0 } } },
+        ),
+      ),
+    );
+    expect(free.status('providers.unpriced-free')).toBe('fail');
+    expect(free.code).toBe(EXIT.error);
+    const noPrice = await doctor(
+      { BRAKE_KEY: KEY },
+      healthy(
+        me(
+          {},
+          {
+            unpriced: { tavily: { policy: 'allow-with-default-price', defaultPriceMicros: null } },
+          },
+        ),
+      ),
+    );
+    expect(noPrice.status('providers.unpriced')).toBe('pass');
+    expect(noPrice.out).not.toContain('billed at no');
   });
 
   it('gives up on a request that does not answer in time', async () => {

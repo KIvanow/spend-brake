@@ -176,6 +176,32 @@ describe('GET /v1/me', () => {
     // Without a session budget the proxy refuses the header, so it is not a scope here either.
     expect((await me(await key(null))).scopes.some((s) => s.scope === 'sess:run-7')).toBe(false);
   });
+
+  it("shows a session's agent day cap before the first call creates it, as the proxy would", async () => {
+    const org = await newOrg(env);
+    const call = (url: string, payload: object) =>
+      env.app.inject({ method: 'POST', url, headers: bearer(org.admin), payload });
+    const cred = (
+      await call('/v1/providers/credentials', { provider: 'acme', name: 'c', secret: 's' })
+    ).json<{ id: string }>().id;
+    const parent = (await call('/v1/keys', { name: 'p', credentials: { acme: cred } })).json<{
+      id: string;
+    }>();
+    const session = (
+      await call('/v1/sessions', {
+        parentKeyId: parent.id,
+        budgetMicros: '3000000',
+        dayBudgetMicros: '1000000',
+        agentId: 'bot',
+      })
+    ).json<{ token: string }>();
+    const me = (
+      await env.app.inject({ url: '/v1/me', headers: { 'x-brake-key': session.token } })
+    ).json<{ scopes: { scope: string; window: string; hard: number | null }[] }>();
+    const agent = me.scopes.filter((s) => s.scope === 'agent:bot');
+    expect(agent.find((s) => s.window.startsWith('d:'))).toMatchObject({ hard: 1_000_000 });
+    expect(agent.find((s) => s.window.startsWith('m:'))).toMatchObject({ hard: null });
+  });
 });
 
 describe('Google key restriction check', () => {

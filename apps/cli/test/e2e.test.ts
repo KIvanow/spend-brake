@@ -106,7 +106,8 @@ function brake(args: string[], env: Record<string, string>, cwd?: string) {
     let stderr = '';
     child.stdout.on('data', (d: Buffer) => (stdout += d.toString()));
     child.stderr.on('data', (d: Buffer) => (stderr += d.toString()));
-    child.on('exit', (code) => resolve({ code: code ?? -1, stdout, stderr }));
+    // 'close', not 'exit': the output may still be arriving when the process exits.
+    child.on('close', (code) => resolve({ code: code ?? -1, stdout, stderr }));
   });
 }
 

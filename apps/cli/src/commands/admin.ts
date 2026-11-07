@@ -1,6 +1,6 @@
 import type { Command } from 'commander';
 import { apiCall, money, print } from '../admin.js';
-import { CliError, EXIT, type Io, config, usdToMicros } from '../io.js';
+import { CliError, EXIT, type Io, config, keyHeaders, usdToMicros } from '../io.js';
 
 const pretty = (cmd: Command) => Boolean(cmd.optsWithGlobals<{ pretty?: boolean }>().pretty);
 const leaf = (parent: Command, name: string) =>
@@ -305,7 +305,7 @@ export function adminCommands(program: Command, io: Io, done: (code: number) => 
       const cfg = config(io);
       let r: { scopes: Status[]; killed: unknown };
       if (cfg.key && !o.scope) {
-        r = await apiCall(io, 'GET', '/v1/me', undefined, { 'x-brake-key': cfg.key });
+        r = await apiCall(io, 'GET', '/v1/me', undefined, keyHeaders(cfg));
       } else {
         const q = (o.scope ?? []).map((s) => `scope=${encodeURIComponent(s)}`).join('&');
         r = await apiCall(io, 'GET', `/v1/status${q ? `?${q}` : ''}`);

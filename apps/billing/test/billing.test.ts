@@ -577,6 +577,28 @@ describe('sign-up and checkout', () => {
   });
 });
 
+describe('agent sessions', () => {
+  it('count toward the plan, except $0 probes of a minute (brake doctor --prove)', async () => {
+    const { ownerToken: t } = await signup('free', '203.0.113.78');
+    const cred = (await credential(t, 'mapbox')).json<{ id: string }>().id;
+    const parentKeyId = (await newKey(t, cred)).json<{ id: string }>().id;
+    const mint = (payload: object) =>
+      api.inject({
+        method: 'POST',
+        url: '/v1/sessions',
+        headers: bearer(t),
+        payload: { parentKeyId, ...payload },
+      });
+    const probe = { budgetMicros: '0', dayBudgetMicros: '0', ttlSec: 60 };
+    for (let i = 0; i < 20; i++)
+      expect((await mint({ budgetMicros: '1000' })).statusCode).toBe(201);
+    expect((await mint({ budgetMicros: '1000' })).json()).toMatchObject({ error: 'plan_limit' });
+    expect((await mint({ ...probe, ttlSec: 61 })).json()).toMatchObject({ error: 'plan_limit' });
+    expect((await mint(probe)).statusCode).toBe(201);
+    expect((await mint(probe)).statusCode).toBe(201);
+  });
+});
+
 describe('plan transitions', () => {
   it('moves through every plan, blocking only new resources on downgrade or failed payment', async () => {
     const { orgId, ownerToken } = await signup();

@@ -1,6 +1,6 @@
 import { createInterface } from 'node:readline';
 import type { Command } from 'commander';
-import { CliError, EXIT, type Io, config, microsToUsd } from '../io.js';
+import { CliError, EXIT, type Io, config, keyHeaders, microsToUsd, withTimeout } from '../io.js';
 import { VERSION } from '../version.js';
 import { type ProxyRequest, proxyCall, refusal } from '../proxy.js';
 
@@ -42,7 +42,8 @@ function pick(args: Json, schema: Json): Json | string {
   }
   const out: Json = {};
   for (const [k, v] of Object.entries(args)) {
-    const p = props[k];
+    // Own properties only: `constructor` or `toString` are not arguments.
+    const p = Object.hasOwn(props, k) ? props[k] : undefined;
     if (!p) return `unknown argument ${k}`;
     if (p.type === 'string' && (typeof v !== 'string' || !v.trim()))
       return `${k} must be a non-empty string`;
@@ -185,6 +186,10 @@ interface Me {
   }[];
 }
 
+/** How long a tool call waits for an answer (and its body) before it reports one never came. */
+const SEARCH_TIMEOUT_MS = 60_000;
+const ME_TIMEOUT_MS = 10_000;
+
 const NO_KEY =
   'BRAKE_KEY is not set for this MCP server: add a Spend Brake virtual key to the "env" of its entry in the MCP configuration.';
 
@@ -193,11 +198,8 @@ async function budget(io: Io, structured: boolean): Promise<ToolResult> {
   if (!cfg.key) return text(NO_KEY, true);
   let me: Me;
   try {
-    const res = await io.fetch(`${cfg.apiUrl}/v1/me`, {
-      headers: {
-        'x-brake-key': cfg.key,
-        ...(cfg.session ? { 'x-brake-session': cfg.session } : {}),
-      },
+    const res = await withTimeout(io, ME_TIMEOUT_MS).fetch(`${cfg.apiUrl}/v1/me`, {
+      headers: keyHeaders(cfg),
     });
     if (res.status === 401 || res.status === 403) {
       return text(`The key was refused (HTTP ${res.status}): unknown, revoked or expired.`, true);
@@ -239,7 +241,7 @@ async function callTool(io: Io, tool: Tool, args: Json, structured: boolean): Pr
   if (!config(io).key) return text(NO_KEY, true);
   let r;
   try {
-    r = await proxyCall(io, req);
+    r = await proxyCall(withTimeout(io, SEARCH_TIMEOUT_MS), req);
   } catch (err) {
     return text(err instanceof CliError ? err.message : (err as Error).message, true);
   }
@@ -266,17 +268,13 @@ interface Message {
 export async function serveMcp(io: Io, tools: Tool[]): Promise<void> {
   if (!io.stdin) throw new CliError('brake mcp needs stdin');
   let structured = true;
-  const send = (m: Json) => io.stdout(`${JSON.stringify({ jsonrpc: '2.0', ...m })}\n`);
+  const reply = (m: Json): Json => ({ jsonrpc: '2.0', ...m });
   const fail = (id: Message['id'], code: number, message: string) =>
-    send({ id: id ?? null, error: { code, message } });
+    reply({ id: id ?? null, error: { code, message } });
+  const send = (m: Json | Json[]) => io.stdout(`${JSON.stringify(m)}\n`);
 
-  async function handle(line: string) {
-    let msg: Message;
-    try {
-      msg = JSON.parse(line) as Message;
-    } catch {
-      return fail(null, -32700, 'Parse error');
-    }
+  /** The answer to one message, or nothing for a notification. */
+  async function answer(msg: Message): Promise<Json | undefined> {
     if (typeof msg !== 'object' || msg === null || Array.isArray(msg)) {
       return fail(null, -32600, 'Invalid request');
     }
@@ -296,7 +294,7 @@ export async function serveMcp(io: Io, tools: Tool[]): Promise<void> {
             : PROTOCOL_VERSIONS[0]!;
         // structuredContent arrived in 2025-06-18.
         structured = version >= '2025-06-18';
-        return send({
+        return reply({
           id: msg.id,
           result: {
             protocolVersion: version,
@@ -311,9 +309,9 @@ export async function serveMcp(io: Io, tools: Tool[]): Promise<void> {
         });
       }
       case 'ping':
-        return send({ id: msg.id, result: {} });
+        return reply({ id: msg.id, result: {} });
       case 'tools/list':
-        return send({
+        return reply({
           id: msg.id,
           result: {
             tools: tools.map(({ name, description, inputSchema, annotations }) => ({
@@ -330,7 +328,10 @@ export async function serveMcp(io: Io, tools: Tool[]): Promise<void> {
         if (!tool) return fail(msg.id, -32602, `Unknown tool: ${String(params.name)}`);
         const args = params.arguments ?? {};
         if (typeof args !== 'object' || args === null || Array.isArray(args)) {
-          return send({ id: msg.id, result: text('Invalid arguments: expected an object.', true) });
+          return reply({
+            id: msg.id,
+            result: text('Invalid arguments: expected an object.', true),
+          });
         }
         let res: ToolResult;
         try {
@@ -339,11 +340,30 @@ export async function serveMcp(io: Io, tools: Tool[]): Promise<void> {
           // Answer the request whatever went wrong, so the client is never left waiting.
           return fail(msg.id, -32603, `Internal error: ${(err as Error).message}`);
         }
-        return send({ id: msg.id, result: res });
+        return reply({ id: msg.id, result: res });
       }
       default:
         return fail(msg.id, -32601, `Method not found: ${msg.method}`);
     }
+  }
+
+  async function handle(line: string) {
+    let msg: unknown;
+    try {
+      msg = JSON.parse(line);
+    } catch {
+      return send(fail(null, -32700, 'Parse error'));
+    }
+    if (!Array.isArray(msg)) {
+      const a = await answer(msg as Message);
+      return a && send(a);
+    }
+    // A batch (protocol 2025-03-26): one array of answers, none when all were notifications.
+    if (msg.length === 0) return send(fail(null, -32600, 'Invalid request'));
+    const answers = (await Promise.all(msg.map((m) => answer(m as Message)))).filter(
+      (a): a is Json => a !== undefined,
+    );
+    return answers.length ? send(answers) : undefined;
   }
 
   const pending = new Set<Promise<unknown>>();

@@ -1,12 +1,8 @@
-import type { Scope } from '@spend-brake/budget';
+import { SESSION_ID, type Scope, capTemplatesFor } from '@spend-brake/budget';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { type Ctx, n } from '../common.js';
 import { ApiError, type Router } from '../route.js';
-import { orgTimeZone } from './budget.js';
-
-/** The proxy's rule for X-Brake-Session. */
-const SESSION_ID = /^[A-Za-z0-9_.-]{1,128}$/;
 
 const scopeStatus = z.object({
   scope: z.string(),
@@ -91,10 +87,18 @@ export function meRoutes(app: FastifyInstance, router: Router, ctx: Ctx): void {
     if (namedSession) scopes.push({ kind: 'sess', id: namedSession });
     if (key.parentKeyId) scopes.push({ kind: 'key', id: key.parentKeyId });
     if (key.agentId) scopes.push({ kind: 'agent', id: key.agentId });
-    const tz = await orgTimeZone(ctx, key.orgId);
-    const status = await ctx.engine.status(key.orgId, scopes, tz, ctx.now());
-    const killed = await ctx.engine.killed(key.orgId);
-    const org = await ctx.registry.getOrg(key.orgId);
+    // The org record the proxy reads holds its time zone, so windows match the proxy's.
+    const [org, killed] = await Promise.all([
+      ctx.registry.getOrg(key.orgId),
+      ctx.engine.killed(key.orgId),
+    ]);
+    const status = await ctx.engine.status(
+      key.orgId,
+      scopes,
+      org?.timeZone ?? 'UTC',
+      ctx.now(),
+      capTemplatesFor(key, key.sessionId ?? namedSession),
+    );
     const providers = Object.keys(key.credentials).sort();
     const mine = [
       'org',
@@ -107,27 +111,14 @@ export function meRoutes(app: FastifyInstance, router: Router, ctx: Ctx): void {
       keyId: key.id,
       sessionId: key.sessionId,
       killed: killed.some((k) => mine.includes(k)),
-      scopes: status.map((s) => {
-        let { hard, remaining } = s;
-        if (
-          hard === null &&
-          namedSession &&
-          s.scope === `sess:${namedSession}` &&
-          s.window.startsWith('m:')
-        ) {
-          hard = BigInt(key.sessionCapMicros!);
-          const left = hard - s.spent - s.held;
-          remaining = left > 0n ? left : 0n;
-        }
-        return {
-          scope: s.scope,
-          window: s.window,
-          spent: Number(s.spent),
-          held: Number(s.held),
-          hard: n(hard),
-          remaining: n(remaining),
-        };
-      }),
+      scopes: status.map((s) => ({
+        scope: s.scope,
+        window: s.window,
+        spent: Number(s.spent),
+        held: Number(s.held),
+        hard: n(s.hard),
+        remaining: n(s.remaining),
+      })),
       policy: {
         providers,
         skus: key.skus,

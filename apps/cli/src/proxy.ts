@@ -1,4 +1,4 @@
-import { CliError, EXIT, type Io, config, microsToUsd } from './io.js';
+import { CliError, EXIT, type Io, config, keyHeaders, microsToUsd } from './io.js';
 
 export interface ProxyRequest {
   method: string;
@@ -36,8 +36,7 @@ export async function proxyCall(io: Io, req: ProxyRequest): Promise<ProxyResult>
   for (const [k, v] of Object.entries(req.headers ?? {})) {
     if (!k.toLowerCase().startsWith('x-brake-')) headers[k] = v;
   }
-  headers['x-brake-key'] = cfg.key;
-  if (cfg.session) headers['x-brake-session'] = cfg.session;
+  Object.assign(headers, keyHeaders(cfg));
   let body: string | undefined;
   if (req.body !== undefined) {
     body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);

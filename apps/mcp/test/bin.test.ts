@@ -15,7 +15,8 @@ it('serves MCP from the CLI without arguments', async () => {
   child.stdin.end(
     `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18' } })}\n`,
   );
-  await new Promise((resolve) => child.on('exit', resolve));
+  // 'close', not 'exit': the reply may still be in the pipe when the process exits.
+  await new Promise((resolve) => child.on('close', resolve));
   const reply = JSON.parse(out) as { result: { serverInfo: { name: string; version: string } } };
   expect(reply.result.serverInfo).toMatchObject({
     name: 'spend-brake',

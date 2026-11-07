@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
   BudgetEngine,
-  type CapTemplate,
   type Crossing,
   DEFAULT_LOOP_POLICY,
   DEFAULT_PUMPING_POLICY,
@@ -11,9 +10,11 @@ import {
   type PauseReason,
   Registry,
   type ReservationHandle,
+  SESSION_ID,
   type ScopeShare,
   type Scope,
   type ValkeyClient,
+  capTemplatesFor,
   isVirtualKey,
   scopeLabel,
   shareOf,
@@ -114,7 +115,6 @@ declare module 'fastify' {
 
 class KeyNotFound extends Error {}
 
-const SESSION_ID = /^[A-Za-z0-9_.-]{1,128}$/;
 /** Messaging destinations allowed when a key has no country list: high-risk ones need opting in. */
 const DEFAULT_COUNTRIES = ['US', 'CA'];
 const CONFIG_STALE_MS = 10 * 60_000;
@@ -798,17 +798,7 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
     ];
     if (session) killTargets.push({ kind: 'sess', id: session });
     if (key.parentKeyId) killTargets.push({ kind: 'key', id: key.parentKeyId });
-    const capTemplates: CapTemplate[] = [];
-    if (sessionScope && key.sessionCapMicros) {
-      capTemplates.push({ scope: sessionScope, kind: 'm', hard: BigInt(key.sessionCapMicros) });
-    }
-    if (key.agentId && key.agentDayCapMicros) {
-      capTemplates.push({
-        scope: { kind: 'agent', id: key.agentId },
-        kind: 'd',
-        hard: BigInt(key.agentDayCapMicros),
-      });
-    }
+    const capTemplates = capTemplatesFor(key, session ?? null);
 
     const reqId = request.id;
     let remaining: bigint | null = null;
