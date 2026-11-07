@@ -62,6 +62,9 @@ describe('brake mcp', () => {
     expect(m.code).toBe(EXIT.ok);
     // The notification gets no answer.
     expect(m.replies).toHaveLength(2);
+    expect(String(m.byId(1).result!.instructions)).toContain(
+      'do not switch to the other search tool',
+    );
     expect(m.byId(1).result).toMatchObject({
       protocolVersion: '2025-06-18',
       capabilities: { tools: {} },
@@ -211,7 +214,9 @@ describe('brake mcp', () => {
       env: { BRAKE_URL: 'http://proxy' },
     });
     expect(m.byId(2).result).toMatchObject({ isError: true });
-    expect(m.byId(2).result!.content![0]!.text).toContain('BRAKE_KEY is not set');
+    expect(m.byId(2).result!.content![0]!.text).toContain(
+      'add a Spend Brake virtual key to the "env" of its entry',
+    );
   });
 
   it('answers protocol errors and pings', async () => {
