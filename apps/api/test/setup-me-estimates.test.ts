@@ -107,6 +107,49 @@ describe('GET /v1/me', () => {
     ).toBe(401);
     expect((await env.app.inject({ url: '/v1/me' })).statusCode).toBe(401);
   });
+
+  it("shows a key its own policy and its providers' unpriced-route policy", async () => {
+    const org = await newOrg(env);
+    const call = (method: 'GET' | 'POST' | 'PUT', url: string, payload?: object) =>
+      env.app.inject({ method, url, headers: bearer(org.admin), ...(payload ? { payload } : {}) });
+    const cred = async (provider: string) =>
+      (await call('POST', '/v1/providers/credentials', { provider, name: 'c', secret: 's' })).json<{
+        id: string;
+      }>().id;
+    const [acme, zeta] = [await cred('acme'), await cred('zeta')];
+    const put = await env.app.inject({
+      method: 'PUT',
+      url: '/v1/org',
+      headers: bearer(org.owner),
+      payload: {
+        providers: {
+          acme: { unpricedPolicy: 'allow-with-default-price', defaultPriceMicros: 1000 },
+        },
+      },
+    });
+    expect(put.statusCode).toBe(200);
+    const key = (
+      await call('POST', '/v1/keys', {
+        name: 'k',
+        credentials: { acme, zeta },
+        canMintSessions: true,
+      })
+    ).json<{ token: string }>();
+    const me = await env.app.inject({ url: '/v1/me', headers: { 'x-brake-key': key.token } });
+    expect(me.json<{ policy: unknown }>().policy).toEqual({
+      providers: ['acme', 'zeta'],
+      skus: null,
+      canMintSessions: true,
+      expiresAt: null,
+      failOpenMicros: null,
+      unpriced: {
+        acme: { policy: 'allow-with-default-price', defaultPriceMicros: 1000 },
+        zeta: { policy: 'deny', defaultPriceMicros: null },
+      },
+    });
+    // Credential ids stay private.
+    expect(me.body).not.toContain(acme);
+  });
 });
 
 describe('Google key restriction check', () => {

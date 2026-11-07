@@ -14,9 +14,27 @@ const scopeStatus = z.object({
   remaining: z.number().nullable(),
 });
 
+const policyView = z.object({
+  /** Providers the key may call (no credential ids). */
+  providers: z.array(z.string()),
+  skus: z.array(z.string()).nullable(),
+  canMintSessions: z.boolean(),
+  expiresAt: z.string().nullable(),
+  failOpenMicros: z.number().nullable(),
+  /** The org's policy for routes with no known price, for each of the key's providers. */
+  unpriced: z.record(
+    z.string(),
+    z.object({
+      policy: z.enum(['deny', 'allow-with-default-price']),
+      defaultPriceMicros: z.number().nullable(),
+    }),
+  ),
+});
+
 /**
- * What an agent may know about its own key (`brake status` inside a session): remaining budget
- * for the key, its session, parent key and agent, today and this month.
+ * What an agent may know about its own key (`brake status` inside a session, `brake doctor`):
+ * remaining budget for the key, its session, parent key and agent, today and this month, and
+ * the key's own policy.
  */
 export function meRoutes(app: FastifyInstance, router: Router, ctx: Ctx): void {
   router.registry.registerPath({
@@ -34,6 +52,7 @@ export function meRoutes(app: FastifyInstance, router: Router, ctx: Ctx): void {
               sessionId: z.string().nullable(),
               killed: z.boolean(),
               scopes: z.array(scopeStatus),
+              policy: policyView,
             }),
           },
         },
@@ -59,6 +78,8 @@ export function meRoutes(app: FastifyInstance, router: Router, ctx: Ctx): void {
     const tz = await orgTimeZone(ctx, key.orgId);
     const status = await ctx.engine.status(key.orgId, scopes, tz, ctx.now());
     const killed = await ctx.engine.killed(key.orgId);
+    const org = await ctx.registry.getOrg(key.orgId);
+    const providers = Object.keys(key.credentials).sort();
     const mine = [
       'org',
       `key:${key.id}`,
@@ -77,6 +98,26 @@ export function meRoutes(app: FastifyInstance, router: Router, ctx: Ctx): void {
         hard: n(s.hard),
         remaining: n(s.remaining),
       })),
+      policy: {
+        providers,
+        skus: key.skus,
+        canMintSessions: key.canMintSessions,
+        expiresAt: key.expiresAt,
+        failOpenMicros: key.failOpenMicros === null ? null : Number(key.failOpenMicros),
+        unpriced: Object.fromEntries(
+          providers.map((p) => {
+            const o = org?.providers[p];
+            return [
+              p,
+              {
+                policy: o?.unpricedPolicy ?? 'deny',
+                defaultPriceMicros:
+                  o?.defaultPriceMicros === undefined ? null : Number(o.defaultPriceMicros),
+              },
+            ];
+          }),
+        ),
+      },
     };
   });
 }

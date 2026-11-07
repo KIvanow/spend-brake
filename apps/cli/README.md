@@ -34,6 +34,18 @@ summary (`{"brakeSession":{"spent":"$0.0120",...}}`) on stderr. The exit code is
 
 Minting needs `BRAKE_KEY` with `canMintSessions`, or `BRAKE_ADMIN_TOKEN` plus `--parent-key <id>`.
 
+## Check a workload
+
+```sh
+brake session -- brake doctor --pretty   # run where the agent runs
+brake doctor --prove                     # a $0 session must stop a priced call; spends nothing
+```
+
+`brake doctor` fails on an uncapped, killed or revoked key, an admin token the workload can
+read, and raw provider keys in the environment or `./.env*` files; it warns on fail-open keys,
+plain HTTP, keys that never expire and forwarded unpriced routes. It always lists what it cannot
+verify.
+
 ## Capped calls
 
 ```sh

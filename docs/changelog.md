@@ -12,6 +12,20 @@ images for linux/amd64 and linux/arm64
 (`ghcr.io/kivanow/spend-brake-<service>:<version>`, with build provenance) and the CLI
 (`@spend-brake/cli`).
 
+## [Unreleased]
+
+### Added
+
+- `brake doctor` checks, from where an agent runs, what could let it spend past its caps: a
+  missing or uncapped key, a readable admin token, raw provider keys in the environment or in
+  `./.env*` files, a second virtual key, plain HTTP, fail-open, keys that never expire, and
+  providers whose unpriced routes are forwarded. `--prove` mints a $0 session and shows that
+  the proxy refuses a priced call before forwarding it, spending nothing. Every report lists
+  what doctor cannot verify; it never reports a workload as protected.
+- `GET /v1/me` reports the key's own policy: its providers, SKUs, whether it may mint
+  sessions, its expiry, fail-open allowance, and the org's unpriced-route policy for each of
+  its providers.
+
 ## [0.2.1] - 2026-11-02
 
 ### Fixed

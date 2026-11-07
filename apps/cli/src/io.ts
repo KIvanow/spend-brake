@@ -9,6 +9,8 @@ export interface Io {
   stderr: (s: string) => void;
   fetch: typeof fetch;
   spawn: (cmd: string, args: string[], opts: SpawnOptions) => Child;
+  /** The working directory `brake doctor` scans. */
+  cwd?: () => string;
   /** Ask the user (init wizard); absent when not interactive. */
   prompt?: (question: string, opts?: { secret?: boolean; default?: string }) => Promise<string>;
 }

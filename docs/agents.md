@@ -88,3 +88,31 @@ Run the agent as a different OS user than the one that ran `brake init` (or with
 `XDG_CONFIG_HOME` pointing elsewhere). The agent must not be able to read the saved admin token
 in `~/.config/brake/config.json`, or it could lift its own caps. `brake session` warns when it
 can.
+
+## Check the workload with brake doctor
+
+A cap only holds for the calls that go through the proxy with a capped key. `brake doctor`
+looks for the usual ways around that, from the agent's own point of view, so run it as the
+agent's user, in its working directory and environment:
+
+```sh
+brake session -- brake doctor --pretty     # what a session hands the agent
+brake doctor --prove --pretty              # with a key that may mint sessions
+```
+
+It fails on a missing, revoked, killed or uncapped key, an admin token the agent can read (in
+the environment or the saved config), and raw provider keys (`TAVILY_API_KEY`, `AIza…`, …) in
+the environment or in `./.env*` files, which let the agent call the provider directly. It warns
+on a second virtual key, plain HTTP to a remote host, fail-open keys, keys that never expire,
+keys with many providers, and providers whose unpriced routes are forwarded at a default price.
+Secrets are named, never printed.
+
+`--prove` mints a $0, 60-second session from the key and sends one priced request with it. The
+proxy must refuse it with `402 budget_exceeded` before it contacts the provider; the session is
+then ended, having spent nothing. The repository runs the same probe against a counting mock
+provider and checks it receives no request (`apps/cli/test/e2e.test.ts`).
+
+Doctor exits 1 when a check fails. A clean report is not a guarantee: it always lists what a
+client cannot see, such as HTTP clients that skip the proxy, credentials kept elsewhere, the
+org-wide cap, and network egress. Blocking the providers' own hosts at the firewall is what
+makes the proxy the only way out.
