@@ -105,6 +105,16 @@ function subscriptionPlan(sub: Stripe.Subscription): { plan: Plan; status: 'acti
   }
 }
 
+/** A paid invoice whose license cannot be issued yet: the event is left for Stripe to retry. */
+export class LicenseNotIssued extends Error {
+  constructor(
+    readonly orgId: string,
+    reason: string,
+  ) {
+    super(`license not issued: ${reason}`);
+  }
+}
+
 /**
  * Apply one verified Stripe event. Each event id is applied once (Stripe retries and may send
  * an event twice): the id is recorded in the same transaction as its effects.
@@ -120,7 +130,35 @@ export async function applyEvent(deps: WebhookDeps, event: Stripe.Event): Promis
   // Stripe answers; they only read, so a retry after a failure repeats them harmlessly.
   const reads = event.type === 'invoice.paid' ? await invoiceReads(deps, event.data.object) : null;
   const mails: LicenseMail[] = [];
-  const outcome = await deps.db.transaction(async (tx): Promise<Outcome> => {
+  let outcome: Outcome;
+  try {
+    outcome = await applyInTransaction(deps, event, reads, mails);
+  } catch (err) {
+    // The payment still went through: a failed payment's hold is lifted now, while the license
+    // waits for the retry.
+    if (err instanceof LicenseNotIssued) await paidUp(deps.db, deps, err.orgId);
+    throw err;
+  }
+  for (const m of mails) await deps.sendLicense(m);
+  return outcome;
+}
+
+async function paidUp(db: Db, deps: WebhookDeps, orgId: string) {
+  await db.transaction(async (tx) => {
+    const current = await planOf(tx, orgId);
+    if (current?.status === 'past_due') {
+      await setPlan(tx, orgId, { plan: current.plan, status: 'active' }, deps.now());
+    }
+  });
+}
+
+function applyInTransaction(
+  deps: WebhookDeps,
+  event: Stripe.Event,
+  reads: InvoiceReads | null,
+  mails: LicenseMail[],
+): Promise<Outcome> {
+  return deps.db.transaction(async (tx): Promise<Outcome> => {
     const fresh = await tx
       .insert(stripeEvents)
       .values({ id: event.id, type: event.type, processedAt: deps.now() })
@@ -143,8 +181,6 @@ export async function applyEvent(deps: WebhookDeps, event: Stripe.Event): Promis
         return 'ignored';
     }
   });
-  for (const m of mails) await deps.sendLicense(m);
-  return outcome;
 }
 
 async function checkoutCompleted(tx: Tx, deps: WebhookDeps, s: Stripe.Checkout.Session) {
@@ -262,11 +298,12 @@ async function invoicePaid(
   }
   if (reads.lines.length === 0) return 'applied';
   if (!deps.licenseKey) {
+    // Paid for, so not recorded without its license: Stripe retries until a key is configured.
     deps.log?.warn(
       { orgId, invoice: invoice.id },
-      'no BRAKE_LICENSE_SIGNING_KEY: license not issued',
+      'no BRAKE_LICENSE_SIGNING_KEY: license not issued, the event will be retried',
     );
-    return 'applied';
+    throw new LicenseNotIssued(orgId, 'no license signing key');
   }
   const licenseOrg = await licenseOrgFor(
     tx,
@@ -351,7 +388,10 @@ async function licenseOrgFor(
       { orgId, invoice: invoice.id, licenseOrg: fromStripe },
       'license_org metadata is not a valid org id: license not issued, the event will be retried',
     );
-    throw new Error(`license_org ${JSON.stringify(fromStripe)} is not a valid org id`);
+    throw new LicenseNotIssued(
+      orgId,
+      `license_org ${JSON.stringify(fromStripe)} is not a valid org id`,
+    );
   }
   // Under the row lock: an id the owner saved meanwhile wins over the metadata.
   return setLicenseOrg(tx, orgId, fromStripe, 'system', deps.now(), { onlyIfUnset: true });

@@ -240,6 +240,16 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
     });
   }
 
+  // A license plan is sold only where licenses can be signed: without the key, a payment would
+  // buy nothing.
+  const sellable = (p: string) => !isLicensePlan(p) || deps.licenseKey !== null;
+  const notSold = () =>
+    new ApiError(
+      409,
+      'license_unavailable',
+      'Self-hosted licenses are not on sale here right now. Email support@spendbrake.dev.',
+    );
+
   async function checkout(
     orgId: string,
     plan: CheckoutPlan,
@@ -255,6 +265,7 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
         'This org already has a subscription: change plans in the billing portal.',
       );
     }
+    if (!sellable(plan)) throw notSold();
     // A license installs only into the org it names: the buyer's own install.
     const forLicense = isLicensePlan(plan) ? (licenseOrg ?? current?.licenseOrg) : undefined;
     if (isLicensePlan(plan) && !forLicense) throw licenseOrgRequired();
@@ -310,7 +321,8 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
           id === 'free' ? 0 : id in MONTHLY_CENTS ? MONTHLY_CENTS[id as CheckoutPlan] / 100 : null,
         selfHosted: isLicensePlan(id),
         // Sold through Checkout (Enterprise is arranged with us).
-        purchasable: id === 'free' || (CHECKOUT_PLANS as readonly string[]).includes(id),
+        purchasable:
+          id === 'free' || ((CHECKOUT_PLANS as readonly string[]).includes(id) && sellable(id)),
         limits: {
           ...l,
           maxOrgMonthCapMicros:
@@ -441,7 +453,9 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
     // that use the hosted plans; an org that has one, or signed up for one, keeps seeing it.
     const licensed =
       licenses.length > 0 || isLicensePlan(plan?.plan ?? 'free') || Boolean(plan?.licenseOrg);
-    const offered = CHECKOUT_PLANS.filter((p) => !deps.signup || licensed || !isLicensePlan(p));
+    const offered = CHECKOUT_PLANS.filter(
+      (p) => sellable(p) && (!deps.signup || licensed || !isLicensePlan(p)),
+    );
     return {
       plan: plan?.plan ?? null,
       planName: plan ? PLAN_NAMES[plan.plan] : null,
@@ -567,6 +581,7 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
       if (!deps.signup) throw new ApiError(404, 'not_found', 'Sign-up is not open here.');
       const body = parse(signupBody, req.body);
       if (body.plan !== 'free') requireTerms(body.acceptTerms);
+      if (!sellable(body.plan)) throw notSold();
       const licenseOrg = isLicensePlan(body.plan) ? body.licenseOrg : undefined;
       if (isLicensePlan(body.plan) && !licenseOrg) throw licenseOrgRequired();
       const taken = async (db: Db, id: string) =>

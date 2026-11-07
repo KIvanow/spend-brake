@@ -1100,6 +1100,11 @@ describe('licenses', () => {
 
   it('refuses license_org metadata that is not an org id, so Stripe retries once it is fixed', async () => {
     const { orgId, ownerToken } = await signup('free', '203.0.113.83');
+    // A failed payment earlier: paying lifts its hold even while the license waits.
+    await db
+      .update(orgEntitlements)
+      .set({ status: 'past_due' })
+      .where(eq(orgEntitlements.orgId, orgId));
     customers.set('cus_typo', {
       id: 'cus_typo',
       metadata: { orgId, license_org: 'big corp' },
@@ -1132,6 +1137,7 @@ describe('licenses', () => {
     );
     expect(mails).toHaveLength(before);
     expect(await db.select().from(stripeEvents).where(eq(stripeEvents.id, paid.id))).toEqual([]);
+    expect((await plan(orgId)).status).toBe('active');
     // The owner fixes the id under Billing; Stripe's retry issues the license for the paid period.
     await billing.inject({
       method: 'PUT',
@@ -1143,6 +1149,59 @@ describe('licenses', () => {
     const [row] = await db.select().from(issuedLicenses).where(eq(issuedLicenses.orgId, orgId));
     expect(verify(row!.raw).org).toBe('bigcorp');
     expect(mails).toHaveLength(before + 1);
+  });
+
+  it('sells no license without a signing key, and retries a license invoice paid anyway', async () => {
+    const keyless = await buildServer({
+      db,
+      valkey,
+      stripe: fakeStripe,
+      webhookSecret: SECRET,
+      dashboardUrl: 'https://app.example.com',
+      licenseKey: null,
+      sendLicense: () => Promise.resolve(),
+      signup: true,
+      now: () => NOW,
+    });
+    const plans = (await keyless.inject('/v1/billing/plans')).json<{
+      plans: { id: string; purchasable: boolean }[];
+    }>().plans;
+    expect(plans.find((p) => p.id === 'business')).toMatchObject({ purchasable: false });
+    expect(plans.find((p) => p.id === 'team')).toMatchObject({ purchasable: true });
+    const buy = await keyless.inject({
+      method: 'POST',
+      url: '/v1/billing/signup',
+      remoteAddress: '203.0.113.90',
+      payload: {
+        name: 'x',
+        email: `keyless-${randomBytes(3).toString('hex')}@example.com`,
+        plan: 'business',
+        licenseOrg: 'acme',
+        acceptTerms: true,
+      },
+    });
+    expect(buy.statusCode).toBe(409);
+    expect(buy.json()).toMatchObject({ error: 'license_unavailable' });
+
+    // Enterprise invoiced by hand anyway: not recorded, so Stripe retries once a key is set.
+    const { orgId } = await signup('free', '203.0.113.91');
+    customers.set('cus_keyless', {
+      id: 'cus_keyless',
+      metadata: { orgId, license_org: 'bigcorp' },
+    } as unknown as Stripe.Customer);
+    const paid = event(
+      'invoice.paid',
+      invoice('in_keyless', 'cus_keyless', 'prod_enterprise', new Date('2027-10-30T00:00:00Z')),
+    ) as unknown as Stripe.Event;
+    const deps = { db, stripe: fakeStripe, now: () => NOW, sendLicense: () => Promise.resolve() };
+    await expect(applyEvent({ ...deps, licenseKey: null }, paid)).rejects.toThrow(
+      /no license signing key/,
+    );
+    expect(await db.select().from(stripeEvents).where(eq(stripeEvents.id, paid.id))).toEqual([]);
+    expect(await applyEvent({ ...deps, licenseKey: signer.privateKey }, paid)).toBe('applied');
+    const [row] = await db.select().from(issuedLicenses).where(eq(issuedLicenses.orgId, orgId));
+    expect(verify(row!.raw).org).toBe('bigcorp');
+    await keyless.close();
   });
 
   it('emails each license on an invoice with several license lines', async () => {

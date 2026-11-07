@@ -70,5 +70,9 @@ describe('license signing key', () => {
     };
     expect(loadEnv(test)).toMatchObject({ licenseKey: throwaway, releasedLicenseKey: false });
     expect(isReleasedLicenseKey(throwaway)).toBe(false);
+    // An unreadable key names the setting.
+    expect(() => loadEnv({ ...test, BRAKE_LICENSE_SIGNING_KEY: 'not a key' })).toThrow(
+      /BRAKE_LICENSE_SIGNING_KEY is not a readable private key/,
+    );
   });
 });

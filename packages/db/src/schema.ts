@@ -333,7 +333,7 @@ export const issuedLicenses = pgTable(
     /** The paid invoice this license covers: one license per invoice. */
     invoiceId: text('invoice_id').notNull().unique(),
     raw: text('raw').notNull(),
-    /** The install org id the license names (from its payload; null only if unreadable). */
+    /** The install org id the license names (copied from its signed payload). */
     licenseOrg: text('license_org'),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     issuedAt: timestamp('issued_at', { withTimezone: true }).notNull().defaultNow(),

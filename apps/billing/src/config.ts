@@ -40,7 +40,16 @@ MCowBQYDK2VwAyEASqhKChiRmMqLgza2CWI05G51ehMzE9pc8Ej5Y4b8S6c=
 
 /** Whether a signing key (PEM) is the one released ee builds trust. */
 export function isReleasedLicenseKey(privateKeyPem: string): boolean {
-  const pub = createPublicKey(createPrivateKey(privateKeyPem)).export({
+  let key;
+  try {
+    key = createPrivateKey(privateKeyPem);
+  } catch (err) {
+    throw new Error(
+      `BRAKE_LICENSE_SIGNING_KEY is not a readable private key (PEM): ${(err as Error).message}`,
+      { cause: err },
+    );
+  }
+  const pub = createPublicKey(key).export({
     type: 'spki',
     format: 'pem',
   });
