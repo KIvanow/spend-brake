@@ -36,7 +36,7 @@ import {
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import type Stripe from 'stripe';
 import { z } from 'zod';
-import { planOf, setPlan } from './entitlements.js';
+import { planOf, setLicenseOrg, setPlan } from './entitlements.js';
 import {
   CHECKOUT_PLANS,
   type CheckoutPlan,
@@ -237,6 +237,7 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
     plan: CheckoutPlan,
     from: 'billing' | 'signup' = 'billing',
     licenseOrg?: string,
+    actor = 'system',
   ) {
     const current = await planOf(deps.db, orgId);
     if (current?.stripeSubscriptionId) {
@@ -249,14 +250,7 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
     // A license installs only into the org it names: the buyer's own install.
     const forLicense = isLicensePlan(plan) ? (licenseOrg ?? current?.licenseOrg) : undefined;
     if (isLicensePlan(plan) && !forLicense) throw licenseOrgRequired();
-    if (forLicense && forLicense !== current?.licenseOrg) {
-      await setPlan(
-        deps.db,
-        orgId,
-        { plan: current?.plan ?? 'free', licenseOrg: forLicense },
-        now(),
-      );
-    }
+    if (forLicense) await setLicenseOrg(deps.db, orgId, forLicense, actor, now());
     const customer = await customerFor(orgId, current?.billingEmail ?? null);
     const session = await deps.stripe.checkout.sessions.create({
       mode: 'subscription',
@@ -472,7 +466,7 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
       req.body,
     );
     requireTerms(body.acceptTerms);
-    const url = await checkout(a.orgId, body.plan, 'billing', body.licenseOrg);
+    const url = await checkout(a.orgId, body.plan, 'billing', body.licenseOrg, a.actor);
     await recordTerms(a.orgId, a.actor, body.plan, 'billing');
     return { url };
   });
@@ -497,13 +491,7 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
   app.put('/v1/billing/license-org', async (req) => {
     const a = await auth(req, 'owner');
     const body = parse(z.object({ licenseOrg: z.string().regex(LICENSE_ORG) }), req.body);
-    const current = await planOf(deps.db, a.orgId);
-    await setPlan(
-      deps.db,
-      a.orgId,
-      { plan: current?.plan ?? 'free', licenseOrg: body.licenseOrg },
-      now(),
-    );
+    await setLicenseOrg(deps.db, a.orgId, body.licenseOrg, a.actor, now());
     return { licenseOrg: body.licenseOrg };
   });
 

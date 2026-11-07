@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { type Db, eq, issuedLicenses, orgEntitlements, orgs, stripeEvents } from '@spend-brake/db';
 import { LICENSE_FEATURES, type LicensePayload, signLicense } from '@spend-brake/shared';
 import type Stripe from 'stripe';
-import { planOf, setPlan } from './entitlements.js';
+import { planOf, setLicenseOrg, setPlan } from './entitlements.js';
 import {
   DEFAULT_ORG_UNITS,
   LICENSE_ORG,
@@ -283,7 +283,6 @@ async function licenseOrgFor(
     if (!('deleted' in c && c.deleted)) fromStripe = (c as Stripe.Customer).metadata?.license_org;
   }
   if (!fromStripe || !LICENSE_ORG.test(fromStripe)) return orgId;
-  const current = await planOf(tx, orgId);
-  await setPlan(tx, orgId, { plan: current?.plan ?? 'free', licenseOrg: fromStripe }, deps.now());
+  await setLicenseOrg(tx, orgId, fromStripe, 'system', deps.now());
   return fromStripe;
 }

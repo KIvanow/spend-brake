@@ -385,6 +385,29 @@ describe('sign-up and checkout', () => {
     });
   });
 
+  it('audits a change of the install org id and leaves the plan and its limits as they are', async () => {
+    const { orgId, ownerToken } = await signup('business', '203.0.113.81');
+    await db.update(orgEntitlements).set({ maxKeys: 7 }).where(eq(orgEntitlements.orgId, orgId));
+    const put = (licenseOrg: string) =>
+      billing.inject({
+        method: 'PUT',
+        url: '/v1/billing/license-org',
+        headers: bearer(ownerToken),
+        payload: { licenseOrg },
+      });
+    expect((await put('acme-prod')).statusCode).toBe(200);
+    expect((await put('acme-prod')).statusCode).toBe(200);
+    expect(await plan(orgId)).toMatchObject({ licenseOrg: 'acme-prod', maxKeys: 7 });
+    const rows = await db
+      .select({ actor: auditLog.actor, data: auditLog.data })
+      .from(auditLog)
+      .where(and(eq(auditLog.orgId, orgId), eq(auditLog.action, 'billing.license_org_set')));
+    // Once: saving the same id again changes nothing.
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.data).toEqual({ from: expect.any(String) as string, to: 'acme-prod' });
+    expect(rows[0]!.actor).not.toBe('system');
+  });
+
   it('creates a Free org with its protected spend, and opens Checkout for a paid plan', async () => {
     const { orgId, ownerToken } = await signup();
     expect(await plan(orgId)).toMatchObject({
