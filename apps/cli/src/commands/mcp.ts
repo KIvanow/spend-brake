@@ -326,10 +326,10 @@ export async function serveMcp(io: Io, tools: Tool[]): Promise<void> {
     if (typeof msg !== 'object' || msg === null || Array.isArray(msg)) {
       return fail(null, -32600, 'Invalid request');
     }
-    if (inBatch && msg.method === 'initialize') {
-      return fail(msg.id, -32600, 'initialize cannot be part of a batch');
-    }
     const isRequest = msg.id !== undefined && msg.id !== null;
+    if (inBatch && msg.method === 'initialize') {
+      return isRequest ? fail(msg.id, -32600, 'initialize cannot be part of a batch') : undefined;
+    }
     if (msg.jsonrpc !== '2.0' || typeof msg.method !== 'string') {
       return isRequest ? fail(msg.id, -32600, 'Invalid request') : undefined;
     }
