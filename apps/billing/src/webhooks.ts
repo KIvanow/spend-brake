@@ -145,7 +145,12 @@ export async function applyEvent(deps: WebhookDeps, event: Stripe.Event): Promis
 
 async function paidUp(db: Db, deps: WebhookDeps, orgId: string) {
   await db.transaction(async (tx) => {
-    const current = await planOf(tx, orgId);
+    // Locked, so a payment failure committing meanwhile is not overwritten.
+    const [current] = await tx
+      .select({ plan: orgEntitlements.plan, status: orgEntitlements.status })
+      .from(orgEntitlements)
+      .where(eq(orgEntitlements.orgId, orgId))
+      .for('update');
     if (current?.status === 'past_due') {
       await setPlan(tx, orgId, { plan: current.plan, status: 'active' }, deps.now());
     }

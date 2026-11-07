@@ -156,8 +156,9 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST https://app.spendbrake.dev/v1/b
 ```
 
 The only expected warning is `no license signing key` if `BRAKE_LICENSE_SIGNING_KEY_FILE` is
-not set: then Business is not on sale (the pricing page's **Buy Business** answers that it is
-unavailable). With a key, billing refuses to start in live mode unless it is the key released
+not set: then Business is not on sale (the pricing page's **Buy Business** opens sign-up with
+Free selected and a note that the plan in the link is not sold here, so set the key before
+linking to it). With a key, billing refuses to start in live mode unless it is the key released
 ee builds verify licenses with (`ee/src/license/keys.ts`).
 
 ## 5. Real-card test
