@@ -9,8 +9,9 @@ const PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05
 
 const INSTRUCTIONS =
   'Web search through Spend Brake: every call is charged against a hard dollar cap. When a tool ' +
-  'answers with STOP, do not retry or work around it; tell the user and ask them to raise the ' +
-  'cap. brake_budget shows what is left.';
+  'answers with STOP, do not retry or work around it, and do not switch to the other search ' +
+  'tool: the same caps apply to both. Tell the user and ask them to raise the cap. brake_budget ' +
+  'shows what is left.';
 
 type Json = Record<string, unknown>;
 
@@ -184,9 +185,12 @@ interface Me {
   }[];
 }
 
+const NO_KEY =
+  'BRAKE_KEY is not set for this MCP server: add a Spend Brake virtual key to the "env" of its entry in the MCP configuration.';
+
 async function budget(io: Io, structured: boolean): Promise<ToolResult> {
   const cfg = config(io);
-  if (!cfg.key) return text('BRAKE_KEY is not set for this MCP server.', true);
+  if (!cfg.key) return text(NO_KEY, true);
   let me: Me;
   try {
     const res = await io.fetch(`${cfg.apiUrl}/v1/me`, {
@@ -232,6 +236,7 @@ async function callTool(io: Io, tool: Tool, args: Json, structured: boolean): Pr
   }
   const req = tool.build(args);
   if (typeof req === 'string') return text(`Invalid arguments: ${req}.`, true);
+  if (!config(io).key) return text(NO_KEY, true);
   let r;
   try {
     r = await proxyCall(io, req);
