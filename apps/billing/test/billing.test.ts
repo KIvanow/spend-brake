@@ -291,6 +291,36 @@ describe('Stripe webhooks', () => {
 });
 
 describe('sign-up and checkout', () => {
+  it('needs the org id of the install for a license, so the license installs there', async () => {
+    const payload = {
+      name: 'Acme',
+      email: 'license@example.com',
+      plan: 'business',
+      acceptTerms: true,
+    };
+    // Its own client address: sign-up is rate limited per client.
+    const remoteAddress = '203.0.113.77';
+    const missing = await billing.inject({
+      method: 'POST',
+      url: '/v1/billing/signup',
+      remoteAddress,
+      payload,
+    });
+    expect(missing.statusCode).toBe(400);
+    expect(missing.json()).toMatchObject({ error: 'org_id_required' });
+
+    const { orgId } = await signup('business', remoteAddress);
+    expect(checkouts.at(-1)).toMatchObject({ client_reference_id: orgId });
+    const taken = await billing.inject({
+      method: 'POST',
+      url: '/v1/billing/signup',
+      remoteAddress,
+      payload: { ...payload, orgId },
+    });
+    expect(taken.statusCode).toBe(409);
+    expect(taken.json<{ message: string }>().message).toContain('support@spendbrake.dev');
+  });
+
   it('creates a Free org with its protected spend, and opens Checkout for a paid plan', async () => {
     const { orgId, ownerToken } = await signup();
     expect(await plan(orgId)).toMatchObject({

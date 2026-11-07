@@ -502,6 +502,14 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
       if (!deps.signup) throw new ApiError(404, 'not_found', 'Sign-up is not open here.');
       const body = parse(signupBody, req.body);
       if (body.plan !== 'free') requireTerms(body.acceptTerms);
+      // A license installs only into the org it names, so it must name the buyer's own install.
+      if ((LICENSE_PLANS as readonly string[]).includes(body.plan) && !body.orgId) {
+        throw new ApiError(
+          400,
+          'org_id_required',
+          'A license needs the org id of your install (the --org you gave brake init).',
+        );
+      }
       const email = body.email.trim().toLowerCase();
       // Each sign-up emails the address: keep anyone from flooding someone else's inbox.
       if (deps.signIn && !(await allowLinkTo(deps.valkey, email))) {
@@ -516,7 +524,15 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
           .from(orgs)
           .where(eq(orgs.id, orgId))
           .limit(1);
-        if (taken) throw new ApiError(409, 'conflict', 'That org id is taken.');
+        if (taken) {
+          throw new ApiError(
+            409,
+            'conflict',
+            (LICENSE_PLANS as readonly string[]).includes(body.plan)
+              ? 'That org id is taken here. Email support@spendbrake.dev and we will license it for you.'
+              : 'That org id is taken.',
+          );
+        }
         const orgDeps = { db: tx as unknown as Db, registry: ctx.registry };
         const result = deps.signIn
           ? { ownerToken: null, ...(await createOrg(orgDeps, org, { email })) }
