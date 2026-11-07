@@ -34,7 +34,7 @@ const createBody = z.object({
 
 /** The longest $0 session that is a probe (`brake doctor --prove` mints 60 seconds). */
 export const PROBE_TTL_SEC = 300;
-/** Probes an org may mint an hour: plenty for doctor on every deploy, too few to use as sessions. */
+/** Probes a key may mint an hour: plenty for doctor on every deploy, too few to use as sessions. */
 export const PROBES_PER_HOUR = 30;
 
 const sessionView = z
@@ -80,7 +80,19 @@ export function sessionRoutes(
     request: { body: { content: { 'application/json': { schema: createBody } } } },
     responses: {
       201: { description: 'Created', content: { 'application/json': { schema: sessionView } } },
+      400: {
+        description: 'Invalid request',
+        content: { 'application/json': { schema: errorSchema } },
+      },
+      402: {
+        description: "A failed payment, or the plan's sessions or requests are used up",
+        content: { 'application/json': { schema: errorSchema } },
+      },
       403: { description: 'Not allowed', content: { 'application/json': { schema: errorSchema } } },
+      429: {
+        description: 'Too many $0 probe sessions from this key in the last hour',
+        content: { 'application/json': { schema: errorSchema } },
+      },
     },
   });
   router.registry.registerPath({
@@ -141,25 +153,6 @@ export function sessionRoutes(
     // payment or a spent request allowance still stops it. Kept short so that probes cannot stand
     // in for sessions on routes priced at $0.
     const probe = body.budgetMicros === 0n && body.ttlSec <= PROBE_TTL_SEC;
-    if (probe) {
-      const [row] = await ctx.db
-        .select({ n: sql<string>`count(*)::text` })
-        .from(virtualKeys)
-        .where(
-          and(
-            eq(virtualKeys.orgId, orgId),
-            gte(virtualKeys.createdAt, new Date(ctx.now().getTime() - 3600_000)),
-            sql`${virtualKeys.config}->>'probe' = 'true'`,
-          ),
-        );
-      if (Number(row?.n ?? 0) >= PROBES_PER_HOUR) {
-        throw new ApiError(
-          429,
-          'rate_limited',
-          `At most ${PROBES_PER_HOUR} $0 probe sessions an hour (brake doctor --prove uses one per run). Try again later.`,
-        );
-      }
-    }
     await requireCapacity(ctx, orgId, probe ? 'probe' : 'session');
 
     let parent: KeyRecord;
@@ -180,6 +173,26 @@ export function sessionRoutes(
     }
     if (parent.sessionId)
       throw new ApiError(403, 'forbidden', 'A session key cannot mint sessions.');
+    if (probe) {
+      const [row] = await ctx.db
+        .select({ n: sql<string>`count(*)::text` })
+        .from(virtualKeys)
+        .where(
+          and(
+            eq(virtualKeys.orgId, orgId),
+            sql`${virtualKeys.config}->>'parentKeyId' = ${parent.id}`,
+            gte(virtualKeys.createdAt, new Date(ctx.now().getTime() - 3600_000)),
+            sql`${virtualKeys.config}->>'probe' = 'true'`,
+          ),
+        );
+      if (Number(row?.n ?? 0) >= PROBES_PER_HOUR) {
+        throw new ApiError(
+          429,
+          'rate_limited',
+          `At most ${PROBES_PER_HOUR} $0 probe sessions an hour per key (brake doctor --prove uses one per run). Try again later.`,
+        );
+      }
+    }
 
     const keyId = newId('key');
     const sessionId = `sess_${random62(16)}`;

@@ -133,6 +133,32 @@ describe('brake doctor', () => {
     expect(uncapped.status('key.capped')).toBe('fail');
   });
 
+  it("counts only the key's own cap when the key may mint sessions", async () => {
+    const agentCap = {
+      scope: 'agent:x',
+      window: 'd:2026-11-07',
+      spent: 0,
+      held: 0,
+      hard: 20_000_000,
+      remaining: 20_000_000,
+    };
+    // The agent cap binds a key that mints nothing.
+    const plain = await doctor({ BRAKE_KEY: KEY }, healthy(me({ scopes: [agentCap] })));
+    expect(plain.status('key.capped')).toBe('pass');
+    // A minting key's sessions bring their own budgets; the first may set the agent cap itself.
+    const minter = await doctor(
+      { BRAKE_KEY: KEY },
+      healthy(me({ scopes: [agentCap] }, { canMintSessions: true })),
+    );
+    expect(minter.status('key.capped')).toBe('fail');
+    expect(minter.report!.checks.find((c) => c.id === 'key.capped')!.detail).toContain(
+      'only a cap on this key bounds them all',
+    );
+    expect(minter.code).toBe(EXIT.error);
+    const own = await doctor({ BRAKE_KEY: KEY }, healthy(me({}, { canMintSessions: true })));
+    expect(own.status('key.capped')).toBe('pass');
+  });
+
   it('finds cap-raising and bypass credentials without printing them', async () => {
     const home = tmp('brake-doctor-');
     mkdirSync(join(home, '.config', 'brake'), { recursive: true });

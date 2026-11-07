@@ -36,7 +36,7 @@ images for linux/amd64 and linux/arm64
   that was charged names the charge.
 - A key that has an agent mints sessions for that agent only (`403` for another `agentId`), so
   the agent's caps keep applying to them.
-- `$0` probe sessions are limited to 30 an hour per org (`429 rate_limited`).
+- `$0` probe sessions are limited to 30 an hour per key (`429 rate_limited`).
 
 ## [0.2.1] - 2026-11-02
 

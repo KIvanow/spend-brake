@@ -102,7 +102,9 @@ brake doctor --prove --pretty              # with a key that may mint sessions
 ```
 
 It fails on a missing, revoked, killed or uncapped key (a budget per `X-Brake-Session` alone is
-no cap: the client names the session, so it can start a fresh one), a `BRAKE_SESSION` the proxy
+no cap: the client names the session, so it can start a fresh one; a key that may mint sessions
+needs a cap on the key itself, since each session it mints brings its own budget), a
+`BRAKE_SESSION` the proxy
 would refuse, unpriced routes charged $0, an admin token the agent can read (in the environment
 or the saved config), and raw provider keys (`TAVILY_API_KEY`, `GOOGLE_MAPS_KEY`, …) in the
 environment or in `./.env*` files, which let the agent call the provider directly; placeholders

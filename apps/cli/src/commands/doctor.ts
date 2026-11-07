@@ -465,7 +465,8 @@ async function prove(io: Io, me: Me | null): Promise<Check> {
       {
         budgetMicros: '0',
         dayBudgetMicros: '0',
-        agentId: 'brake-doctor',
+        // No agentId: the session is the key's own agent's (the API refuses another one). The
+        // probe key's $0 cap refuses the call before any agent cap could be created.
         ttlSec: 60,
         name: 'brake doctor probe',
       },
@@ -698,8 +699,14 @@ export async function remoteChecks(
   // A session the client names (X-Brake-Session) is no limit: the client can pick a fresh name,
   // or send none. Only a session key's own session binds it.
   const named = (s: Me['scopes'][number]) => !me.sessionId && s.scope.startsWith('sess:');
-  const capped = me.scopes.filter((s) => s.hard !== null && !named(s));
+  // A key that mints sessions is bounded by its own cap only: each session it mints brings its
+  // own budget, and the first one sets the agent's day cap when none is set.
+  const minter = !me.sessionId && me.policy?.canMintSessions === true;
+  const binds = (s: Me['scopes'][number]) =>
+    !named(s) && (!minter || s.scope === `key:${me.keyId}`);
+  const capped = me.scopes.filter((s) => s.hard !== null && binds(s));
   const namedOnly = !capped.length && me.scopes.some((s) => s.hard !== null && named(s));
+  const otherOnly = !capped.length && minter && me.scopes.some((s) => s.hard !== null && !named(s));
   checks.push(
     capped.length
       ? {
@@ -713,23 +720,32 @@ export async function remoteChecks(
             )
             .join('; '),
         }
-      : namedOnly
+      : otherOnly
         ? {
             id: 'key.capped',
             status: 'fail',
-            title: 'Only a per-session budget caps this key, and the client names the session',
+            title: 'This key may mint sessions, and no cap is set on the key itself',
             detail:
-              'A client can send a new X-Brake-Session for a fresh budget each time, or none, so nothing bounds its total. An org cap may exist, but a key cannot read it.',
-            fix: 'Cap the key itself: `brake caps set key:<id> --day 5 --month 50`, or give the workload session keys (`brake session`).',
+              'Each session it mints chooses its own budget, and the first one sets the agent day cap when none is set: only a cap on this key bounds them all.',
+            fix: `Cap the key itself: \`brake caps set key:${me.keyId} --day 5 --month 50\`.`,
           }
-        : {
-            id: 'key.capped',
-            status: 'fail',
-            title: 'No cap that doctor can see applies to this key',
-            detail:
-              'The key, its session, its parent and its agent have no hard cap. An org cap may exist, but a key cannot read it.',
-            fix: 'Set a cap: `brake caps set key:<id> --day 5`, or run the workload in `brake session`.',
-          },
+        : namedOnly
+          ? {
+              id: 'key.capped',
+              status: 'fail',
+              title: 'Only a per-session budget caps this key, and the client names the session',
+              detail:
+                'A client can send a new X-Brake-Session for a fresh budget each time, or none, so nothing bounds its total. An org cap may exist, but a key cannot read it.',
+              fix: 'Cap the key itself: `brake caps set key:<id> --day 5 --month 50`, or give the workload session keys (`brake session`).',
+            }
+          : {
+              id: 'key.capped',
+              status: 'fail',
+              title: 'No cap that doctor can see applies to this key',
+              detail:
+                'The key, its session, its parent and its agent have no hard cap. An org cap may exist, but a key cannot read it.',
+              fix: 'Set a cap: `brake caps set key:<id> --day 5`, or run the workload in `brake session`.',
+            },
   );
 
   const p = me.policy;

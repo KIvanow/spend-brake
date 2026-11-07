@@ -111,7 +111,11 @@ function brake(args: string[], env: Record<string, string>, cwd?: string) {
   });
 }
 
-async function parentKey(opts: { canMintSessions: boolean; credentials?: Record<string, string> }) {
+async function parentKey(opts: {
+  canMintSessions: boolean;
+  credentials?: Record<string, string>;
+  agentId?: string;
+}) {
   const orgId = `org_${randomBytes(3).toString('hex')}`;
   await bootstrapOrg({ db, registry }, { id: orgId, name: orgId });
   // The key exists in Valkey (what the proxy and the session endpoint read) and Postgres.
@@ -120,6 +124,7 @@ async function parentKey(opts: { canMintSessions: boolean; credentials?: Record<
     orgId,
     credentials: opts.credentials ?? { 'google-maps': 'cred-google' },
     canMintSessions: opts.canMintSessions,
+    ...(opts.agentId ? { agentId: opts.agentId } : {}),
   });
   const { virtualKeys } = await import('@spend-brake/db');
   const { hashVirtualKey } = await import('@spend-brake/budget');
@@ -227,7 +232,8 @@ describe('brake session end to end', () => {
 
 describe('brake doctor end to end', () => {
   it('--prove: a $0 budget stops a priced call before the provider sees it', async () => {
-    const parent = await parentKey({ canMintSessions: true });
+    // A key bound to an agent: its probe session is that agent's too.
+    const parent = await parentKey({ canMintSessions: true, agentId: 'ci-agent' });
     await engine.setCap(parent.orgId, { kind: 'key', id: parent.keyId }, 'd', {
       hard: 1_000_000n,
       soft: null,
