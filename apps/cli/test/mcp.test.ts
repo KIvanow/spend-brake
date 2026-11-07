@@ -186,18 +186,36 @@ describe('brake mcp', () => {
   });
 
   it('answers a batch with one array, and an empty batch with an error', async () => {
+    const ping = (id: number) => ({ jsonrpc: '2.0', id, method: 'ping' });
     const m = await mcp([
-      [init('2025-03-26'), initialized, { jsonrpc: '2.0', id: 2, method: 'ping' }],
+      init('2025-03-26'),
+      [initialized, ping(2), ping(3)],
       [],
       [initialized],
+      [{ ...init('2025-03-26'), id: 4 }],
     ]);
     // Messages are answered concurrently, so in any order; the all-notification batch, never.
     const out = m.f.out.map((l) => JSON.parse(l) as Reply | Reply[]);
-    expect(out).toHaveLength(2);
-    const batch = out.find((o) => Array.isArray(o))!;
-    expect(batch.map((r) => r.id)).toEqual([1, 2]);
-    expect(batch[0]!.result).toMatchObject({ protocolVersion: '2025-03-26' });
-    expect((out.find((o) => !Array.isArray(o)) as Reply).error!.code).toBe(-32600);
+    expect(out).toHaveLength(4);
+    expect((out.find((o) => !Array.isArray(o) && o.id === 1) as Reply).result).toMatchObject({
+      protocolVersion: '2025-03-26',
+    });
+    const batches = out.filter((o): o is Reply[] => Array.isArray(o));
+    const pings = batches.find((b) => b.length === 2)!;
+    expect(pings.map((r) => r.id).sort()).toEqual([2, 3]);
+    // initialize may not be part of a batch.
+    expect(batches.find((b) => b.length === 1)![0]).toMatchObject({
+      id: 4,
+      error: { code: -32600 },
+    });
+    expect((out.find((o) => !Array.isArray(o) && o.id === null) as Reply).error!.code).toBe(-32600);
+  });
+
+  it('refuses batches from 2025-06-18 on, where the protocol dropped them', async () => {
+    const m = await mcp([init('2025-06-18'), [{ jsonrpc: '2.0', id: 2, method: 'ping' }]]);
+    const out = m.f.out.map((l) => JSON.parse(l) as Reply);
+    expect(out.find((o) => o.id === null)!.error!.code).toBe(-32600);
+    expect(out.some((o) => o.id === 2)).toBe(false);
   });
 
   it('gives every proxy and budget request a deadline', async () => {

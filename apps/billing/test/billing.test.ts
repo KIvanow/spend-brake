@@ -593,13 +593,17 @@ describe('agent sessions', () => {
     for (let i = 0; i < 20; i++)
       expect((await mint({ budgetMicros: '1000' })).statusCode).toBe(201);
     expect((await mint({ budgetMicros: '1000' })).json()).toMatchObject({ error: 'plan_limit' });
-    // Any $0 session is a probe, whatever its lifetime: it can never spend.
+    // A short $0 session is a probe: it can never spend.
     expect((await mint(probe)).statusCode).toBe(201);
-    const long = await mint({ ...probe, ttlSec: 7 * 24 * 3600 });
-    expect(long.statusCode).toBe(201);
+    const short = await mint(probe);
+    expect(short.statusCode).toBe(201);
+    // A long one counts like any other session.
+    expect((await mint({ ...probe, ttlSec: 7 * 24 * 3600 })).json()).toMatchObject({
+      error: 'plan_limit',
+    });
 
     // Raising (or removing) a probe's caps would let it spend outside the plan: refused.
-    const { keyId, sessionId } = long.json<{ keyId: string; sessionId: string }>();
+    const { keyId, sessionId } = short.json<{ keyId: string; sessionId: string }>();
     for (const scope of [`key:${keyId}`, `sess:${sessionId}`]) {
       const raise = await api.inject({
         method: 'PUT',
@@ -616,6 +620,23 @@ describe('agent sessions', () => {
       });
       expect(drop.json()).toMatchObject({ error: 'probe_session' });
     }
+    // So would fail-open or a longer life on the key itself; its name may change.
+    for (const payload of [{ failOpenMicros: '50000000' }, { expiresAt: null }]) {
+      const patch = await api.inject({
+        method: 'PATCH',
+        url: `/v1/keys/${keyId}`,
+        headers: bearer(t),
+        payload,
+      });
+      expect(patch.json(), JSON.stringify(payload)).toMatchObject({ error: 'probe_session' });
+    }
+    const renamed = await api.inject({
+      method: 'PATCH',
+      url: `/v1/keys/${keyId}`,
+      headers: bearer(t),
+      payload: { name: 'doctor probe' },
+    });
+    expect(renamed.statusCode).toBe(200);
     // The billing page counts them as the API does.
     const usage = await billing.inject({ url: '/v1/billing', headers: bearer(t) });
     expect(usage.json()).toMatchObject({ usage: { agentSessionsThisMonth: 20 } });

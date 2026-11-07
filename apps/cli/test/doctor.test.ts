@@ -106,6 +106,23 @@ describe('brake doctor', () => {
     expect(d.out).not.toMatch(/protected|safe/i);
   });
 
+  it('does not vouch while the workload can read another virtual key', async () => {
+    const env = await doctor({ BRAKE_KEY: KEY, OTHER_KEY: `sb_live_${rand(22)}` }, healthy(me()));
+    expect(env.status('virtual-keys.env')).toBe('warn');
+    expect(env.report!.checks.filter((c) => c.status === 'fail')).toEqual([]);
+    expect(env.report!.ok).toBe(false);
+    expect(env.code).toBe(EXIT.error);
+
+    const cwd = tmp('brake-doctor-cwd-');
+    writeFileSync(join(cwd, '.env'), `SPARE_KEY=sb_live_${rand(22)}\n`);
+    const file = await doctor({ BRAKE_KEY: KEY }, healthy(me()), { cwd });
+    expect(file.status('virtual-keys.files')).toBe('warn');
+    expect(file.status('files.cwd')).toBe('pass');
+    expect(file.code).toBe(EXIT.error);
+    const pretty = await doctor({ BRAKE_KEY: KEY }, healthy(me()), { cwd, args: ['--pretty'] });
+    expect(pretty.out).toMatch(/checked the caps of BRAKE_KEY only/);
+  });
+
   it('fails without a key, and when nothing caps the key', async () => {
     const none = await doctor({}, healthy(me()));
     expect(none.code).toBe(EXIT.error);

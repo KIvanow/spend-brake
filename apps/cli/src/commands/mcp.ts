@@ -314,15 +314,20 @@ interface Message {
 export async function serveMcp(io: Io, tools: Tool[]): Promise<void> {
   if (!io.stdin) throw new CliError('brake mcp needs stdin');
   let structured = true;
+  // JSON-RPC batches: in 2025-03-26 (and before), not since 2025-06-18.
+  let batches = true;
   const reply = (m: Json): Json => ({ jsonrpc: '2.0', ...m });
   const fail = (id: Message['id'], code: number, message: string) =>
     reply({ id: id ?? null, error: { code, message } });
   const send = (m: Json | Json[]) => io.stdout(`${JSON.stringify(m)}\n`);
 
   /** The answer to one message, or nothing for a notification. */
-  async function answer(msg: Message): Promise<Json | undefined> {
+  async function answer(msg: Message, inBatch = false): Promise<Json | undefined> {
     if (typeof msg !== 'object' || msg === null || Array.isArray(msg)) {
       return fail(null, -32600, 'Invalid request');
+    }
+    if (inBatch && msg.method === 'initialize') {
+      return fail(msg.id, -32600, 'initialize cannot be part of a batch');
     }
     const isRequest = msg.id !== undefined && msg.id !== null;
     if (msg.jsonrpc !== '2.0' || typeof msg.method !== 'string') {
@@ -340,6 +345,7 @@ export async function serveMcp(io: Io, tools: Tool[]): Promise<void> {
             : PROTOCOL_VERSIONS[0]!;
         // structuredContent arrived in 2025-06-18.
         structured = version >= '2025-06-18';
+        batches = version < '2025-06-18';
         return reply({
           id: msg.id,
           result: {
@@ -405,8 +411,10 @@ export async function serveMcp(io: Io, tools: Tool[]): Promise<void> {
       return a && send(a);
     }
     // A batch (protocol 2025-03-26): one array of answers, none when all were notifications.
+    if (!batches)
+      return send(fail(null, -32600, 'Batches are not supported in this protocol version'));
     if (msg.length === 0) return send(fail(null, -32600, 'Invalid request'));
-    const answers = (await Promise.all(msg.map((m) => answer(m as Message)))).filter(
+    const answers = (await Promise.all(msg.map((m) => answer(m as Message, true)))).filter(
       (a): a is Json => a !== undefined,
     );
     return answers.length ? send(answers) : undefined;

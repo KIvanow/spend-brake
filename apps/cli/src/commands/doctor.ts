@@ -257,6 +257,26 @@ export function localChecks(io: Io, cwd: string): Check[] {
       .map(([k, v]) => classify(k, v, cfg.key, true))
       .filter((f): f is Found => f !== null),
   }));
+  // Other virtual keys get their own check: doctor cannot vouch while one is readable.
+  const virtual = files.flatMap((f) =>
+    f.found.filter((x) => x.kind === 'virtual').map((x) => `${f.file}: ${x.name}`),
+  );
+  for (const f of files) f.found = f.found.filter((x) => x.kind !== 'virtual');
+  checks.push(
+    virtual.length
+      ? {
+          id: 'virtual-keys.files',
+          status: 'warn',
+          title: 'Another virtual key is in .env files the workload can read',
+          detail: `${virtual.join(', ')}. Doctor checks the caps of BRAKE_KEY only; the workload may use this one instead.`,
+          fix: 'Give the workload one virtual key.',
+        }
+      : {
+          id: 'virtual-keys.files',
+          status: 'pass',
+          title: 'No other virtual keys in .env files in the working directory',
+        },
+  );
   const hits = files.filter((f) => f.found.length > 0);
   const severe = hits.some((f) => f.found.some((x) => x.kind === 'admin' || x.kind === 'provider'));
   const notRead = scan.skipped.length
@@ -833,8 +853,11 @@ export function doctorCommand(program: Command, io: Io, done: (code: number) => 
       for (const c of checks) summary[c.status]++;
       // Doctor vouches only for what it saw: the caps on the key, and the probe when asked for.
       const passed = (id: string) => checks.some((c) => c.id === id && c.status === 'pass');
+      // Another readable virtual key has caps doctor did not check.
+      const otherKey = checks.some((c) => c.id.startsWith('virtual-keys.') && c.status !== 'pass');
       const ok =
         summary.fail === 0 &&
+        !otherKey &&
         passed('key.capped') &&
         (!o.prove || passed('enforcement.exhausted-budget'));
       if (!pretty) {
@@ -857,7 +880,9 @@ export function doctorCommand(program: Command, io: Io, done: (code: number) => 
             ? 'No failed checks in what doctor can verify. This is not a guarantee that every spend is capped.'
             : summary.fail
               ? 'Fix the failed checks above; until then doctor cannot vouch for this workload.'
-              : 'Doctor could not check the caps (or the --prove probe) above, so it cannot vouch for this workload.',
+              : otherKey
+                ? 'Doctor checked the caps of BRAKE_KEY only, and the workload can read another virtual key, so it cannot vouch for this workload.'
+                : 'Doctor could not check the caps (or the --prove probe) above, so it cannot vouch for this workload.',
         );
         io.stdout(`${lines.join('\n')}\n`);
       }

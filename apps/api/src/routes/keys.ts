@@ -310,6 +310,14 @@ export function keyRoutes(r: Router, ctx: Ctx): void {
     handler: async ({ auth, params, body }) => {
       const row = await load(auth.orgId, params.id);
       if (row.status !== 'active') throw new ApiError(409, 'conflict', 'Key is revoked.');
+      // A probe stays out of the plan's sessions only while it cannot spend: only its name changes.
+      if ((row.config as KeyRecord).probe && Object.keys(body).some((k) => k !== 'name')) {
+        throw new ApiError(
+          409,
+          'probe_session',
+          'This is a $0 probe session (brake doctor --prove): only its name can change. Start a session with a budget instead.',
+        );
+      }
       if (body.loop) await requireFeature(ctx, auth.orgId, 'customLoopRules');
       if (body.credentials) await checkCredentials(auth.orgId, body.credentials);
       // Records written before keys carried a name get it from the row.

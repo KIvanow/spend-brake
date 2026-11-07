@@ -32,6 +32,9 @@ const createBody = z.object({
   name: z.string().max(200).optional(),
 });
 
+/** The longest $0 session that is a probe (`brake doctor --prove` mints 60 seconds). */
+export const PROBE_TTL_SEC = 300;
+
 const sessionView = z
   .object({
     sessionId: z.string(),
@@ -131,10 +134,11 @@ export function sessionRoutes(
       dayBudgetMicros: parsed.data.dayBudgetMicros ?? 20_000_000n,
     };
     const orgId = c.auth.orgId;
-    // A $0 session (brake doctor --prove) is marked a probe: its caps can never be raised, so it
-    // spends nothing and does not use up the plan's sessions. A failed payment or a spent request
-    // allowance still stops it.
-    const probe = body.budgetMicros === 0n;
+    // A short $0 session (brake doctor --prove) is marked a probe: its caps, lifetime and fail-open
+    // can never change, so it spends nothing and does not use up the plan's sessions. A failed
+    // payment or a spent request allowance still stops it. Kept short so that probes cannot stand
+    // in for sessions on routes priced at $0.
+    const probe = body.budgetMicros === 0n && body.ttlSec <= PROBE_TTL_SEC;
     await requireCapacity(ctx, orgId, probe ? 'probe' : 'session');
 
     let parent: KeyRecord;

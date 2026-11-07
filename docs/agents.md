@@ -114,20 +114,21 @@ named, never printed.
 
 `--prove` mints a $0, 60-second session from the key and sends one priced request with it. The
 proxy must refuse it with `402 budget_exceeded` before it contacts the provider; the session is
-then ended, having spent nothing. The API marks every $0 session as a probe: its caps can never
-be raised, so it cannot spend, and it does not count toward a plan's agent sessions. `--prove`
-can run on every deploy (it still needs a plan whose payment has gone through and whose monthly
-requests are not used up). Killed providers are skipped, and a provider the proxy refuses for
-another reason first (killed, unpriced) makes doctor try the next. The repository runs the same probe against a counting
-mock provider and checks it receives no request (`apps/cli/test/e2e.test.ts`).
+then ended, having spent nothing. The API marks a $0 session of up to five minutes as a probe:
+its caps, lifetime and fail-open can never change, so it cannot spend, and it does not count
+toward a plan's agent sessions. `--prove` can run on every deploy (it still needs a plan whose
+payment has gone through and whose monthly requests are not used up). Killed providers are
+skipped, and a provider the proxy refuses for another reason first (killed, unpriced) makes
+doctor try the next. The repository runs the same probe against a counting mock provider and
+checks it receives no request (`apps/cli/test/e2e.test.ts`).
 
-Doctor exits 1 when a check fails, and also when it could not read the key's caps or, with
-`--prove`, could not complete the probe: it exits 0 only for what it actually saw. A session
-key, or a key that may not mint sessions, cannot run the probe, so run `--prove` with the
-parent key. A clean report is not a guarantee: it always lists what a client cannot see, such
-as HTTP clients that skip the proxy, credentials kept elsewhere, the org-wide cap, and network
-egress. Blocking the providers' own hosts at the firewall is what makes the proxy the only way
-out.
+Doctor exits 1 when a check fails, and also when it could not read the key's caps, when the
+workload can read another virtual key (whose caps it did not check) or, with `--prove`, when it
+could not complete the probe: it exits 0 only for what it actually saw. A session key, or a key
+that may not mint sessions, cannot run the probe, so run `--prove` with the parent key. A clean
+report is not a guarantee: it always lists what a client cannot see, such as HTTP clients that
+skip the proxy, credentials kept elsewhere, the org-wide cap, and network egress. Blocking the
+providers' own hosts at the firewall is what makes the proxy the only way out.
 
 ## MCP clients (preview)
 

@@ -130,7 +130,8 @@ Each call prints `ok`, `status`, `costMicros`, `cost`, `remainingMicros`, `reque
 
 Checks what could let the workload spend past its caps, from where it runs. One JSON report
 (`ok`, `summary`, `checks`, `notVerified`) or, with `--pretty`, a readable one; exit code 1
-when a check fails.
+when a check fails, when it could not read the key's caps, when the workload can read another
+virtual key, or when `--prove` could not complete the probe.
 
 ```sh
 brake doctor --pretty
