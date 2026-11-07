@@ -5,6 +5,16 @@ images for linux/amd64 and linux/arm64
 (`ghcr.io/kivanow/spend-brake-<service>:<version>`, with build provenance) and the CLI
 (`@spend-brake/cli`).
 
+## [Unreleased]
+
+### Fixed
+
+- Buying Business online: the sign-up page asks for the org id of your install, so the license
+  it issues installs there (before, it named a new hosted org id, and installing it answered
+  `403 license_wrong_org`). The pricing page links to it, and
+  [Editions and license](https://docs.spendbrake.dev/editions/#buying-a-license) explains buying,
+  installing and renewing.
+
 ## [0.2.1] - 2026-11-02
 
 ### Fixed

@@ -96,6 +96,19 @@ beforeEach(() => {
             },
           },
           {
+            id: 'business',
+            name: 'Business',
+            monthlyUsd: 299,
+            selfHosted: true,
+            purchasable: true,
+            limits: {
+              maxKeys: 1,
+              maxProviders: 1,
+              requestsPerMonth: 10_000,
+              maxOrgMonthCapMicros: 50_000_000,
+            },
+          },
+          {
             id: 'enterprise',
             name: 'Enterprise',
             monthlyUsd: null,
@@ -749,6 +762,34 @@ describe('sign-up', () => {
       expect(calls.find((c) => c.url === '/v1/billing/signup')!.body).toMatchObject({
         plan: 'team',
         acceptTerms: true,
+      }),
+    );
+  });
+
+  it('offers Business only from its link, licensed to the org id of the install', async () => {
+    window.location.hash = '/signup';
+    render(<App client={client()} />);
+    await screen.findByText('Team');
+    expect(screen.queryByText('Business')).toBeNull();
+    cleanup();
+
+    window.location.hash = '/signup?plan=business';
+    routes['POST /v1/billing/signup'] = () => [
+      201,
+      { orgId: 'acme', emailSent: true, checkoutUrl: 'about:blank' },
+    ];
+    const user = userEvent.setup();
+    render(<App client={client()} />);
+    expect(await screen.findByRole('radio', { name: /Business/ })).toHaveProperty('checked', true);
+    await user.type(screen.getByLabelText('Work email'), 'ana@acme.test');
+    await user.type(screen.getByLabelText('Team or project name'), 'Acme');
+    await user.type(screen.getByLabelText(/^Org id on your install/), 'acme');
+    await user.click(screen.getByRole('checkbox', { name: /I agree to the Terms of Service/ }));
+    await user.click(screen.getByRole('button', { name: 'Continue to payment' }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.url === '/v1/billing/signup')!.body).toMatchObject({
+        plan: 'business',
+        orgId: 'acme',
       }),
     );
   });
