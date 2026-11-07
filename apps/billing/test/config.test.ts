@@ -1,5 +1,7 @@
+import { generateKeyPairSync } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { loadEnv } from '../src/config.js';
+import { RELEASED_LICENSE_PUBLIC_KEY, isReleasedLicenseKey, loadEnv } from '../src/config.js';
 import { stripeClient } from '../src/stripe.js';
 
 // Dummy strings only: no real Stripe key is ever used here.
@@ -38,5 +40,35 @@ describe('Stripe live mode', () => {
   it('builds a client for whichever mode the key matches', () => {
     expect(() => stripeClient('sk_test_dummy', { allowLive: false })).not.toThrow();
     expect(() => stripeClient('sk_live_dummy', { allowLive: true })).not.toThrow();
+  });
+});
+
+describe('license signing key', () => {
+  const throwaway = generateKeyPairSync('ed25519', {
+    publicKeyEncoding: { type: 'spki', format: 'pem' },
+    privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+  }).privateKey;
+
+  it('is the public key released ee builds verify with', () => {
+    const ee = readFileSync(new URL('../../../ee/src/license/keys.ts', import.meta.url), 'utf8');
+    expect(ee).toContain(RELEASED_LICENSE_PUBLIC_KEY.trim());
+  });
+
+  it('refuses to take payments in live mode with a key installs would refuse', () => {
+    const live = {
+      ...base,
+      STRIPE_SECRET_KEY: 'sk_live_dummy',
+      BILLING_LIVE_MODE: 'true',
+      BRAKE_LICENSE_SIGNING_KEY: throwaway,
+    };
+    expect(() => loadEnv(live)).toThrow(/not the key released ee builds verify/);
+    // In test mode a throwaway key is fine, and says so.
+    const test = {
+      ...base,
+      STRIPE_SECRET_KEY: 'sk_test_dummy',
+      BRAKE_LICENSE_SIGNING_KEY: throwaway,
+    };
+    expect(loadEnv(test)).toMatchObject({ licenseKey: throwaway, releasedLicenseKey: false });
+    expect(isReleasedLicenseKey(throwaway)).toBe(false);
   });
 });

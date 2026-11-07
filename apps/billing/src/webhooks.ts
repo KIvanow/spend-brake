@@ -276,7 +276,6 @@ async function invoicePaid(
     invoice,
     reads,
   );
-  if (!licenseOrg) return 'applied';
 
   // A license for each Business / Enterprise line, valid to the end of the period paid for.
   for (const { line, plan, product } of reads.lines) {
@@ -327,9 +326,10 @@ async function invoicePaid(
  * checkout, Billing, which also copies it to the Stripe customer), or this sets it once from
  * Stripe. Without one, the subscription's or customer's `license_org` metadata (hand-made
  * Enterprise invoices) is stored and used; without that, the hosted org's own id, as licenses
- * issued before license_org named. Metadata that is not a valid id issues nothing (null) and
- * says so, rather than a license for an id the buyer did not give: set the id under Billing,
- * and the next invoice is licensed.
+ * issued before license_org named. Metadata that is not a valid id issues nothing, rather than
+ * a license for an id the buyer did not give: it throws, so the event is not recorded and Stripe
+ * retries it, and the retry after the id is fixed (under Billing, or in the customer's metadata)
+ * issues the license for the period paid.
  */
 async function licenseOrgFor(
   tx: Tx,
@@ -338,18 +338,20 @@ async function licenseOrgFor(
   stored: string | null,
   invoice: Stripe.Invoice,
   reads: InvoiceReads,
-): Promise<string | null> {
+): Promise<string> {
   if (stored) return stored;
   const fromStripe =
     invoice.parent?.subscription_details?.metadata?.license_org ??
     reads.customer?.metadata?.license_org;
   if (!fromStripe) return orgId;
   if (!LICENSE_ORG.test(fromStripe)) {
+    // Not recorded as applied: the period is paid for, so Stripe retries the event, and once the
+    // id is fixed (under Billing, or in the customer's metadata) the retry issues the license.
     deps.log?.warn(
       { orgId, invoice: invoice.id, licenseOrg: fromStripe },
-      'license_org metadata is not a valid org id: license not issued',
+      'license_org metadata is not a valid org id: license not issued, the event will be retried',
     );
-    return null;
+    throw new Error(`license_org ${JSON.stringify(fromStripe)} is not a valid org id`);
   }
   // Under the row lock: an id the owner saved meanwhile wins over the metadata.
   return setLicenseOrg(tx, orgId, fromStripe, 'system', deps.now(), { onlyIfUnset: true });

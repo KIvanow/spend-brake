@@ -32,6 +32,11 @@ const app = await buildServer({
   logger: redactingLoggerOptions(env.LOG_LEVEL),
 });
 if (!env.licenseKey) app.log.warn('no license signing key: Business invoices issue no license');
+else if (!env.releasedLicenseKey) {
+  app.log.warn(
+    'the license signing key is not the released one: released ee builds refuse its licenses (fine for testing)',
+  );
+}
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, () => {

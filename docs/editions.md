@@ -47,7 +47,12 @@ Business is bought online ([pricing](https://spendbrake.dev/#pricing)):
 2. Pay through Stripe Checkout. The license file, `<org id>.license`, is emailed to you. Left the
    payment page? Sign in to app.spendbrake.dev by email and buy it under Billing.
 3. Install it as [shown above](#business-and-enterprise), with an owner token of that org (the
-   one `brake init` printed): `BRAKE_ADMIN_TOKEN=<owner token> brake license install acme.license`.
+   one `brake init` printed). Read it without echo, so it stays out of your shell history:
+
+   ```sh
+   read -rs BRAKE_ADMIN_TOKEN && export BRAKE_ADMIN_TOKEN   # paste the owner token, then Enter
+   brake license install acme.license
+   ```
 
 The account at app.spendbrake.dev is only the customer record (invoices, card, cancelling);
 your install never contacts it. Its Billing page has **Download the latest license** and the

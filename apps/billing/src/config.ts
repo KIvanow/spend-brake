@@ -1,3 +1,4 @@
+import { createPrivateKey, createPublicKey } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 import { assertStripeKeyMode } from './stripe.js';
@@ -28,8 +29,28 @@ const envSchema = z.object({
   BRAKE_HOSTED_SIGNUP: z.stringbool().default(false),
 });
 
+/**
+ * The public half released ee builds verify licenses with (ee/src/license/keys.ts; a test keeps
+ * the two equal). A license signed with any other key is refused by every install.
+ */
+export const RELEASED_LICENSE_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEASqhKChiRmMqLgza2CWI05G51ehMzE9pc8Ej5Y4b8S6c=
+-----END PUBLIC KEY-----
+`;
+
+/** Whether a signing key (PEM) is the one released ee builds trust. */
+export function isReleasedLicenseKey(privateKeyPem: string): boolean {
+  const pub = createPublicKey(createPrivateKey(privateKeyPem)).export({
+    type: 'spki',
+    format: 'pem',
+  });
+  return pub.toString().trim() === RELEASED_LICENSE_PUBLIC_KEY.trim();
+}
+
 export type BillingEnv = z.output<typeof envSchema> & {
   licenseKey: string | null;
+  /** The signing key is the released one (licenses it signs install). */
+  releasedLicenseKey: boolean;
   automaticTax: boolean;
 };
 
@@ -43,9 +64,17 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): BillingEnv {
     (parsed.BRAKE_LICENSE_SIGNING_KEY_FILE
       ? readFileSync(parsed.BRAKE_LICENSE_SIGNING_KEY_FILE, 'utf8')
       : null);
+  const releasedLicenseKey = licenseKey !== null && isReleasedLicenseKey(licenseKey);
+  // Real payments for licenses no install accepts: refuse to start instead.
+  if (parsed.BILLING_LIVE_MODE && licenseKey !== null && !releasedLicenseKey) {
+    throw new Error(
+      'BRAKE_LICENSE_SIGNING_KEY is not the key released ee builds verify licenses with: in live mode every license it signed would be refused.',
+    );
+  }
   return {
     ...parsed,
     licenseKey,
+    releasedLicenseKey,
     automaticTax: parsed.BILLING_AUTOMATIC_TAX ?? parsed.BILLING_LIVE_MODE,
   };
 }

@@ -59,8 +59,12 @@ Enterprise is sold by hand: create the customer with metadata `orgId` (an org cr
 sign-up) and `license_org` (the org id of their install), then a Stripe invoice with a line on the "Spend Brake Enterprise" product (set
 `org_units` in the product metadata, or leave the default). Paying the invoice issues the
 license, and the org keeps that `license_org` from then on (change it later with
-`PUT /v1/billing/license-org`, not in Stripe). A `license_org` that is not a valid org id
-issues no license and logs a warning.
+`PUT /v1/billing/license-org`, not in Stripe). An id already stored on the org (from sign-up or
+Billing) wins over the customer's metadata: check it under Billing before sending the invoice.
+A `license_org` that is not a valid org id issues no license: the webhook answers 500 and logs a
+warning, so Stripe retries the event. Fix the id (under Billing, or in the customer's metadata)
+and the next retry, or **Resend** on the event in the Stripe Dashboard, issues the license for
+the period paid.
 
 ## Tax
 

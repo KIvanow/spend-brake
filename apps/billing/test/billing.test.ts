@@ -1098,36 +1098,51 @@ describe('licenses', () => {
     expect((await plan(orgId)).licenseOrg).toBe('bigcorp');
   });
 
-  it('issues nothing for license_org metadata that is not an org id, and says so', async () => {
-    const { orgId } = await signup('free', '203.0.113.83');
+  it('refuses license_org metadata that is not an org id, so Stripe retries once it is fixed', async () => {
+    const { orgId, ownerToken } = await signup('free', '203.0.113.83');
     customers.set('cus_typo', {
       id: 'cus_typo',
       metadata: { orgId, license_org: 'big corp' },
     } as unknown as Stripe.Customer);
     const warned: string[] = [];
     const before = mails.length;
-    const outcome = await applyEvent(
-      {
-        db,
-        stripe: fakeStripe,
-        licenseKey: signer.privateKey,
-        now: () => NOW,
-        sendLicense: (m) => Promise.resolve(void mails.push(m)),
-        log: { warn: (_o, msg) => void warned.push(msg) },
-      },
-      event(
-        'invoice.paid',
-        invoice('in_typo', 'cus_typo', 'prod_enterprise', new Date('2027-10-30T00:00:00Z')),
-      ) as unknown as Stripe.Event,
-    );
-    // Applied, so Stripe does not retry it: the id is fixed under Billing for the next invoice.
-    expect(outcome).toBe('applied');
-    expect(warned).toEqual(['license_org metadata is not a valid org id: license not issued']);
+    const paid = event(
+      'invoice.paid',
+      invoice('in_typo', 'cus_typo', 'prod_enterprise', new Date('2027-10-30T00:00:00Z')),
+    ) as unknown as Stripe.Event;
+    const apply = () =>
+      applyEvent(
+        {
+          db,
+          stripe: fakeStripe,
+          licenseKey: signer.privateKey,
+          now: () => NOW,
+          sendLicense: (m) => Promise.resolve(void mails.push(m)),
+          log: { warn: (_o, msg) => void warned.push(msg) },
+        },
+        paid,
+      );
+    // Not recorded: the endpoint answers 500 and Stripe sends the event again.
+    await expect(apply()).rejects.toThrow(/not a valid org id/);
+    expect(warned).toEqual([
+      'license_org metadata is not a valid org id: license not issued, the event will be retried',
+    ]);
     expect(await db.select().from(issuedLicenses).where(eq(issuedLicenses.orgId, orgId))).toEqual(
       [],
     );
     expect(mails).toHaveLength(before);
-    expect((await plan(orgId)).licenseOrg).toBeNull();
+    expect(await db.select().from(stripeEvents).where(eq(stripeEvents.id, paid.id))).toEqual([]);
+    // The owner fixes the id under Billing; Stripe's retry issues the license for the paid period.
+    await billing.inject({
+      method: 'PUT',
+      url: '/v1/billing/license-org',
+      headers: bearer(ownerToken),
+      payload: { licenseOrg: 'bigcorp' },
+    });
+    expect(await apply()).toBe('applied');
+    const [row] = await db.select().from(issuedLicenses).where(eq(issuedLicenses.orgId, orgId));
+    expect(verify(row!.raw).org).toBe('bigcorp');
+    expect(mails).toHaveLength(before + 1);
   });
 
   it('emails each license on an invoice with several license lines', async () => {

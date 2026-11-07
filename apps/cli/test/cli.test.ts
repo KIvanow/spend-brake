@@ -448,16 +448,19 @@ describe('brake license', () => {
     const { mkdtempSync, writeFileSync } = await import('node:fs');
     const { tmpdir } = await import('node:os');
     const { join } = await import('node:path');
-    const file = join(mkdtempSync(join(tmpdir(), 'lic-')), 'acme.license');
+    // A path with a space and a quote still pastes as one word.
+    const file = join(mkdtempSync(join(tmpdir(), "lic it's-")), 'acme.license');
     writeFileSync(file, '{"format":"spend-brake-license/1","payload":"e30","signature":"AA"}\n');
     const f = fake({ ...ENV, BRAKE_ADMIN_TOKEN: `sbt_${'a'.repeat(32)}` }, () => ({
       status: 403,
       body: { error: 'forbidden', message: 'This needs the owner role.' },
     }));
     expect(await run(['license', 'install', file], f.io)).toBe(EXIT.error);
-    expect(f.err.join('')).toContain(
-      `owner token \`brake init\` printed: BRAKE_ADMIN_TOKEN=<owner token> brake license install ${file}`,
-    );
+    const err = f.err.join('');
+    // The token is read without echo, never typed into the command line.
+    expect(err).toContain('read -rs BRAKE_ADMIN_TOKEN && export BRAKE_ADMIN_TOKEN && brake');
+    expect(err).not.toContain('BRAKE_ADMIN_TOKEN=');
+    expect(err).toContain(`brake license install '${file.replaceAll("'", "'\\''")}'`);
   });
 });
 

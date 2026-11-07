@@ -59,6 +59,9 @@ interface Status {
 }
 
 /** Caps as a table with --pretty (list and set answer with the same items). */
+/** A path as one shell word, safe to paste. */
+const shellWord = (s: string) => (/^[\w./-]+$/.test(s) ? s : `'${s.replaceAll("'", "'\\''")}'`);
+
 function printCaps(io: Io, r: { items: Cap[]; pending?: unknown[] }, asTable: boolean) {
   print(
     io,
@@ -389,7 +392,7 @@ export function adminCommands(program: Command, io: Io, done: (code: number) => 
         // The saved config holds an admin token; installing takes the owner token init printed.
         if (err instanceof CliError && /owner role/.test(err.message)) {
           throw new CliError(
-            `${err.message} Run it with the owner token \`brake init\` printed: BRAKE_ADMIN_TOKEN=<owner token> brake license install ${file}`,
+            `${err.message} Run it with the owner token \`brake init\` printed, read without echo so it stays out of your shell history: read -rs BRAKE_ADMIN_TOKEN && export BRAKE_ADMIN_TOKEN && brake license install ${shellWord(file)}`,
             err.code,
           );
         }
