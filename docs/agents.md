@@ -102,27 +102,28 @@ brake doctor --prove --pretty              # with a key that may mint sessions
 
 It fails on a missing, revoked, killed or uncapped key (a budget per `X-Brake-Session` alone is
 no cap: the client names the session, so it can start a fresh one), a `BRAKE_SESSION` the proxy
-would refuse, unpriced routes charged $0,
-an admin token the agent can read (in the environment or the saved config), and raw provider
-keys (`TAVILY_API_KEY`, `AIza…`, …) in the environment or in `./.env*` files, which let the
-agent call the provider directly; placeholders such as `your_key_here` are skipped. It warns
-on a second virtual key, plain HTTP to a remote host, some of the key's providers killed,
-fail-open keys, keys that never expire,
-keys with many providers, and providers whose unpriced routes are forwarded at a default price.
-Secrets are named, never printed.
+would refuse, unpriced routes charged $0, an admin token the agent can read (in the environment
+or the saved config), and raw provider keys (`TAVILY_API_KEY`, `AIza…`, …) in the environment
+or in `./.env*` files, which let the agent call the provider directly; placeholders such as
+`your_key_here` are skipped. It warns on a second virtual key, plain HTTP to a remote host,
+some of the key's providers killed, fail-open keys, keys that never expire, keys with many
+providers, and providers whose unpriced routes are forwarded at a default price. Secrets are
+named, never printed.
 
 `--prove` mints a $0, 60-second session from the key and sends one priced request with it. The
 proxy must refuse it with `402 budget_exceeded` before it contacts the provider; the session is
 then ended, having spent nothing. Such a session does not count toward a plan's agent sessions,
-so `--prove` can run on every deploy (it still needs a plan whose payment has gone through). The repository runs the same probe against a counting
+so `--prove` can run on every deploy (it still needs a plan whose payment has gone through and
+whose monthly requests are not used up). The repository runs the same probe against a counting
 mock provider and checks it receives no request (`apps/cli/test/e2e.test.ts`).
 
 Doctor exits 1 when a check fails, and also when it could not read the key's caps or, with
-`--prove`, could not complete the probe: it exits 0 only for what it actually saw. A clean
-report is not a guarantee: it always lists what a
-client cannot see, such as HTTP clients that skip the proxy, credentials kept elsewhere, the
-org-wide cap, and network egress. Blocking the providers' own hosts at the firewall is what
-makes the proxy the only way out.
+`--prove`, could not complete the probe: it exits 0 only for what it actually saw. A session
+key, or a key that may not mint sessions, cannot run the probe, so run `--prove` with the
+parent key. A clean report is not a guarantee: it always lists what a client cannot see, such
+as HTTP clients that skip the proxy, credentials kept elsewhere, the org-wide cap, and network
+egress. Blocking the providers' own hosts at the firewall is what makes the proxy the only way
+out.
 
 ## MCP clients (preview)
 
