@@ -9,6 +9,8 @@ export interface Io {
   stderr: (s: string) => void;
   fetch: typeof fetch;
   spawn: (cmd: string, args: string[], opts: SpawnOptions) => Child;
+  /** Protocol input for `brake mcp`. */
+  stdin?: NodeJS.ReadableStream;
   /** The working directory `brake doctor` scans. */
   cwd?: () => string;
   /** Ask the user (init wizard); absent when not interactive. */

@@ -139,6 +139,12 @@ brake doctor --prove     # mint a $0 session and show a priced call is refused; 
 
 See [checking a workload](../agents/#check-the-workload-with-brake-doctor) for the checks.
 
+## brake mcp
+
+An MCP server on stdio with capped `tavily_search` and `exa_search` tools and a read-only
+`brake_budget` tool (preview). It reads `BRAKE_KEY`, `BRAKE_URL` and `BRAKE_API_URL`;
+`--tools tavily,exa` picks the providers. Setup: [MCP clients](../agents/#mcp-clients-preview).
+
 ## Admin commands
 
 These use the admin token (`BRAKE_ADMIN_TOKEN` or the saved one).

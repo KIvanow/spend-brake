@@ -3,11 +3,12 @@ import { randomBytes } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { buildApi } from '@spend-brake/api';
 import { bootstrapOrg } from '@spend-brake/api/bootstrap';
 import { BudgetEngine, Registry } from '@spend-brake/budget';
-import { GoogleMapsAdapter } from '@spend-brake/catalog';
+import { ExaAdapter, GoogleMapsAdapter, TavilyAdapter } from '@spend-brake/catalog';
 import { type Db, auditLog, createDb, eq, migrate } from '@spend-brake/db';
 import { buildServer } from '@spend-brake/proxy';
 import { StaticSecretStore } from '@spend-brake/proxy/secrets';
@@ -32,6 +33,7 @@ let proxyUrl = '';
 let registry: Registry;
 let engine: BudgetEngine;
 let googleCalls = 0;
+let searchCalls = 0;
 
 beforeAll(async () => {
   [pg, vk] = await Promise.all([
@@ -58,15 +60,30 @@ beforeAll(async () => {
     googleCalls++;
     return { results: [{ place_id: 'ChIJ' }], status: 'OK' };
   });
+  // Tavily and Exa both search at POST /search; Exa authenticates with x-api-key.
+  mock.post('/search', (req) => {
+    searchCalls++;
+    return req.headers['x-api-key']
+      ? { results: [{ url: 'https://exa.example' }], costDollars: { total: 0.004 } }
+      : { results: [{ url: 'https://tavily.example' }], usage: { credits: 1 } };
+  });
   const mockUrl = await mock.listen({ port: 0, host: '127.0.0.1' });
 
   api = await buildApi({ db, valkey, wrapper: null, authCacheMs: 0, rateLimitPerMinute: 100_000 });
   apiUrl = await api.listen({ port: 0, host: '127.0.0.1' });
   proxy = buildServer({
     valkey,
-    adapters: [new GoogleMapsAdapter()],
-    secrets: new StaticSecretStore({ 'cred-google': 'AIza-real' }),
-    upstreamOverrides: { 'https://maps.googleapis.com': mockUrl },
+    adapters: [new GoogleMapsAdapter(), new TavilyAdapter(), new ExaAdapter()],
+    secrets: new StaticSecretStore({
+      'cred-google': 'AIza-real',
+      'cred-tavily': 'tvly-real',
+      'cred-exa': 'exa-real',
+    }),
+    upstreamOverrides: {
+      'https://maps.googleapis.com': mockUrl,
+      'https://api.tavily.com': mockUrl,
+      'https://api.exa.ai': mockUrl,
+    },
   });
   proxyUrl = await proxy.listen({ port: 0, host: '127.0.0.1' });
 });
@@ -92,14 +109,14 @@ function brake(args: string[], env: Record<string, string>, cwd?: string) {
   });
 }
 
-async function parentKey(opts: { canMintSessions: boolean }) {
+async function parentKey(opts: { canMintSessions: boolean; credentials?: Record<string, string> }) {
   const orgId = `org_${randomBytes(3).toString('hex')}`;
   await bootstrapOrg({ db, registry }, { id: orgId, name: orgId });
   // The key exists in Valkey (what the proxy and the session endpoint read) and Postgres.
   const { token, record } = await registry.createKey({
     id: `key_parent_${randomBytes(3).toString('hex')}`,
     orgId,
-    credentials: { 'google-maps': 'cred-google' },
+    credentials: opts.credentials ?? { 'google-maps': 'cred-google' },
     canMintSessions: opts.canMintSessions,
   });
   const { virtualKeys } = await import('@spend-brake/db');
@@ -241,5 +258,70 @@ describe('brake doctor end to end', () => {
     expect(probeKey.status).toBe('revoked');
     const [status] = await engine.status(parent.orgId, [{ kind: 'key', id: parent.keyId }], 'UTC');
     expect(status!.spent).toBe(0n);
+  });
+});
+
+describe('brake mcp end to end', () => {
+  it('serves capped Tavily and Exa search over stdio until the session cap stops it', async () => {
+    const parent = await parentKey({
+      canMintSessions: true,
+      credentials: { tavily: 'cred-tavily', exa: 'cred-exa' },
+    });
+    // Tavily basic is $0.008 and Exa lite $0.004: a $0.016 session fits three searches.
+    const child = spawn(
+      process.execPath,
+      [CLI, 'session', '--budget', '0.016', '--agent', 'mcp', '--', process.execPath, CLI, 'mcp'],
+      {
+        env: {
+          PATH: process.env.PATH ?? '',
+          BRAKE_URL: proxyUrl,
+          BRAKE_API_URL: apiUrl,
+          BRAKE_KEY: parent.token,
+        },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      },
+    );
+    const replies = createInterface({ input: child.stdout })[Symbol.asyncIterator]();
+    let id = 0;
+    // One request at a time, so which call meets the cap is fixed.
+    const rpc = async (method: string, params: object = {}) => {
+      child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: ++id, method, params })}\n`);
+      const line = await replies.next();
+      return (JSON.parse(line.value as string) as { result: Record<string, unknown> }).result;
+    };
+    const tool = async (name: string, args: object = {}) =>
+      (await rpc('tools/call', { name, arguments: args })) as {
+        content: { text: string }[];
+        isError?: boolean;
+      };
+
+    expect(
+      await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {} }),
+    ).toMatchObject({
+      serverInfo: { name: 'spend-brake' },
+    });
+    const before = searchCalls;
+    const first = await tool('tavily_search', { query: 'valkey' });
+    expect(JSON.parse(first.content[0]!.text)).toMatchObject({
+      cost: '$0.0080',
+      result: { results: [{ url: 'https://tavily.example' }] },
+    });
+    expect((await tool('exa_search', { query: 'valkey', type: 'lite' })).isError).toBeUndefined();
+    expect((await tool('exa_search', { query: 'valkey', type: 'lite' })).isError).toBeUndefined();
+    const stopped = await tool('tavily_search', { query: 'valkey' });
+    expect(stopped.isError).toBe(true);
+    expect(stopped.content[0]!.text).toMatch(/^STOP\. Spend cap reached for key:key_/);
+    expect(searchCalls - before).toBe(3);
+
+    const budget = JSON.parse((await tool('brake_budget')).content[0]!.text) as {
+      caps: { scope: string; remaining: string }[];
+    };
+    expect(budget.caps.find((c) => c.scope.startsWith('key:'))).toMatchObject({
+      remaining: '$0.0000',
+    });
+
+    child.stdin.end();
+    const code = await new Promise<number | null>((resolve) => child.on('exit', resolve));
+    expect(code).toBe(0);
   });
 });
