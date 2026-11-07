@@ -287,7 +287,7 @@ async function callTool(io: Io, tool: Tool, args: Json, structured: boolean): Pr
   if (why) {
     // A STOP says all there is to say; any other failure carries the provider's own error, so
     // the model can fix its arguments.
-    const more = why.code === EXIT.error ? excerpt(r.data) : '';
+    const more = why.code === EXIT.error && !why.message.startsWith('STOP') ? excerpt(r.data) : '';
     return text(
       more && !why.message.includes(more) ? `${why.message} (provider said: ${more})` : why.message,
       true,

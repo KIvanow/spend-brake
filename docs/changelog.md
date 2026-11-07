@@ -34,6 +34,12 @@ images for linux/amd64 and linux/arm64
   its providers, and which of them a provider kill has switched off. It refuses an
   `X-Brake-Session` the proxy would refuse (400) instead of ignoring it.
 
+### Changed
+
+- `brake search`, `brake call` and `brake mcp` answer `STOP`, with the charge, when the provider
+  did not answer in time behind the proxy (`504 upstream_timeout`): it may have done the request,
+  so it must not be retried blindly. Any other failed call that was charged names the charge.
+
 ## [0.2.1] - 2026-11-02
 
 ### Fixed

@@ -161,7 +161,8 @@ offers one provider only. With the CLI installed, `brake mcp` is the same server
 
 Each result carries its `cost` and the `remaining` budget. When a cap stops a search the tool
 answers with an error that starts with `STOP.` and tells the model not to retry. So does a
-search with no answer within 60 s: the proxy may have forwarded and charged it, so the model is
-told to check `brake_budget` before searching again. Other failures carry a short excerpt of
-the provider's error. The search tools are annotated as neither read-only nor idempotent.
+search with no answer within 60 s, or one the provider did not answer in time behind the proxy
+(`504 upstream_timeout`): it may have been forwarded and charged, so the model is told the
+charge and to check `brake_budget` before searching again. Other failures carry a short excerpt
+of the provider's error, and the charge when there was one. The search tools are annotated as neither read-only nor idempotent.
 `BRAKE_API_URL` is required: without it `brake_budget` asks `http://localhost:8081`.

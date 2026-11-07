@@ -366,4 +366,27 @@ describe('brake mcp', () => {
     expect(exa).toContain('HTTP 422');
     expect(exa.length).toBeLessThan(400);
   });
+
+  it('says STOP, with the charge, when the provider timed out behind the proxy', async () => {
+    const m = await mcp([init(), call(2, 'tavily_search', { query: 'q' })], () => ({
+      status: 504,
+      body: { error: 'upstream_timeout', message: 'Provider did not answer in time.' },
+      headers: { 'x-brake-cost-micros': '8000', 'x-brake-remaining-micros': '4992000' },
+    }));
+    const r = m.byId(2).result!;
+    expect(r.isError).toBe(true);
+    expect(r.content![0]!.text).toMatch(
+      /^STOP\. The provider did not answer in time; charged \$0\.0080\./,
+    );
+    expect(r.content![0]!.text).toContain('do not retry it blindly');
+  });
+
+  it('names the charge on any other failed call that was charged', async () => {
+    const m = await mcp([init(), call(2, 'exa_search', { query: 'q' })], () => ({
+      status: 502,
+      body: { error: 'upstream_error', message: 'Bad gateway.' },
+      headers: { 'x-brake-cost-micros': '5000' },
+    }));
+    expect(m.byId(2).result!.content![0]!.text).toContain('charged $0.0050');
+  });
 });

@@ -91,6 +91,8 @@ interface BrakeErrorBody {
 export function refusal(r: ProxyResult): { message: string; code: number } | null {
   if (r.ok) return null;
   const e = (typeof r.data === 'object' && r.data !== null ? r.data : {}) as BrakeErrorBody;
+  // A failed call can still be charged (a provider that timed out may have done the work).
+  const charged = r.costMicros ? `; charged ${r.cost}` : '';
   switch (e.error) {
     case 'budget_exceeded':
       return {
@@ -112,11 +114,16 @@ export function refusal(r: ProxyResult): { message: string; code: number } | nul
         message: `STOP. Repeated identical requests; the key is paused${e.retryAfter ? ` for ${e.retryAfter} s` : ''}. Do not retry; ask the user.`,
         code: EXIT.loop,
       };
+    case 'upstream_timeout':
+      return {
+        message: `STOP. The provider did not answer in time${charged}. It may have done the request anyway: do not retry it blindly; check the budget and ask the user.`,
+        code: EXIT.error,
+      };
     case 'invalid_key':
       return { message: e.message ?? 'invalid virtual key', code: EXIT.auth };
     default:
       return {
-        message: `request failed with HTTP ${r.status}${e.message ? `: ${e.message}` : ''}`,
+        message: `request failed with HTTP ${r.status}${e.message ? `: ${e.message}` : ''}${charged}`,
         code: EXIT.error,
       };
   }
