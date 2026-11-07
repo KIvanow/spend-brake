@@ -26,6 +26,8 @@ interface Me {
   keyId: string;
   sessionId: string | null;
   killed: boolean;
+  /** Servers before 0.3.0 do not send it. */
+  killedProviders?: string[];
   scopes: { scope: string; window: string; hard: number | null; remaining: number | null }[];
   /** Servers before 0.3.0 do not send it. */
   policy?: {
@@ -309,17 +311,42 @@ export function localChecks(io: Io, cwd: string): Check[] {
 /** Every request doctor makes, and its body, gets this long before it is reported as unanswered. */
 const TIMEOUT_MS = 10_000;
 
-async function ready(io: Io, base: string): Promise<{ ok: boolean; detail: string }> {
-  try {
-    const res = await io.fetch(`${base}/readyz`);
-    const body = await res.text();
-    return {
-      ok: res.ok,
-      detail: `${base}/readyz answered HTTP ${res.status} ${body.slice(0, 200)}`,
-    };
-  } catch (err) {
-    return { ok: false, detail: `cannot reach ${base}: ${(err as Error).message}` };
+/**
+ * Readiness at the first of `paths` the server knows (a 404 tries the next). Only a JSON answer
+ * counts: a web server in front, such as the dashboard's, answers any path with its own page.
+ */
+async function ready(
+  io: Io,
+  base: string,
+  paths: string[] = ['/readyz'],
+): Promise<{ ok: boolean; detail: string }> {
+  let detail = '';
+  for (const path of paths) {
+    let res: Response;
+    let body: string;
+    try {
+      res = await io.fetch(`${base}${path}`);
+      body = await res.text();
+    } catch (err) {
+      return { ok: false, detail: `cannot reach ${base}: ${(err as Error).message}` };
+    }
+    detail = `${base}${path} answered HTTP ${res.status} ${body.slice(0, 200)}`;
+    if (res.status === 404) continue;
+    let json: unknown;
+    try {
+      json = JSON.parse(body);
+    } catch {
+      json = null;
+    }
+    if (typeof json !== 'object' || json === null) {
+      return {
+        ok: false,
+        detail: `${base}${path} answered HTTP ${res.status} with a page, not a Spend Brake readiness report: is this URL a website in front of the service?`,
+      };
+    }
+    return { ok: res.ok && (json as { ok?: unknown }).ok !== false, detail };
   }
+  return { ok: false, detail };
 }
 
 /** A cheap priced request per provider, refused by a $0 cap before the provider is called. */
@@ -511,8 +538,11 @@ export async function remoteChecks(
 ): Promise<{ checks: Check[]; me: Me | null }> {
   const cfg = config(io);
   const checks: Check[] = [];
-  const proxy = await ready(io, cfg.proxyUrl);
-  const api = await ready(io, cfg.apiUrl);
+  // The API also answers under /v1, the only path the dashboard domain forwards to it.
+  const [proxy, api] = await Promise.all([
+    ready(io, cfg.proxyUrl),
+    ready(io, cfg.apiUrl, ['/v1/readyz', '/readyz']),
+  ]);
   checks.push(
     {
       id: 'proxy.reachable',
@@ -528,6 +558,17 @@ export async function remoteChecks(
     },
   );
   if (!cfg.key) return { checks, me: null };
+  // Whatever stopped doctor from reading the key, the checks it then skipped are reported as
+  // not checked, never left out: a report without them would read as passing.
+  const unchecked = async (): Promise<{ checks: Check[]; me: null }> => {
+    checks.push({
+      id: 'key.capped',
+      status: 'unknown',
+      title: 'Could not check the caps on this key',
+    });
+    if (opts.prove) checks.push(await prove(io, null));
+    return { checks, me: null };
+  };
   if (!api.ok) {
     checks.push({
       id: 'key.valid',
@@ -535,7 +576,7 @@ export async function remoteChecks(
       title: 'Could not check BRAKE_KEY',
       detail: 'The admin API is not ready, so the key, its caps and its policy were not checked.',
     });
-    return { checks, me: null };
+    return unchecked();
   }
 
   let me: Me | null = null;
@@ -549,7 +590,16 @@ export async function remoteChecks(
         title: 'BRAKE_KEY is not a working key',
         detail: `GET /v1/me answered HTTP ${res.status}: the key is unknown, revoked, expired or not allowed from this IP.`,
       });
-    else
+    else if (res.status === 400 && cfg.session) {
+      const e = (await res.json().catch(() => ({}))) as { message?: string };
+      checks.push({
+        id: 'key.session',
+        status: 'fail',
+        title: 'The proxy refuses every call with this BRAKE_SESSION',
+        detail: e.message ?? `GET /v1/me answered HTTP ${res.status}.`,
+        fix: 'Unset BRAKE_SESSION, or use a key with a session budget and a name of up to 128 letters, digits, `.`, `_` or `-`.',
+      });
+    } else
       checks.push({
         id: 'key.valid',
         status: 'unknown',
@@ -564,7 +614,7 @@ export async function remoteChecks(
       detail: (err as Error).message,
     });
   }
-  if (!me) return { checks, me };
+  if (!me) return unchecked();
 
   checks.push({
     id: 'key.valid',
@@ -581,7 +631,15 @@ export async function remoteChecks(
           detail: 'The key, its parent, its session or the org is killed: every call is refused.',
           fix: 'Expected after a kill; resume it with `brake unkill` when ready.',
         }
-      : { id: 'key.killed', status: 'pass', title: 'Spending is switched on' },
+      : me.killedProviders?.length
+        ? {
+            id: 'key.killed',
+            status: 'warn',
+            title: "Some of this key's providers are switched off",
+            detail: `${me.killedProviders.join(', ')}: every call to them is refused.`,
+            fix: 'Expected after a kill; resume them with `brake unkill` when ready.',
+          }
+        : { id: 'key.killed', status: 'pass', title: 'Spending is switched on' },
   );
   // A session the client names (X-Brake-Session) is no limit: the client can pick a fresh name,
   // or send none. Only a session key's own session binds it.
@@ -741,7 +799,12 @@ export function doctorCommand(program: Command, io: Io, done: (code: number) => 
       const checks = [...local, ...remote];
       const summary = { pass: 0, warn: 0, fail: 0, unknown: 0 };
       for (const c of checks) summary[c.status]++;
-      const ok = summary.fail === 0;
+      // Doctor vouches only for what it saw: the caps on the key, and the probe when asked for.
+      const passed = (id: string) => checks.some((c) => c.id === id && c.status === 'pass');
+      const ok =
+        summary.fail === 0 &&
+        passed('key.capped') &&
+        (!o.prove || passed('enforcement.exhausted-budget'));
       if (!pretty) {
         io.stdout(`${JSON.stringify({ ok, summary, checks, notVerified: NOT_VERIFIED })}\n`);
       } else {
@@ -760,7 +823,9 @@ export function doctorCommand(program: Command, io: Io, done: (code: number) => 
           '',
           ok
             ? 'No failed checks in what doctor can verify. This is not a guarantee that every spend is capped.'
-            : 'Fix the failed checks above; until then doctor cannot vouch for this workload.',
+            : summary.fail
+              ? 'Fix the failed checks above; until then doctor cannot vouch for this workload.'
+              : 'Doctor could not check the caps (or the --prove probe) above, so it cannot vouch for this workload.',
         );
         io.stdout(`${lines.join('\n')}\n`);
       }

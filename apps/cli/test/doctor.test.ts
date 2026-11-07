@@ -196,8 +196,70 @@ describe('brake doctor', () => {
     const down = await doctor({ BRAKE_KEY: KEY }, () => ({ status: 503, body: { ok: false } }));
     expect(down.status('proxy.reachable')).toBe('fail');
     expect(down.status('api.reachable')).toBe('fail');
-    expect(down.status('key.capped')).toBeUndefined();
+    expect(down.status('key.capped')).toBe('unknown');
     expect(down.status('key.valid')).toBe('unknown');
+  });
+
+  it('does not pass a key whose caps it could not read, and still reports --prove', async () => {
+    const d = await doctor(
+      { BRAKE_KEY: KEY },
+      (c) =>
+        c.url.endsWith('/readyz') ? { status: 200, body: { ok: true } } : { status: 502, body: {} },
+      { args: ['--prove'] },
+    );
+    expect(d.report!.checks.filter((c) => c.status === 'fail')).toEqual([]);
+    expect(d.status('key.capped')).toBe('unknown');
+    expect(d.status('enforcement.exhausted-budget')).toBe('unknown');
+    expect(d.report!.ok).toBe(false);
+    expect(d.code).toBe(EXIT.error);
+  });
+
+  it('does not take a web page in front of the API for readiness', async () => {
+    const html = '<!doctype html><html><body>dashboard</body></html>';
+    const spa = await doctor({ BRAKE_KEY: KEY }, (c) =>
+      c.url.startsWith('https://api/') && c.url.endsWith('/readyz')
+        ? { status: 200, body: html }
+        : healthy(me())(c),
+    );
+    expect(spa.status('api.reachable')).toBe('fail');
+    expect(spa.report!.checks.find((c) => c.id === 'api.reachable')!.detail).toMatch(
+      /not a Spend Brake/,
+    );
+
+    // Through the dashboard: /v1/readyz reaches the API; an older API without it falls back.
+    const viaV1 = await doctor({ BRAKE_KEY: KEY }, healthy(me()));
+    expect(viaV1.f.calls.some((c) => c.url === 'https://api/v1/readyz')).toBe(true);
+    const old = await doctor({ BRAKE_KEY: KEY }, (c) =>
+      c.url === 'https://api/v1/readyz'
+        ? { status: 404, body: { error: 'not_found' } }
+        : healthy(me())(c),
+    );
+    expect(old.status('api.reachable')).toBe('pass');
+    expect(old.f.calls.some((c) => c.url === 'https://api/readyz')).toBe(true);
+  });
+
+  it('fails a BRAKE_SESSION the proxy would refuse', async () => {
+    const d = await doctor({ BRAKE_KEY: KEY, BRAKE_SESSION: 'run-1' }, (c) =>
+      c.url.endsWith('/v1/me')
+        ? {
+            status: 400,
+            body: {
+              error: 'invalid_request',
+              message: 'This key has no session budget; drop X-Brake-Session.',
+            },
+          }
+        : healthy(me())(c),
+    );
+    expect(d.status('key.session')).toBe('fail');
+    expect(d.report!.checks.find((c) => c.id === 'key.session')!.detail).toMatch(
+      /no session budget/,
+    );
+    expect(d.code).toBe(EXIT.error);
+  });
+
+  it("warns when some of the key's providers are killed", async () => {
+    const d = await doctor({ BRAKE_KEY: KEY }, healthy(me({ killedProviders: ['tavily'] })));
+    expect(d.status('key.killed')).toBe('warn');
   });
 
   it('fails a revoked key and a killed one', async () => {

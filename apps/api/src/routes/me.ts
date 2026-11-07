@@ -2,7 +2,7 @@ import { SESSION_ID, type Scope, capTemplatesFor } from '@spend-brake/budget';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { type Ctx, n } from '../common.js';
-import { ApiError, type Router } from '../route.js';
+import { ApiError, type Router, errorSchema } from '../route.js';
 
 const scopeStatus = z.object({
   scope: z.string(),
@@ -44,6 +44,10 @@ export function meRoutes(app: FastifyInstance, router: Router, ctx: Ctx): void {
     tags: ['Sessions'],
     request: { headers: z.object({ 'x-brake-session': z.string().optional() }) },
     responses: {
+      400: {
+        description: 'An X-Brake-Session the proxy would refuse',
+        content: { 'application/json': { schema: errorSchema } },
+      },
       200: {
         description: 'OK',
         content: {
@@ -52,6 +56,8 @@ export function meRoutes(app: FastifyInstance, router: Router, ctx: Ctx): void {
               keyId: z.string(),
               sessionId: z.string().nullable(),
               killed: z.boolean(),
+              /** The key's providers switched off by a provider kill (`prov:<name>`). */
+              killedProviders: z.array(z.string()),
               scopes: z.array(scopeStatus),
               policy: policyView,
             }),
@@ -76,14 +82,19 @@ export function meRoutes(app: FastifyInstance, router: Router, ctx: Ctx): void {
     if (key.sessionId) scopes.push({ kind: 'sess', id: key.sessionId });
     // A session the client names (X-Brake-Session), as the proxy charges it: only keys with a
     // session budget may name one, and its cap is that budget until the first call creates it.
-    const named = req.headers['x-brake-session'];
-    const namedSession =
-      !key.sessionId &&
-      key.sessionCapMicros !== null &&
-      typeof named === 'string' &&
-      SESSION_ID.test(named)
-        ? named
-        : null;
+    // A header the proxy would refuse is refused here too, so `brake doctor` sees it.
+    const named = key.sessionId ? undefined : req.headers['x-brake-session'];
+    if (named !== undefined && (typeof named !== 'string' || !SESSION_ID.test(named))) {
+      throw new ApiError(400, 'invalid_request', 'Invalid X-Brake-Session.');
+    }
+    if (named !== undefined && key.sessionCapMicros === null) {
+      throw new ApiError(
+        400,
+        'invalid_request',
+        'This key has no session budget; drop X-Brake-Session.',
+      );
+    }
+    const namedSession = named ?? null;
     if (namedSession) scopes.push({ kind: 'sess', id: namedSession });
     if (key.parentKeyId) scopes.push({ kind: 'key', id: key.parentKeyId });
     if (key.agentId) scopes.push({ kind: 'agent', id: key.agentId });
@@ -100,6 +111,8 @@ export function meRoutes(app: FastifyInstance, router: Router, ctx: Ctx): void {
       capTemplatesFor(key, key.sessionId ?? namedSession),
     );
     const providers = Object.keys(key.credentials).sort();
+    // A provider kill stops this key only for that provider; all of them stop it altogether.
+    const killedProviders = providers.filter((p) => killed.includes(`prov:${p}`));
     const mine = [
       'org',
       `key:${key.id}`,
@@ -110,7 +123,10 @@ export function meRoutes(app: FastifyInstance, router: Router, ctx: Ctx): void {
     return {
       keyId: key.id,
       sessionId: key.sessionId,
-      killed: killed.some((k) => mine.includes(k)),
+      killed:
+        killed.some((k) => mine.includes(k)) ||
+        (providers.length > 0 && killedProviders.length === providers.length),
+      killedProviders,
       scopes: status.map((s) => ({
         scope: s.scope,
         window: s.window,

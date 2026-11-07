@@ -131,9 +131,10 @@ export function sessionRoutes(
       dayBudgetMicros: parsed.data.dayBudgetMicros ?? 20_000_000n,
     };
     const orgId = c.auth.orgId;
-    // A $0 session of a minute at most (brake doctor --prove) can spend nothing.
+    // A $0 session of a minute at most (brake doctor --prove) can spend nothing, so it does not
+    // use up the plan's sessions; a failed payment or a spent request allowance still stops it.
     const probe = body.budgetMicros === 0n && body.ttlSec <= PROBE_TTL_SEC;
-    if (!probe) await requireCapacity(ctx, orgId, 'session');
+    await requireCapacity(ctx, orgId, probe ? 'probe' : 'session');
 
     let parent: KeyRecord;
     if (c.kind === 'key') {

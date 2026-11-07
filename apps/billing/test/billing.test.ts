@@ -597,6 +597,23 @@ describe('agent sessions', () => {
     expect((await mint(probe)).statusCode).toBe(201);
     expect((await mint(probe)).statusCode).toBe(201);
   });
+
+  it('refuses even a $0 probe while a payment has failed', async () => {
+    const { orgId, ownerToken: t } = await signup('free', '203.0.113.79');
+    const cred = (await credential(t, 'mapbox')).json<{ id: string }>().id;
+    const parentKeyId = (await newKey(t, cred)).json<{ id: string }>().id;
+    await db
+      .update(orgEntitlements)
+      .set({ status: 'past_due' })
+      .where(eq(orgEntitlements.orgId, orgId));
+    const res = await api.inject({
+      method: 'POST',
+      url: '/v1/sessions',
+      headers: bearer(t),
+      payload: { parentKeyId, budgetMicros: '0', dayBudgetMicros: '0', ttlSec: 60 },
+    });
+    expect(res.json()).toMatchObject({ error: 'payment_required' });
+  });
 });
 
 describe('plan transitions', () => {

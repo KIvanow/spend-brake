@@ -4457,6 +4457,12 @@
                     "killed": {
                       "type": "boolean"
                     },
+                    "killedProviders": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
                     "scopes": {
                       "type": "array",
                       "items": {
@@ -4570,9 +4576,20 @@
                     "keyId",
                     "sessionId",
                     "killed",
+                    "killedProviders",
                     "scopes",
                     "policy"
                   ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "An X-Brake-Session the proxy would refuse",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }

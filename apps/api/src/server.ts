@@ -162,13 +162,17 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   app.get('/v1/openapi.json', { config: { rateLimit: false } }, () => spec);
   // Liveness: the process answers. Readiness: Valkey and Postgres answer too.
   app.get('/healthz', { config: { rateLimit: false } }, () => ({ ok: true, service: 'api' }));
-  app.get('/readyz', { config: { rateLimit: false } }, async (_req, reply) => {
-    const [valkey, postgres] = await Promise.all([
-      answers(() => deps.valkey.ping()),
-      answers(() => deps.db.execute(sql`select 1`)),
-    ]);
-    const ok = valkey && postgres;
-    return reply.code(ok ? 200 : 503).send({ ok, valkey, postgres });
-  });
+  // Also under /v1, the only path the dashboard's nginx forwards, so `brake doctor` can check
+  // readiness through the dashboard domain.
+  for (const path of ['/readyz', '/v1/readyz']) {
+    app.get(path, { config: { rateLimit: false } }, async (_req, reply) => {
+      const [valkey, postgres] = await Promise.all([
+        answers(() => deps.valkey.ping()),
+        answers(() => deps.db.execute(sql`select 1`)),
+      ]);
+      const ok = valkey && postgres;
+      return reply.code(ok ? 200 : 503).send({ ok, valkey, postgres });
+    });
+  }
   return app;
 }

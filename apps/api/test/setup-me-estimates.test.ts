@@ -162,19 +162,50 @@ describe('GET /v1/me', () => {
       (
         await call('POST', '/v1/keys', { name: 'k', credentials: { acme: cred }, sessionCapMicros })
       ).json<{ token: string }>().token;
-    const me = async (token: string) =>
-      (
-        await env.app.inject({
-          url: '/v1/me',
-          headers: { 'x-brake-key': token, 'x-brake-session': 'run-7' },
-        })
-      ).json<{ scopes: { scope: string; window: string; hard: number | null }[] }>();
+    const me = (token: string, session = 'run-7') =>
+      env.app.inject({
+        url: '/v1/me',
+        headers: { 'x-brake-key': token, 'x-brake-session': session },
+      });
 
     // Before the first call the session cap is the key's session budget.
-    const sess = (await me(await key(2_000_000))).scopes.filter((s) => s.scope === 'sess:run-7');
+    const budgeted = await key(2_000_000);
+    const sess = (await me(budgeted))
+      .json<{ scopes: { scope: string; window: string; hard: number | null }[] }>()
+      .scopes.filter((s) => s.scope === 'sess:run-7');
     expect(sess.find((s) => s.window.startsWith('m:'))).toMatchObject({ hard: 2_000_000 });
-    // Without a session budget the proxy refuses the header, so it is not a scope here either.
-    expect((await me(await key(null))).scopes.some((s) => s.scope === 'sess:run-7')).toBe(false);
+    // A header the proxy refuses is refused here too: no session budget, or a bad id.
+    const plain = await me(await key(null));
+    expect(plain.statusCode).toBe(400);
+    expect(plain.json()).toMatchObject({
+      message: expect.stringContaining('no session budget') as string,
+    });
+    expect((await me(budgeted, 'x'.repeat(129))).statusCode).toBe(400);
+  });
+
+  it('reports provider kills: all of them kill the key, some of them are listed', async () => {
+    const org = await newOrg(env);
+    const call = (url: string, payload: object) =>
+      env.app.inject({ method: 'POST', url, headers: bearer(org.admin), payload });
+    const cred = async (provider: string) =>
+      (await call('/v1/providers/credentials', { provider, name: 'c', secret: 's' })).json<{
+        id: string;
+      }>().id;
+    const [acme, zeta] = [await cred('acme'), await cred('zeta')];
+    const both = (await call('/v1/keys', { name: 'b', credentials: { acme, zeta } })).json<{
+      token: string;
+    }>().token;
+    const one = (await call('/v1/keys', { name: 'o', credentials: { acme } })).json<{
+      token: string;
+    }>().token;
+    expect((await call('/v1/kill', { target: 'prov:acme' })).statusCode).toBeLessThan(300);
+    const me = async (token: string) =>
+      (await env.app.inject({ url: '/v1/me', headers: { 'x-brake-key': token } })).json<{
+        killed: boolean;
+        killedProviders: string[];
+      }>();
+    expect(await me(both)).toMatchObject({ killed: false, killedProviders: ['acme'] });
+    expect(await me(one)).toMatchObject({ killed: true, killedProviders: ['acme'] });
   });
 
   it("shows a session's agent day cap before the first call creates it, as the proxy would", async () => {

@@ -64,7 +64,8 @@ async function requestsThisMonth(ctx: Ctx, orgId: string): Promise<number> {
 export async function requireCapacity(
   ctx: Ctx,
   orgId: string,
-  what: 'key' | 'session' | 'customApi' | { provider: string },
+  /** `probe`: a $0 doctor session, which counts against nothing but needs a paid-up plan. */
+  what: 'key' | 'session' | 'probe' | 'customApi' | { provider: string },
 ): Promise<void> {
   const e = await entitlementsOf(ctx, orgId);
   if (!e) return;
@@ -101,7 +102,8 @@ export async function requireCapacity(
           gte(virtualKeys.createdAt, monthStart(ctx.now())),
           sql`${virtualKeys.config}->>'sessionId' is not null`,
           // Probes ($0, a minute at most) can spend nothing.
-          sql`not (${virtualKeys.config}->>'sessionCapMicros' = '0' and ${virtualKeys.expiresAt} <= ${virtualKeys.createdAt} + make_interval(secs => ${PROBE_TTL_SEC}))`,
+          // A NULL in either column is not a probe: coalesce keeps the row counted.
+          sql`not coalesce(${virtualKeys.config}->>'sessionCapMicros' = '0' and ${virtualKeys.expiresAt} <= ${virtualKeys.createdAt} + make_interval(secs => ${PROBE_TTL_SEC}), false)`,
         ),
       );
     if (Number(row?.n ?? 0) >= e.agentSessionsPerMonth) {
