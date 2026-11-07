@@ -15,6 +15,9 @@ images for linux/amd64 and linux/arm64
   providers whose unpriced routes are forwarded. `--prove` mints a $0 session and shows that
   the proxy refuses a priced call before forwarding it, spending nothing. Every report lists
   what doctor cannot verify; it never reports a workload as protected.
+- `brake mcp`, a stdio MCP server with capped `tavily_search` and `exa_search` tools and a
+  read-only `brake_budget` tool, to replace a Tavily or Exa MCP server entry without changing
+  the agent (preview).
 - `GET /v1/me` reports the key's own policy: its providers, SKUs, whether it may mint
   sessions, its expiry, fail-open allowance, and the org's unpriced-route policy for each of
   its providers.

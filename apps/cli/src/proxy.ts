@@ -82,6 +82,44 @@ interface BrakeErrorBody {
 }
 
 /**
+ * Why the proxy refused a result, as one line telling an agent to stop rather than retry, and
+ * the exit code that goes with it. Null when the call succeeded.
+ */
+export function refusal(r: ProxyResult): { message: string; code: number } | null {
+  if (r.ok) return null;
+  const e = (typeof r.data === 'object' && r.data !== null ? r.data : {}) as BrakeErrorBody;
+  switch (e.error) {
+    case 'budget_exceeded':
+      return {
+        message: `STOP. Spend cap reached for ${e.scope ?? 'this key'}${e.cap !== undefined ? ` (cap ${microsToUsd(e.cap, 2)})` : ''}. Do not retry; ask the user to raise the cap.`,
+        code: EXIT.budget,
+      };
+    case 'killed':
+      return {
+        message: `STOP. Spending is switched off for ${e.target ?? 'this key'}. Ask the user.`,
+        code: EXIT.budget,
+      };
+    case 'unpriced_route':
+      return {
+        message: 'STOP. This route has no known price, so it is blocked. Ask the user.',
+        code: EXIT.budget,
+      };
+    case 'loop_detected':
+      return {
+        message: `STOP. Repeated identical requests; the key is paused${e.retryAfter ? ` for ${e.retryAfter} s` : ''}. Do not retry; ask the user.`,
+        code: EXIT.loop,
+      };
+    case 'invalid_key':
+      return { message: e.message ?? 'invalid virtual key', code: EXIT.auth };
+    default:
+      return {
+        message: `request failed with HTTP ${r.status}${e.message ? `: ${e.message}` : ''}`,
+        code: EXIT.error,
+      };
+  }
+}
+
+/**
  * Print a result (JSON by default) and work out the exit code. Proxy refusals get a one-line
  * reason on stderr that tells an agent to stop rather than retry.
  */
@@ -94,34 +132,8 @@ export function report(io: Io, r: ProxyResult, pretty: boolean): number {
   } else {
     io.stdout(`${JSON.stringify(r)}\n`);
   }
-  if (r.ok) return EXIT.ok;
-  const e = (typeof r.data === 'object' && r.data !== null ? r.data : {}) as BrakeErrorBody;
-  switch (e.error) {
-    case 'budget_exceeded':
-      io.stderr(
-        `brake: STOP. Spend cap reached for ${e.scope ?? 'this key'}${e.cap !== undefined ? ` (cap ${microsToUsd(e.cap, 2)})` : ''}. Do not retry; ask the user to raise the cap.\n`,
-      );
-      return EXIT.budget;
-    case 'killed':
-      io.stderr(
-        `brake: STOP. Spending is switched off for ${e.target ?? 'this key'}. Ask the user.\n`,
-      );
-      return EXIT.budget;
-    case 'unpriced_route':
-      io.stderr('brake: STOP. This route has no known price, so it is blocked. Ask the user.\n');
-      return EXIT.budget;
-    case 'loop_detected':
-      io.stderr(
-        `brake: STOP. Repeated identical requests; the key is paused${e.retryAfter ? ` for ${e.retryAfter} s` : ''}. Do not retry; ask the user.\n`,
-      );
-      return EXIT.loop;
-    case 'invalid_key':
-      io.stderr(`brake: ${e.message ?? 'invalid virtual key'}\n`);
-      return EXIT.auth;
-    default:
-      io.stderr(
-        `brake: request failed with HTTP ${r.status}${e.message ? `: ${e.message}` : ''}\n`,
-      );
-      return EXIT.error;
-  }
+  const why = refusal(r);
+  if (!why) return EXIT.ok;
+  io.stderr(`brake: ${why.message}\n`);
+  return why.code;
 }

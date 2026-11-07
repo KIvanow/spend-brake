@@ -105,7 +105,8 @@ or it could lift its own caps. `brake session` warns when it can.
 `brake doctor` checks a workload for these holes from where it runs (a readable admin token,
 raw provider keys, an uncapped key, unpriced routes that are let through), and `--prove` shows
 that an exhausted budget stops forwarding. It lists what it cannot verify rather than calling
-anything protected.
+anything protected. Agents that search through MCP can swap their Tavily or Exa server for
+`brake mcp` (preview), which sends every search through the proxy.
 
 ## Google's controls vs Spend Brake
 

@@ -46,6 +46,23 @@ read, and raw provider keys in the environment or `./.env*` files; it warns on f
 plain HTTP, keys that never expire and forwarded unpriced routes. It always lists what it cannot
 verify.
 
+## MCP server (preview)
+
+`brake mcp` is a stdio MCP server with capped `tavily_search` and `exa_search` tools and a
+read-only `brake_budget` tool. Replace a Tavily or Exa MCP server entry with:
+
+```json
+{
+  "command": "npx",
+  "args": ["-y", "@spend-brake/cli", "mcp"],
+  "env": {
+    "BRAKE_KEY": "sb_live_…",
+    "BRAKE_URL": "https://proxy.spendbrake.dev",
+    "BRAKE_API_URL": "https://app.spendbrake.dev"
+  }
+}
+```
+
 ## Capped calls
 
 ```sh

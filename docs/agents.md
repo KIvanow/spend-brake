@@ -116,3 +116,34 @@ Doctor exits 1 when a check fails. A clean report is not a guarantee: it always 
 client cannot see, such as HTTP clients that skip the proxy, credentials kept elsewhere, the
 org-wide cap, and network egress. Blocking the providers' own hosts at the firewall is what
 makes the proxy the only way out.
+
+## MCP clients (preview)
+
+Agents that search through an MCP server can use `brake mcp` instead of the Tavily or Exa
+server. It offers `tavily_search`, `exa_search` and a read-only `brake_budget`, and sends every
+search through the proxy with the virtual key, so the provider key never reaches the agent.
+Replace the existing entry:
+
+```json
+{
+  "mcpServers": {
+    "search": {
+      "command": "npx",
+      "args": ["-y", "@spend-brake/cli", "mcp"],
+      "env": {
+        "BRAKE_KEY": "sb_live_…",
+        "BRAKE_URL": "https://proxy.spendbrake.dev",
+        "BRAKE_API_URL": "https://app.spendbrake.dev"
+      }
+    }
+  }
+}
+```
+
+and remove `TAVILY_API_KEY` / `EXA_API_KEY` from the agent's configuration. For a budget per
+MCP connection, start it in a session: `"args": ["-y", "@spend-brake/cli", "session",
+"--budget", "2", "--", "npx", "-y", "@spend-brake/cli", "mcp"]`. `--tools tavily` (or `exa`)
+offers one provider only.
+
+Each result carries its `cost` and the `remaining` budget. When a cap stops a search the tool
+answers with an error that starts with `STOP.` and tells the model not to retry.

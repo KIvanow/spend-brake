@@ -6,13 +6,13 @@ import { callCommand } from './commands/call.js';
 import { doctorCommand } from './commands/doctor.js';
 import { initCommand } from './commands/init.js';
 import { mapsCommand } from './commands/maps.js';
+import { mcpCommand } from './commands/mcp.js';
 import { searchCommand } from './commands/search.js';
 import { sessionCommand } from './commands/session.js';
 import { CliError, EXIT, type Io } from './io.js';
+import { VERSION } from './version.js';
 
-// The bundle sets this from package.json (scripts/bundle.mjs); running from source says so.
-declare const __BRAKE_VERSION__: string | undefined;
-export const VERSION = typeof __BRAKE_VERSION__ === 'string' ? __BRAKE_VERSION__ : '0.0.0-dev';
+export { VERSION } from './version.js';
 
 export function buildProgram(io: Io, done: (code: number) => void): Command {
   const program = new Command('brake')
@@ -29,6 +29,7 @@ export function buildProgram(io: Io, done: (code: number) => void): Command {
   callCommand(program, io, done);
   initCommand(program, io, done);
   doctorCommand(program, io, done);
+  mcpCommand(program, io, done);
   adminCommands(program, io, done);
   return program;
 }
@@ -39,6 +40,7 @@ export const defaultIo = (): Io => ({
   stderr: (s) => process.stderr.write(s),
   fetch: globalThis.fetch,
   spawn: (cmd, args, opts) => spawn(cmd, args, opts),
+  stdin: process.stdin,
   cwd: () => process.cwd(),
   ...(process.stdin.isTTY
     ? {
