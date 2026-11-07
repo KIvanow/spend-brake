@@ -24,7 +24,7 @@ detection, CLI, catalog data, dashboard and signed webhooks. It never needs a li
 - billing reconciliation with Google's billing export and Twilio's usage records.
 
 Run it with the `infra/docker-compose.ee.yml` overlay right after the base file, then install
-the license:
+the license ([buying one](#buying-a-license)):
 
 ```sh
 brake license install acme.license   # owner token of the licensed org
@@ -35,6 +35,32 @@ Licenses are Ed25519-signed files checked offline; nothing phones home. After a 
 its features keep working for 14 days, then turn read-only. The proxy and caps never stop. See
 [ee/README.md](https://github.com/KIvanow/spend-brake/blob/main/ee/README.md) and
 [pricing](https://spendbrake.dev/#pricing).
+
+## Buying a license
+
+Business ($299/month, 3 orgs per install) is bought online:
+
+1. Open [Buy Business](https://app.spendbrake.dev/#/signup?plan=business). Give your work email
+   and the **org id of your install**: the `--org` you gave `brake init`. The license names that
+   org, and an install takes it only into the org with the same id (otherwise
+   `403 license_wrong_org`). If the id is taken on the hosted service, email
+   [support@spendbrake.dev](mailto:support@spendbrake.dev) and we license it for you.
+2. Pay through Stripe Checkout. The license file is emailed to you, and the Billing page of the
+   account (the sign-in link is in your email) has **Download the latest license**.
+3. Install it on your server with an owner token of that org:
+
+   ```sh
+   brake license install spend-brake.license
+   brake license status --pretty
+   ```
+
+The account at app.spendbrake.dev is only the customer record (invoices, card, cancelling);
+your install never contacts it. Each license runs to the end of the month paid for, and every
+renewal emails a new one: install it within the 14 days of grace, or the ee features turn
+read-only. Cancelling stops the renewals the same way.
+
+Enterprise (25 orgs per install, invoiced yearly) is arranged with
+[support@spendbrake.dev](mailto:support@spendbrake.dev).
 
 ## Hosted plans
 

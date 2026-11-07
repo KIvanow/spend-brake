@@ -207,6 +207,7 @@ export function Signup() {
   const [unknownPlan, setUnknownPlan] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [installOrg, setInstallOrg] = useState('');
   const [acceptTerms, setAcceptTerms] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -229,6 +230,8 @@ export function Signup() {
   }, [wanted]);
 
   const paid = plan !== 'free';
+  // A license installs only into the org it names, so it is issued for the buyer's own org id.
+  const selfHosted = plans?.find((p) => p.id === plan)?.selfHosted ?? false;
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (paid && !acceptTerms) return;
@@ -241,6 +244,7 @@ export function Signup() {
           name: name.trim(),
           email: email.trim(),
           plan,
+          ...(selfHosted ? { orgId: installOrg.trim() } : {}),
           timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           ...(paid ? { acceptTerms } : {}),
         },
@@ -322,6 +326,23 @@ export function Signup() {
             <p className="muted">Prices exclude VAT where applicable.</p>
           )}
         </fieldset>
+        {selfHosted && (
+          <label>
+            Org id on your install
+            <input
+              value={installOrg}
+              onChange={(e) => setInstallOrg(e.target.value)}
+              placeholder="acme"
+              pattern="[A-Za-z0-9_\-]{3,64}"
+              title="3 to 64 letters, digits, - or _"
+              autoComplete="off"
+              required
+            />
+            <span className="muted">
+              The --org you gave brake init. The license installs only into the org with this id.
+            </span>
+          </label>
+        )}
         {paid ? (
           <TermsConsent checked={acceptTerms} onChange={setAcceptTerms} />
         ) : (

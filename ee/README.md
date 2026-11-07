@@ -38,7 +38,9 @@ brake license status
 | expired | after the grace period     | Read-only: reads work, changes answer `403 license_expired` |
 | missing | no valid license           | None (`403 license_required`); core features as always      |
 
-Issuing licenses needs the private key, which never enters this repository:
+Business licenses are sold online ([buying one](../docs/editions.md#buying-a-license)): the
+billing service issues them when an invoice is paid. Issuing one by hand needs the private key,
+which never enters this repository:
 
 ```sh
 pnpm --filter @spend-brake/ee sign-license -- --key /secure/license-ed25519.pem \
