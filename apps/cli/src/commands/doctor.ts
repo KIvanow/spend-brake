@@ -1,7 +1,7 @@
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Command } from 'commander';
-import { EXIT, type Io, config, configPath, microsToUsd, readSavedConfig } from '../io.js';
+import { EXIT, type Io, type SavedConfig, config, configPath, microsToUsd } from '../io.js';
 import { type ProxyRequest, proxyCall } from '../proxy.js';
 
 type Status = 'pass' | 'warn' | 'fail' | 'unknown';
@@ -87,30 +87,75 @@ function classify(name: string, value: string, key: string | undefined, strict: 
   return null;
 }
 
-/** `.env*` files in the working directory, as name/value pairs (comments and quotes dropped). */
-function dotenvFiles(dir: string): { file: string; vars: [string, string][] }[] {
+/** A dotenv value: the inside of a quoted value, or an unquoted one without its `# comment`. */
+export function dotenvValue(raw: string): string {
+  const v = raw.trim();
+  const q = v[0];
+  if (q === '"' || q === "'") {
+    const end = v.indexOf(q, 1);
+    return end === -1 ? v.slice(1) : v.slice(1, end);
+  }
+  return v.replace(/(^|\s)#.*$/, '').trim();
+}
+
+/** Bigger files are not read, and are reported as not checked. */
+const MAX_DOTENV_BYTES = 10_000_000;
+
+/** `.env*` files in the working directory, as name/value pairs, and the ones too big to read. */
+function dotenvFiles(dir: string): {
+  files: { file: string; vars: [string, string][] }[];
+  skipped: string[];
+} {
+  const files: { file: string; vars: [string, string][] }[] = [];
+  const skipped: string[] = [];
   let names: string[];
   try {
     names = readdirSync(dir).filter((f) => /^\.env/.test(f));
   } catch {
-    return [];
+    return { files, skipped };
   }
-  const out: { file: string; vars: [string, string][] }[] = [];
   for (const f of names.sort()) {
     const path = join(dir, f);
     try {
-      if (!statSync(path).isFile() || statSync(path).size > 1_000_000) continue;
+      const st = statSync(path);
+      if (!st.isFile()) continue;
+      if (st.size > MAX_DOTENV_BYTES) {
+        skipped.push(path);
+        continue;
+      }
       const vars: [string, string][] = [];
       for (const line of readFileSync(path, 'utf8').split('\n')) {
-        const m = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(line);
-        if (m) vars.push([m[1]!, m[2]!.replace(/^(['"])(.*)\1\s*$/, '$2').replace(/\s+#.*$/, '')]);
+        const m = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/.exec(line);
+        if (m) vars.push([m[1]!, dotenvValue(m[2]!)]);
       }
-      out.push({ file: path, vars });
+      files.push({ file: path, vars });
     } catch {
       // unreadable: not reachable by this user either
     }
   }
-  return out;
+  return { files, skipped };
+}
+
+/**
+ * Saved brake configs this user can read: the one brake would use now, and the default one,
+ * which a different XDG_CONFIG_HOME hides from brake but not from the agent.
+ */
+function savedConfigs(io: Io): { looked: string[]; found: { path: string; cfg: SavedConfig }[] } {
+  const paths = new Set<string>();
+  const current = configPath(io);
+  if (current) paths.add(current);
+  if (io.env.HOME) paths.add(join(io.env.HOME, '.config', 'brake', 'config.json'));
+  const found: { path: string; cfg: SavedConfig }[] = [];
+  for (const path of paths) {
+    try {
+      if (existsSync(path)) {
+        found.push({ path, cfg: JSON.parse(readFileSync(path, 'utf8')) as SavedConfig });
+      }
+    } catch {
+      // unreadable or not JSON: brake could not use it either
+    }
+  }
+  return { looked: [...paths], found };
 }
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -154,22 +199,24 @@ export function localChecks(io: Io, cwd: string): Check[] {
       : { id: 'admin-token.env', status: 'pass', title: 'No admin token in the environment' },
   );
 
-  const path = configPath(io);
-  const saved = readSavedConfig(io);
+  const configs = savedConfigs(io);
+  const withToken = configs.found.filter((c) => c.cfg.adminToken).map((c) => c.path);
   checks.push(
-    saved.adminToken
+    withToken.length
       ? {
           id: 'admin-token.config',
           status: 'fail',
           title: 'The saved admin token is readable',
-          detail: `${path} holds an admin token this user can read, so the workload can lift its own caps.`,
-          fix: 'Run the workload as another OS user than the one that ran `brake init`, or with XDG_CONFIG_HOME pointing elsewhere.',
+          detail: `${withToken.join(', ')} holds an admin token this user can read, so the workload can lift its own caps.`,
+          fix: 'Run the workload as another OS user than the one that ran `brake init`. Pointing XDG_CONFIG_HOME elsewhere only hides the file from brake, not from the agent.',
         }
       : {
           id: 'admin-token.config',
           status: 'pass',
           title: 'No readable saved admin token',
-          ...(path ? { detail: `Looked at ${path}.` } : {}),
+          detail: configs.looked.length
+            ? `Looked at ${configs.looked.join(' and ')}; copies elsewhere are not checked.`
+            : 'No config path to look at (HOME is unset).',
         },
   );
 
@@ -206,7 +253,8 @@ export function localChecks(io: Io, cwd: string): Check[] {
         },
   );
 
-  const files = dotenvFiles(cwd).map(({ file, vars }) => ({
+  const scan = dotenvFiles(cwd);
+  const files = scan.files.map(({ file, vars }) => ({
     file,
     found: vars
       .map(([k, v]) => classify(k, v, cfg.key, true))
@@ -214,23 +262,34 @@ export function localChecks(io: Io, cwd: string): Check[] {
   }));
   const hits = files.filter((f) => f.found.length > 0);
   const severe = hits.some((f) => f.found.some((x) => x.kind !== 'virtual'));
+  const notRead = scan.skipped.length
+    ? ` Not read (over ${MAX_DOTENV_BYTES / 1_000_000} MB): ${scan.skipped.join(', ')}.`
+    : '';
   checks.push(
     hits.length
       ? {
           id: 'files.cwd',
           status: severe ? 'fail' : 'warn',
           title: 'Secrets in .env files the workload can read',
-          detail: hits
-            .map((h) => `${h.file}: ${h.found.map((x) => `${x.name} (${x.what})`).join(', ')}`)
-            .join('; '),
+          detail:
+            hits
+              .map((h) => `${h.file}: ${h.found.map((x) => `${x.name} (${x.what})`).join(', ')}`)
+              .join('; ') + notRead,
           fix: 'Move the secrets out of the workspace the agent works in.',
         }
-      : {
-          id: 'files.cwd',
-          status: 'pass',
-          title: 'No secrets in .env files in the working directory',
-          detail: `Looked at ${plural(files.length, 'file')} in ${cwd} (not subfolders).`,
-        },
+      : scan.skipped.length
+        ? {
+            id: 'files.cwd',
+            status: 'unknown',
+            title: 'Some .env files in the working directory were not checked',
+            detail: `Looked at ${plural(files.length, 'file')} in ${cwd}.${notRead}`,
+          }
+        : {
+            id: 'files.cwd',
+            status: 'pass',
+            title: 'No secrets in .env files in the working directory',
+            detail: `Looked at ${plural(files.length, 'file')} in ${cwd} (not subfolders).`,
+          },
   );
 
   for (const [name, url] of [
@@ -255,6 +314,28 @@ export function localChecks(io: Io, cwd: string): Check[] {
     }
   }
   return checks;
+}
+
+/** Every request doctor makes, and its body, gets this long before it is reported as unanswered. */
+const TIMEOUT_MS = 10_000;
+
+export function withTimeout(io: Io, ms: number): Io {
+  return {
+    ...io,
+    fetch: (input: string | URL | Request, init?: RequestInit) =>
+      io.fetch(input, { ...init, signal: AbortSignal.timeout(ms) }),
+  };
+}
+
+/** The key, and the session it spends in when the client names one. */
+export function meHeaders(cfg: {
+  key: string | undefined;
+  session: string | undefined;
+}): Record<string, string> {
+  return {
+    'x-brake-key': cfg.key ?? '',
+    ...(cfg.session ? { 'x-brake-session': cfg.session } : {}),
+  };
 }
 
 async function ready(io: Io, base: string): Promise<{ ok: boolean; detail: string }> {
@@ -332,22 +413,29 @@ async function prove(io: Io, me: Me | null): Promise<Check> {
     };
   }
 
-  const res = await io.fetch(`${cfg.apiUrl}/v1/sessions`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-brake-key': cfg.key! },
-    body: JSON.stringify({
-      budgetMicros: '0',
-      dayBudgetMicros: '0',
-      agentId: 'brake-doctor',
-      ttlSec: 60,
-      name: 'brake doctor probe',
-    }),
-  });
-  const minted = (await res.json().catch(() => ({}))) as {
-    keyId?: string;
-    token?: string;
-    message?: string;
-  };
+  let res: Response;
+  let minted: { keyId?: string; token?: string; message?: string };
+  try {
+    res = await io.fetch(`${cfg.apiUrl}/v1/sessions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-brake-key': cfg.key! },
+      body: JSON.stringify({
+        budgetMicros: '0',
+        dayBudgetMicros: '0',
+        agentId: 'brake-doctor',
+        ttlSec: 60,
+        name: 'brake doctor probe',
+      }),
+    });
+    minted = (await res.json().catch(() => ({}))) as typeof minted;
+  } catch (err) {
+    return {
+      id,
+      status: 'unknown',
+      title,
+      detail: `Could not mint the $0 probe session: ${(err as Error).message}`,
+    };
+  }
   if (res.status !== 201 || !minted.token || !minted.keyId) {
     return {
       id,
@@ -364,12 +452,31 @@ async function prove(io: Io, me: Me | null): Promise<Check> {
   let result: Check | null = null;
   try {
     for (const p of providers) {
-      const r = await proxyCall(probeIo, PROBES[p]!);
+      let r;
+      try {
+        r = await proxyCall(probeIo, PROBES[p]!);
+      } catch (err) {
+        result = {
+          id,
+          status: 'unknown',
+          title,
+          detail: `The ${p} probe did not get an answer: ${(err as Error).message}`,
+        };
+        break;
+      }
       const e = (r.data ?? {}) as { error?: string };
       // Not this key's provider, or not one this proxy serves: try the next.
       if (r.status === 403 && e.error === 'sku_not_allowed') continue;
       if (r.status === 404 && e.error === 'unknown_route') continue;
-      if (r.status === 402 && e.error === 'budget_exceeded' && !r.costMicros) {
+      if (r.costMicros !== null && r.costMicros > 0) {
+        result = {
+          id,
+          status: 'fail',
+          title,
+          detail: `The proxy charged ${r.cost} for a priced ${p} request on a $0 session (HTTP ${r.status}).`,
+          fix: 'Report this: caps are not being enforced on this install.',
+        };
+      } else if (r.status === 402 && e.error === 'budget_exceeded') {
         result = {
           id,
           status: 'pass',
@@ -406,7 +513,7 @@ async function prove(io: Io, me: Me | null): Promise<Check> {
     } catch {
       // the session expires in 60 s anyway
     }
-    if (result && end.spentMicros) {
+    if (end.spentMicros) {
       result = {
         id,
         status: 'fail',
@@ -462,14 +569,21 @@ export async function remoteChecks(
 
   let me: Me | null = null;
   try {
-    const res = await io.fetch(`${cfg.apiUrl}/v1/me`, { headers: { 'x-brake-key': cfg.key } });
+    const res = await io.fetch(`${cfg.apiUrl}/v1/me`, { headers: meHeaders(cfg) });
     if (res.ok) me = (await res.json()) as Me;
-    else
+    else if (res.status === 401 || res.status === 403)
       checks.push({
         id: 'key.valid',
         status: 'fail',
         title: 'BRAKE_KEY is not a working key',
         detail: `GET /v1/me answered HTTP ${res.status}: the key is unknown, revoked, expired or not allowed from this IP.`,
+      });
+    else
+      checks.push({
+        id: 'key.valid',
+        status: 'unknown',
+        title: 'Could not check BRAKE_KEY',
+        detail: `GET /v1/me answered HTTP ${res.status}; the key, its caps and its policy were not checked.`,
       });
   } catch (err) {
     checks.push({
@@ -622,7 +736,9 @@ export function doctorCommand(program: Command, io: Io, done: (code: number) => 
     .action(async (o: { prove?: boolean }, cmd: Command) => {
       const pretty = Boolean(cmd.optsWithGlobals<{ pretty?: boolean }>().pretty);
       const local = localChecks(io, io.cwd?.() ?? process.cwd());
-      const { checks: remote } = await remoteChecks(io, { prove: Boolean(o.prove) });
+      const { checks: remote } = await remoteChecks(withTimeout(io, TIMEOUT_MS), {
+        prove: Boolean(o.prove),
+      });
       const checks = [...local, ...remote];
       const summary = { pass: 0, warn: 0, fail: 0, unknown: 0 };
       for (const c of checks) summary[c.status]++;

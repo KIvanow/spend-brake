@@ -187,18 +187,27 @@ interface Me {
 async function budget(io: Io, structured: boolean): Promise<ToolResult> {
   const cfg = config(io);
   if (!cfg.key) return text('BRAKE_KEY is not set for this MCP server.', true);
-  let res: Response;
+  let me: Me;
   try {
-    res = await io.fetch(`${cfg.apiUrl}/v1/me`, { headers: { 'x-brake-key': cfg.key } });
+    const res = await io.fetch(`${cfg.apiUrl}/v1/me`, {
+      headers: {
+        'x-brake-key': cfg.key,
+        ...(cfg.session ? { 'x-brake-session': cfg.session } : {}),
+      },
+    });
+    if (res.status === 401 || res.status === 403) {
+      return text(`The key was refused (HTTP ${res.status}): unknown, revoked or expired.`, true);
+    }
+    if (!res.ok) return text(`The budget is unavailable right now (HTTP ${res.status}).`, true);
+    me = (await res.json()) as Me;
   } catch (err) {
     return text(`cannot reach the admin API at ${cfg.apiUrl}: ${(err as Error).message}`, true);
   }
-  if (!res.ok)
-    return text(`The key was refused (HTTP ${res.status}): unknown, revoked or expired.`, true);
-  const me = (await res.json()) as Me;
   return result(
     {
       killed: me.killed,
+      // A key sees its own, its session's, its parent's and its agent's caps, not these.
+      notShown: 'Org, environment and SKU caps also apply and are not visible to a key.',
       caps: me.scopes
         .filter((s) => s.hard !== null)
         .map((s) => ({
@@ -215,7 +224,12 @@ async function budget(io: Io, structured: boolean): Promise<ToolResult> {
 }
 
 async function callTool(io: Io, tool: Tool, args: Json, structured: boolean): Promise<ToolResult> {
-  if (!tool.build) return budget(io, structured);
+  if (!tool.build) {
+    const bad = pick(args, tool.inputSchema);
+    return typeof bad === 'string'
+      ? text(`Invalid arguments: ${bad}.`, true)
+      : budget(io, structured);
+  }
   const req = tool.build(args);
   if (typeof req === 'string') return text(`Invalid arguments: ${req}.`, true);
   let r;
@@ -313,7 +327,14 @@ export async function serveMcp(io: Io, tools: Tool[]): Promise<void> {
         if (typeof args !== 'object' || args === null || Array.isArray(args)) {
           return send({ id: msg.id, result: text('Invalid arguments: expected an object.', true) });
         }
-        return send({ id: msg.id, result: await callTool(io, tool, args as Json, structured) });
+        let res: ToolResult;
+        try {
+          res = await callTool(io, tool, args as Json, structured);
+        } catch (err) {
+          // Answer the request whatever went wrong, so the client is never left waiting.
+          return fail(msg.id, -32603, `Internal error: ${(err as Error).message}`);
+        }
+        return send({ id: msg.id, result: res });
       }
       default:
         return fail(msg.id, -32601, `Method not found: ${msg.method}`);

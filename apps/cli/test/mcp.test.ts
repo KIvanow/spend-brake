@@ -192,6 +192,7 @@ describe('brake mcp', () => {
     expect(m.f.calls[0]).toMatchObject({ url: 'http://api/v1/me', method: 'GET' });
     expect(JSON.parse(m.byId(2).result!.content![0]!.text)).toEqual({
       killed: false,
+      notShown: 'Org, environment and SKU caps also apply and are not visible to a key.',
       caps: [
         {
           scope: 'key:key_1',
@@ -226,5 +227,22 @@ describe('brake mcp', () => {
     expect(m.byId(9).error!.code).toBe(-32600);
     // stdout is protocol only.
     expect(m.f.out.every((l) => l.endsWith('\n') && !l.slice(0, -1).includes('\n'))).toBe(true);
+  });
+
+  it('reports the session the server was started in, and takes no arguments', async () => {
+    const m = await mcp(
+      [init(), call(2, 'brake_budget', { scope: 'org' }), call(3, 'brake_budget')],
+      () => ({ status: 200, body: { keyId: 'k', sessionId: null, killed: false, scopes: [] } }),
+      { env: { ...ENV, BRAKE_SESSION: 'run-7' } },
+    );
+    expect(m.byId(2).result).toMatchObject({ isError: true });
+    expect(m.byId(2).result!.content![0]!.text).toContain('unknown argument scope');
+    expect(m.f.calls).toHaveLength(1);
+    expect(m.f.calls[0]!.headers['x-brake-session']).toBe('run-7');
+  });
+
+  it('tells an unavailable budget from a refused key', async () => {
+    const m = await mcp([init(), call(2, 'brake_budget')], () => ({ status: 503, body: {} }));
+    expect(m.byId(2).result!.content![0]!.text).toContain('unavailable right now (HTTP 503)');
   });
 });

@@ -98,9 +98,9 @@ breaker stops a call, `brake` exits 3 or 4 with one line telling the agent to st
 See [Capping an AI agent](https://docs.spendbrake.dev/agents/) and the
 [CLI reference](https://docs.spendbrake.dev/cli/).
 
-Run the agent as a different OS user than the one that ran `brake init` (or with
-`XDG_CONFIG_HOME` pointing elsewhere): the agent must not be able to read the saved admin token,
-or it could lift its own caps. `brake session` warns when it can.
+Run the agent as a different OS user than the one that ran `brake init`: the agent must not be
+able to read the saved admin token, or it could lift its own caps (a different `XDG_CONFIG_HOME`
+hides the file from `brake`, not from the agent). `brake session` warns when it can.
 
 `brake doctor` checks a workload for these holes from where it runs (a readable admin token,
 raw provider keys, an uncapped key, unpriced routes that are let through), and `--prove` shows

@@ -84,10 +84,10 @@ the org settings (`loop` in `PUT /v1/org`: `identical`, `windowSec`, `perMinute`
 
 ## Keep the admin token away from the agent
 
-Run the agent as a different OS user than the one that ran `brake init` (or with
-`XDG_CONFIG_HOME` pointing elsewhere). The agent must not be able to read the saved admin token
-in `~/.config/brake/config.json`, or it could lift its own caps. `brake session` warns when it
-can.
+Run the agent as a different OS user than the one that ran `brake init`. The agent must not be
+able to read the saved admin token in `~/.config/brake/config.json`, or it could lift its own
+caps. Pointing `XDG_CONFIG_HOME` elsewhere is not enough: it hides the file from `brake`, not from
+an agent running as the same user. `brake session` warns when the agent can read the token.
 
 ## Check the workload with brake doctor
 

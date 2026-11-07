@@ -4423,9 +4423,19 @@
     },
     "/v1/me": {
       "get": {
-        "summary": "Remaining budget of the calling virtual key (X-Brake-Key)",
+        "summary": "Remaining budget of the calling virtual key (X-Brake-Key), and of the session it names (X-Brake-Session)",
         "tags": [
           "Sessions"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "x-brake-session",
+            "in": "header"
+          }
         ],
         "responses": {
           "200": {

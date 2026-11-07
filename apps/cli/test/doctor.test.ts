@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { dotenvValue, withTimeout } from '../src/commands/doctor.js';
 import { EXIT } from '../src/io.js';
 import { run } from '../src/program.js';
 import { type Call, fake } from './fake.js';
@@ -244,6 +245,46 @@ describe('brake doctor', () => {
       expect(d.code).toBe(EXIT.error);
     });
 
+    it('fails when the proxy charges for the probe, even on a refusal', async () => {
+      const d = await doctor(
+        { BRAKE_KEY: KEY },
+        healthy(minting, (c) => {
+          if (c.url.endsWith('/v1/sessions')) return session;
+          if (c.method === 'DELETE') throw new Error('gone');
+          return {
+            status: 402,
+            body: { error: 'budget_exceeded' },
+            headers: { 'x-brake-cost-micros': '5000' },
+          };
+        }),
+        { args: ['--prove'] },
+      );
+      expect(d.status('enforcement.exhausted-budget')).toBe('fail');
+    });
+
+    it('keeps the report and ends the session when the probe gets no answer', async () => {
+      const d = await doctor(
+        { BRAKE_KEY: KEY },
+        healthy(minting, (c) => {
+          if (c.url.endsWith('/v1/sessions')) return session;
+          if (c.method === 'DELETE') return { status: 200, body: { spentMicros: 0 } };
+          throw new Error('connection reset');
+        }),
+        { args: ['--prove'] },
+      );
+      expect(d.status('enforcement.exhausted-budget')).toBe('unknown');
+      expect(d.f.calls.at(-1)).toMatchObject({ method: 'DELETE' });
+
+      const noMint = await doctor(
+        { BRAKE_KEY: KEY },
+        healthy(minting, () => {
+          throw new Error('connection reset');
+        }),
+        { args: ['--prove'] },
+      );
+      expect(noMint.status('enforcement.exhausted-budget')).toBe('unknown');
+    });
+
     it('cannot prove anything with a key that may not mint sessions, or a session key', async () => {
       const plain = await doctor({ BRAKE_KEY: KEY }, healthy(me()), { args: ['--prove'] });
       expect(plain.status('enforcement.exhausted-budget')).toBe('unknown');
@@ -260,5 +301,65 @@ describe('brake doctor', () => {
     expect(d.out).toContain('brake doctor: 0 failed');
     expect(d.out).toContain('Not verified');
     expect(d.out).toContain('This is not a guarantee');
+  });
+
+  it('reads dotenv values with quotes and inline comments', () => {
+    expect(dotenvValue(' "abc def" # prod')).toBe('abc def');
+    expect(dotenvValue("'a#b'")).toBe('a#b');
+    expect(dotenvValue('abc # prod')).toBe('abc');
+    expect(dotenvValue('abc#def')).toBe('abc#def');
+    expect(dotenvValue('"unterminated')).toBe('unterminated');
+  });
+
+  it('finds a quoted key followed by a comment, and does not pass files it could not read', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'brake-doctor-cwd-'));
+    writeFileSync(join(cwd, '.env'), 'EXA_API_KEY="0123456789abcdef0123" # prod\n');
+    const found = await doctor({ BRAKE_KEY: KEY }, healthy(me()), { cwd });
+    expect(found.status('files.cwd')).toBe('fail');
+
+    const big = mkdtempSync(join(tmpdir(), 'brake-doctor-cwd-'));
+    writeFileSync(join(big, '.env.dump'), Buffer.alloc(10_000_001, 'a'));
+    const skipped = await doctor({ BRAKE_KEY: KEY }, healthy(me()), { cwd: big });
+    expect(skipped.status('files.cwd')).toBe('unknown');
+  });
+
+  it('finds the default saved config even when XDG_CONFIG_HOME points elsewhere', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'brake-doctor-'));
+    mkdirSync(join(home, '.config', 'brake'), { recursive: true });
+    writeFileSync(
+      join(home, '.config', 'brake', 'config.json'),
+      JSON.stringify({ adminToken: ADMIN }),
+    );
+    const d = await doctor(
+      { BRAKE_KEY: KEY, XDG_CONFIG_HOME: join(home, 'elsewhere') },
+      healthy(me()),
+      {
+        home,
+      },
+    );
+    expect(d.status('admin-token.config')).toBe('fail');
+    expect(d.out).not.toContain(ADMIN);
+  });
+
+  it('reports a key it could not check, rather than a bad key, when the API errs', async () => {
+    const d = await doctor({ BRAKE_KEY: KEY }, (c) =>
+      c.url.endsWith('/readyz') ? { status: 200, body: {} } : { status: 503, body: {} },
+    );
+    expect(d.status('key.valid')).toBe('unknown');
+  });
+
+  it('names the session it runs in when asking for its budget', async () => {
+    const d = await doctor({ BRAKE_KEY: KEY, BRAKE_SESSION: 'run-7' }, healthy(me()));
+    const meCall = d.f.calls.find((c) => c.url.endsWith('/v1/me'))!;
+    expect(meCall.headers['x-brake-session']).toBe('run-7');
+  });
+
+  it('gives up on a request that does not answer in time', async () => {
+    const hanging = fake({}, () => ({ status: 200, body: {} })).io;
+    hanging.fetch = ((_: string, init?: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new Error('timed out')));
+      })) as typeof fetch;
+    await expect(withTimeout(hanging, 20).fetch('http://api/readyz')).rejects.toThrow('timed out');
   });
 });

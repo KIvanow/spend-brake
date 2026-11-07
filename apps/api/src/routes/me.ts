@@ -5,6 +5,9 @@ import { type Ctx, n } from '../common.js';
 import { ApiError, type Router } from '../route.js';
 import { orgTimeZone } from './budget.js';
 
+/** The proxy's rule for X-Brake-Session. */
+const SESSION_ID = /^[A-Za-z0-9_.-]{1,128}$/;
+
 const scopeStatus = z.object({
   scope: z.string(),
   window: z.string(),
@@ -40,8 +43,10 @@ export function meRoutes(app: FastifyInstance, router: Router, ctx: Ctx): void {
   router.registry.registerPath({
     method: 'get',
     path: '/v1/me',
-    summary: 'Remaining budget of the calling virtual key (X-Brake-Key)',
+    summary:
+      'Remaining budget of the calling virtual key (X-Brake-Key), and of the session it names (X-Brake-Session)',
     tags: ['Sessions'],
+    request: { headers: z.object({ 'x-brake-session': z.string().optional() }) },
     responses: {
       200: {
         description: 'OK',
@@ -73,6 +78,17 @@ export function meRoutes(app: FastifyInstance, router: Router, ctx: Ctx): void {
     }
     const scopes: Scope[] = [{ kind: 'key', id: key.id }];
     if (key.sessionId) scopes.push({ kind: 'sess', id: key.sessionId });
+    // A session the client names (X-Brake-Session), as the proxy charges it: only keys with a
+    // session budget may name one, and its cap is that budget until the first call creates it.
+    const named = req.headers['x-brake-session'];
+    const namedSession =
+      !key.sessionId &&
+      key.sessionCapMicros !== null &&
+      typeof named === 'string' &&
+      SESSION_ID.test(named)
+        ? named
+        : null;
+    if (namedSession) scopes.push({ kind: 'sess', id: namedSession });
     if (key.parentKeyId) scopes.push({ kind: 'key', id: key.parentKeyId });
     if (key.agentId) scopes.push({ kind: 'agent', id: key.agentId });
     const tz = await orgTimeZone(ctx, key.orgId);
@@ -85,19 +101,33 @@ export function meRoutes(app: FastifyInstance, router: Router, ctx: Ctx): void {
       `key:${key.id}`,
       ...(key.parentKeyId ? [`key:${key.parentKeyId}`] : []),
       ...(key.sessionId ? [`sess:${key.sessionId}`] : []),
+      ...(namedSession ? [`sess:${namedSession}`] : []),
     ];
     return {
       keyId: key.id,
       sessionId: key.sessionId,
       killed: killed.some((k) => mine.includes(k)),
-      scopes: status.map((s) => ({
-        scope: s.scope,
-        window: s.window,
-        spent: Number(s.spent),
-        held: Number(s.held),
-        hard: n(s.hard),
-        remaining: n(s.remaining),
-      })),
+      scopes: status.map((s) => {
+        let { hard, remaining } = s;
+        if (
+          hard === null &&
+          namedSession &&
+          s.scope === `sess:${namedSession}` &&
+          s.window.startsWith('m:')
+        ) {
+          hard = BigInt(key.sessionCapMicros!);
+          const left = hard - s.spent - s.held;
+          remaining = left > 0n ? left : 0n;
+        }
+        return {
+          scope: s.scope,
+          window: s.window,
+          spent: Number(s.spent),
+          held: Number(s.held),
+          hard: n(hard),
+          remaining: n(remaining),
+        };
+      }),
       policy: {
         providers,
         skus: key.skus,
