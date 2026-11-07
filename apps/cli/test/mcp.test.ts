@@ -163,6 +163,43 @@ describe('brake mcp', () => {
     );
     expect(m.byId(4).result!.content![0]!.text).toContain('unknown argument api_key');
     expect(m.byId(5).error!.code).toBe(-32602);
+
+    // Names every object has are not arguments either.
+    const proto = await mcp([
+      init(),
+      call(2, 'tavily_search', { query: 'q', constructor: 'x' }),
+      call(3, 'exa_search', { query: 'q', toString: 'x' }),
+    ]);
+    expect(proto.f.calls).toHaveLength(0);
+    expect(proto.byId(2).result!.content![0]!.text).toContain('unknown argument constructor');
+    expect(proto.byId(3).result!.content![0]!.text).toContain('unknown argument toString');
+  });
+
+  it('answers a batch with one array, and an empty batch with an error', async () => {
+    const m = await mcp([
+      [init('2025-03-26'), initialized, { jsonrpc: '2.0', id: 2, method: 'ping' }],
+      [],
+      [initialized],
+    ]);
+    // Messages are answered concurrently, so in any order; the all-notification batch, never.
+    const out = m.f.out.map((l) => JSON.parse(l) as Reply | Reply[]);
+    expect(out).toHaveLength(2);
+    const batch = out.find((o) => Array.isArray(o))!;
+    expect(batch.map((r) => r.id)).toEqual([1, 2]);
+    expect(batch[0]!.result).toMatchObject({ protocolVersion: '2025-03-26' });
+    expect((out.find((o) => !Array.isArray(o)) as Reply).error!.code).toBe(-32600);
+  });
+
+  it('gives every proxy and budget request a deadline', async () => {
+    const m = await mcp(
+      [init(), call(2, 'tavily_search', { query: 'q' }), call(3, 'brake_budget')],
+      (c) =>
+        c.url.endsWith('/v1/me')
+          ? { status: 200, body: { keyId: 'k', sessionId: null, killed: false, scopes: [] } }
+          : found,
+    );
+    expect(m.f.calls).toHaveLength(2);
+    for (const c of m.f.calls) expect(c.signal).toBeInstanceOf(AbortSignal);
   });
 
   it('reports the remaining budget read-only from /v1/me', async () => {
