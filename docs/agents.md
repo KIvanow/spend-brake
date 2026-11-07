@@ -119,7 +119,8 @@ makes the proxy the only way out.
 
 ## MCP clients (preview)
 
-Agents that search through an MCP server can use `brake mcp` instead of the Tavily or Exa
+Agents that search through an MCP server can use Spend Brake's,
+[`@spend-brake/mcp`](https://www.npmjs.com/package/@spend-brake/mcp), instead of the Tavily or Exa
 server. It offers `tavily_search`, `exa_search` and a read-only `brake_budget`, and sends every
 search through the proxy with the virtual key, so the provider key never reaches the agent.
 Replace the existing entry:
@@ -129,7 +130,7 @@ Replace the existing entry:
   "mcpServers": {
     "search": {
       "command": "npx",
-      "args": ["-y", "@spend-brake/cli", "mcp"],
+      "args": ["-y", "@spend-brake/mcp"],
       "env": {
         "BRAKE_KEY": "sb_live_…",
         "BRAKE_URL": "https://proxy.spendbrake.dev",
@@ -142,8 +143,8 @@ Replace the existing entry:
 
 and remove `TAVILY_API_KEY` / `EXA_API_KEY` from the agent's configuration. For a budget per
 MCP connection, start it in a session: `"args": ["-y", "@spend-brake/cli", "session",
-"--budget", "2", "--", "npx", "-y", "@spend-brake/cli", "mcp"]`. `--tools tavily` (or `exa`)
-offers one provider only.
+"--budget", "2", "--", "npx", "-y", "@spend-brake/mcp"]`. `--tools tavily` (or `exa`)
+offers one provider only. With the CLI installed, `brake mcp` is the same server.
 
 Each result carries its `cost` and the `remaining` budget. When a cap stops a search the tool
 answers with an error that starts with `STOP.` and tells the model not to retry.
