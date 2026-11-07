@@ -126,6 +126,19 @@ brake call custom/acme GET /v1/items          # a custom API
 Each call prints `ok`, `status`, `costMicros`, `cost`, `remainingMicros`, `requestId` and
 `data`.
 
+## brake doctor
+
+Checks what could let the workload spend past its caps, from where it runs. One JSON report
+(`ok`, `summary`, `checks`, `notVerified`) or, with `--pretty`, a readable one; exit code 1
+when a check fails.
+
+```sh
+brake doctor --pretty
+brake doctor --prove     # mint a $0 session and show a priced call is refused; spends nothing
+```
+
+See [checking a workload](../agents/#check-the-workload-with-brake-doctor) for the checks.
+
 ## Admin commands
 
 These use the admin token (`BRAKE_ADMIN_TOKEN` or the saved one).

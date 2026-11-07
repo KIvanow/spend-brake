@@ -3,6 +3,7 @@ import { Command, CommanderError } from 'commander';
 import { createInterface } from 'node:readline/promises';
 import { adminCommands } from './commands/admin.js';
 import { callCommand } from './commands/call.js';
+import { doctorCommand } from './commands/doctor.js';
 import { initCommand } from './commands/init.js';
 import { mapsCommand } from './commands/maps.js';
 import { searchCommand } from './commands/search.js';
@@ -27,6 +28,7 @@ export function buildProgram(io: Io, done: (code: number) => void): Command {
   searchCommand(program, io, done);
   callCommand(program, io, done);
   initCommand(program, io, done);
+  doctorCommand(program, io, done);
   adminCommands(program, io, done);
   return program;
 }
@@ -37,6 +39,7 @@ export const defaultIo = (): Io => ({
   stderr: (s) => process.stderr.write(s),
   fetch: globalThis.fetch,
   spawn: (cmd, args, opts) => spawn(cmd, args, opts),
+  cwd: () => process.cwd(),
   ...(process.stdin.isTTY
     ? {
         prompt: async (question: string, opts?: { secret?: boolean; default?: string }) => {

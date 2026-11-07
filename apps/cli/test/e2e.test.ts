@@ -1,5 +1,8 @@
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildApi } from '@spend-brake/api';
 import { bootstrapOrg } from '@spend-brake/api/bootstrap';
@@ -75,9 +78,10 @@ afterAll(async () => {
   await Promise.all([pg.stop(), vk.stop()]);
 });
 
-function brake(args: string[], env: Record<string, string>) {
+function brake(args: string[], env: Record<string, string>, cwd?: string) {
   return new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
     const child = spawn(process.execPath, [CLI, ...args], {
+      ...(cwd ? { cwd } : {}),
       env: { PATH: process.env.PATH ?? '', BRAKE_URL: proxyUrl, BRAKE_API_URL: apiUrl, ...env },
     });
     let stdout = '';
@@ -199,5 +203,43 @@ describe('brake session end to end', () => {
     });
     expect(r.code).toBe(3);
     expect(r.stderr).toContain(`Spending is switched off for key:${parent.keyId}`);
+  });
+});
+
+describe('brake doctor end to end', () => {
+  it('--prove: a $0 budget stops a priced call before the provider sees it', async () => {
+    const parent = await parentKey({ canMintSessions: true });
+    await engine.setCap(parent.orgId, { kind: 'key', id: parent.keyId }, 'd', {
+      hard: 1_000_000n,
+      soft: null,
+    });
+    const home = mkdtempSync(join(tmpdir(), 'brake-doctor-e2e-'));
+    const before = googleCalls;
+    const r = await brake(
+      ['doctor', '--prove'],
+      { BRAKE_KEY: parent.token, HOME: home, XDG_CONFIG_HOME: join(home, '.config') },
+      home,
+    );
+    const report = JSON.parse(r.stdout) as {
+      ok: boolean;
+      checks: { id: string; status: string; detail?: string }[];
+    };
+    const probe = report.checks.find((c) => c.id === 'enforcement.exhausted-budget')!;
+    expect(probe, probe.detail).toMatchObject({ status: 'pass' });
+    expect(probe.detail).toContain('402 budget_exceeded');
+    // The proof: the upstream received nothing.
+    expect(googleCalls - before).toBe(0);
+    expect(report.checks.find((c) => c.id === 'key.capped')!.status).toBe('pass');
+    expect(report.ok).toBe(true);
+    expect(r.code).toBe(0);
+
+    // The probe session is ended, and it spent nothing.
+    const sessions = await db.query.virtualKeys.findMany({
+      where: (k, { eq: e }) => e(k.orgId, parent.orgId),
+    });
+    const probeKey = sessions.find((k) => k.id !== parent.keyId)!;
+    expect(probeKey.status).toBe('revoked');
+    const [status] = await engine.status(parent.orgId, [{ kind: 'key', id: parent.keyId }], 'UTC');
+    expect(status!.spent).toBe(0n);
   });
 });

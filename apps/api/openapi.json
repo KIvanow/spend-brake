@@ -4486,13 +4486,82 @@
                           "remaining"
                         ]
                       }
+                    },
+                    "policy": {
+                      "type": "object",
+                      "properties": {
+                        "providers": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "skus": {
+                          "type": [
+                            "array",
+                            "null"
+                          ],
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "canMintSessions": {
+                          "type": "boolean"
+                        },
+                        "expiresAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "failOpenMicros": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "unpriced": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "object",
+                            "properties": {
+                              "policy": {
+                                "type": "string",
+                                "enum": [
+                                  "deny",
+                                  "allow-with-default-price"
+                                ]
+                              },
+                              "defaultPriceMicros": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "policy",
+                              "defaultPriceMicros"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "providers",
+                        "skus",
+                        "canMintSessions",
+                        "expiresAt",
+                        "failOpenMicros",
+                        "unpriced"
+                      ]
                     }
                   },
                   "required": [
                     "keyId",
                     "sessionId",
                     "killed",
-                    "scopes"
+                    "scopes",
+                    "policy"
                   ]
                 }
               }
