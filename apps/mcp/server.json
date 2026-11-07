@@ -1,0 +1,42 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-10-17/server.schema.json",
+  "name": "io.github.KIvanow/spend-brake",
+  "title": "Spend Brake capped search",
+  "description": "Web search for agents with hard dollar caps: Tavily and Exa through a budget-enforcing proxy.",
+  "websiteUrl": "https://docs.spendbrake.dev/agents/#mcp-clients-preview",
+  "repository": {
+    "url": "https://github.com/KIvanow/spend-brake",
+    "source": "github",
+    "subfolder": "apps/mcp"
+  },
+  "version": "0.2.1",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@spend-brake/mcp",
+      "version": "0.2.1",
+      "transport": { "type": "stdio" },
+      "environmentVariables": [
+        {
+          "name": "BRAKE_KEY",
+          "description": "A Spend Brake virtual key (sb_live_…); its caps apply to every search",
+          "isRequired": true,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "BRAKE_URL",
+          "description": "The Spend Brake proxy, e.g. https://proxy.spendbrake.dev",
+          "isRequired": true,
+          "format": "string"
+        },
+        {
+          "name": "BRAKE_API_URL",
+          "description": "The Spend Brake admin API, for the budget tool, e.g. https://app.spendbrake.dev",
+          "isRequired": false,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}

@@ -143,7 +143,7 @@ See [checking a workload](../agents/#check-the-workload-with-brake-doctor) for t
 
 An MCP server on stdio with capped `tavily_search` and `exa_search` tools and a read-only
 `brake_budget` tool (preview). It reads `BRAKE_KEY`, `BRAKE_URL` and `BRAKE_API_URL`;
-`--tools tavily,exa` picks the providers. Setup: [MCP clients](../agents/#mcp-clients-preview).
+`--tools tavily,exa` picks the providers. The same server is published as `@spend-brake/mcp`. Setup: [MCP clients](../agents/#mcp-clients-preview).
 
 ## Admin commands
 

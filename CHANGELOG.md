@@ -17,7 +17,8 @@ images for linux/amd64 and linux/arm64
   what doctor cannot verify; it never reports a workload as protected.
 - `brake mcp`, a stdio MCP server with capped `tavily_search` and `exa_search` tools and a
   read-only `brake_budget` tool, to replace a Tavily or Exa MCP server entry without changing
-  the agent (preview).
+  the agent (preview). Also published on its own as `@spend-brake/mcp`
+  (`npx -y @spend-brake/mcp`).
 - `GET /v1/me` reports the key's own policy: its providers, SKUs, whether it may mint
   sessions, its expiry, fail-open allowance, and the org's unpriced-route policy for each of
   its providers.
