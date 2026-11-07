@@ -193,6 +193,24 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
     return customer.id;
   }
 
+  /**
+   * The install org id on the Stripe customer too, for whoever reads Stripe. The stored id is the
+   * one licenses name, so a failure here only logs. (The subscription's own metadata keeps the
+   * id it was bought with.)
+   */
+  async function copyLicenseOrg(orgId: string, licenseOrg: string, customerId?: string) {
+    const customer = customerId ?? (await planOf(deps.db, orgId))?.stripeCustomerId;
+    if (!customer) return;
+    try {
+      await deps.stripe.customers.update(customer, { metadata: { license_org: licenseOrg } });
+    } catch (err) {
+      app.log.warn(
+        { err: (err as Error).message, orgId },
+        'license_org not copied to the Stripe customer',
+      );
+    }
+  }
+
   const licenseOrgRequired = () =>
     new ApiError(
       400,
@@ -271,7 +289,10 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
     });
     if (!session.url) throw new ApiError(502, 'stripe_error', 'Stripe returned no checkout URL.');
     // Kept only once Checkout is open: a checkout that failed leaves the install id as it was.
-    if (forLicense) await setLicenseOrg(deps.db, orgId, forLicense, actor, now());
+    if (forLicense) {
+      await setLicenseOrg(deps.db, orgId, forLicense, actor, now());
+      await copyLicenseOrg(orgId, forLicense, customer);
+    }
     return session.url;
   }
 
@@ -480,24 +501,12 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
 
   // The install a license names: renewals are issued for it, so a typo or a move to another
   // install is fixed here and the next license names the new id. The stored id is what licenses
-  // name; the Stripe customer gets a copy, so Stripe's records say the same.
+  // name; the Stripe customer gets a copy, so whoever reads Stripe sees it (the subscription keeps the id it was bought with).
   app.put('/v1/billing/license-org', async (req) => {
     const a = await auth(req, 'owner');
     const body = parse(z.object({ licenseOrg: z.string().regex(LICENSE_ORG) }), req.body);
     await setLicenseOrg(deps.db, a.orgId, body.licenseOrg, a.actor, now());
-    const customer = (await planOf(deps.db, a.orgId))?.stripeCustomerId;
-    if (customer) {
-      try {
-        await deps.stripe.customers.update(customer, {
-          metadata: { license_org: body.licenseOrg },
-        });
-      } catch (err) {
-        app.log.warn(
-          { err: (err as Error).message, orgId: a.orgId },
-          'license_org not copied to the Stripe customer',
-        );
-      }
-    }
+    await copyLicenseOrg(a.orgId, body.licenseOrg);
     return { licenseOrg: body.licenseOrg };
   });
 

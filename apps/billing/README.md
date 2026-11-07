@@ -35,10 +35,12 @@ Free limits.
 
 A license (Business sign-up or checkout) names the buyer's install: `licenseOrg`, the `--org`
 they gave `brake init` (400 `license_org_required` without one). It is stored on the hosted org
-(`org_entitlements.license_org`, not unique: installs are separate) once Checkout opens, and
-passed to Stripe as subscription metadata; the hosted org keeps a generated id. The stored id is
-what licenses name: changing it (`PUT /v1/billing/license-org`, every change audited as
-`billing.license_org_set`) also copies it to the Stripe customer's metadata. Licenses issued
+(`org_entitlements.license_org`, not unique: installs are separate) at sign-up, or, bought from
+Billing, once Checkout opens; it is passed to Stripe as subscription metadata and copied to the
+Stripe customer's metadata. The hosted org keeps a generated id. The stored id is what licenses
+name: changing it (`PUT /v1/billing/license-org`, every change audited as
+`billing.license_org_set`) copies the new id to the Stripe customer too; the subscription's
+metadata keeps the id it was bought with. Licenses issued
 before it, and orgs without one, name the hosted org's id.
 
 A paid plan (sign-up or checkout) needs `"acceptTerms": true`: the buyer agrees to the Terms of

@@ -456,6 +456,27 @@ describe('sign-up and checkout', () => {
     expect(checkouts.at(-1)).toMatchObject({
       subscription_data: { metadata: { license_org: 'hq' } },
     });
+    // Copied to the Stripe customer at checkout too, not only when changed later.
+    const customer = checkouts.at(-1)!.customer as string;
+    expect(customers.get(customer)!.metadata).toMatchObject({ license_org: 'hq' });
+    // Only an owner may change the id licenses name.
+    for (const role of ['admin', 'viewer']) {
+      const token = (
+        await api.inject({
+          method: 'POST',
+          url: '/v1/tokens',
+          headers: bearer(ownerToken),
+          payload: { name: role, role },
+        })
+      ).json<{ token: string }>().token;
+      const res = await billing.inject({
+        method: 'PUT',
+        url: '/v1/billing/license-org',
+        headers: bearer(token),
+        payload: { licenseOrg: 'other' },
+      });
+      expect(res.statusCode, role).toBe(403);
+    }
   });
 
   it('audits a change of the install org id and leaves the plan and its limits as they are', async () => {

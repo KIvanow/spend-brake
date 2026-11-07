@@ -133,7 +133,9 @@ export function Billing() {
         value={installOrg ?? b.licenseOrg ?? ''}
         onChange={(e) => setInstallOrg(e.target.value)}
         placeholder="acme"
-        pattern="[A-Za-z0-9_\-]{1,64}"
+        // Checked as trimmed (installValid), which is what is sent: a pattern would refuse
+        // "acme " while Save stays enabled.
+        aria-invalid={installOrg !== null && !installValid}
         title="Up to 64 letters, digits, - or _"
         autoComplete="off"
         required

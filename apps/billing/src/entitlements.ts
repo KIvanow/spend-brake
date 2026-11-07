@@ -46,23 +46,32 @@ export async function setLicenseOrg(
   actor: string,
   now: Date,
 ) {
-  const current = await planOf(db, orgId);
-  if (current?.licenseOrg === licenseOrg) return;
-  if (current) {
-    await db
+  // One transaction (a savepoint inside the caller's), with the row locked: two changes at once
+  // are audited in the order they happened, and never without their audit row.
+  await db.transaction(async (tx) => {
+    // An org without a row gets Free; an existing row (and its plan) is left as it is.
+    await tx
+      .insert(orgEntitlements)
+      .values({ orgId, plan: 'free', status: 'active', ...LIMITS.free, updatedAt: now })
+      .onConflictDoNothing({ target: orgEntitlements.orgId });
+    const [current] = await tx
+      .select({ licenseOrg: orgEntitlements.licenseOrg })
+      .from(orgEntitlements)
+      .where(eq(orgEntitlements.orgId, orgId))
+      .for('update');
+    if (current?.licenseOrg === licenseOrg) return;
+    await tx
       .update(orgEntitlements)
       .set({ licenseOrg, updatedAt: now })
       .where(eq(orgEntitlements.orgId, orgId));
-  } else {
-    await setPlan(db, orgId, { plan: 'free', licenseOrg }, now);
-  }
-  await db.insert(auditLog).values({
-    orgId,
-    actor,
-    action: 'billing.license_org_set',
-    target: `license_org:${licenseOrg}`,
-    data: { from: current?.licenseOrg ?? null, to: licenseOrg },
-    at: now,
+    await tx.insert(auditLog).values({
+      orgId,
+      actor,
+      action: 'billing.license_org_set',
+      target: `license_org:${licenseOrg}`,
+      data: { from: current?.licenseOrg ?? null, to: licenseOrg },
+      at: now,
+    });
   });
 }
 

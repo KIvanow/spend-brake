@@ -403,7 +403,8 @@ describe('dashboard', () => {
     await user.type(field, 'acme prod');
     expect(business).toHaveProperty('disabled', true);
     await user.clear(field);
-    await user.type(field, 'acme-prod');
+    // Surrounding spaces are dropped, as on the server.
+    await user.type(field, ' acme-prod ');
     await user.click(business);
     await waitFor(() =>
       expect(calls.find((c) => c.url === '/v1/billing/checkout')).toMatchObject({
