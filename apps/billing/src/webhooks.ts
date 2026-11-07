@@ -351,6 +351,6 @@ async function licenseOrgFor(
     );
     return null;
   }
-  await setLicenseOrg(tx, orgId, fromStripe, 'system', deps.now());
-  return fromStripe;
+  // Under the row lock: an id the owner saved meanwhile wins over the metadata.
+  return setLicenseOrg(tx, orgId, fromStripe, 'system', deps.now(), { onlyIfUnset: true });
 }

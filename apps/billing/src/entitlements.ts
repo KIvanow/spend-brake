@@ -35,8 +35,8 @@ export async function setPlan(db: Db | Tx, orgId: string, change: PlanChange, no
 }
 
 /**
- * Change the install org id that an org's licenses name, and audit it: licenses already issued
- * keep naming the old id until they expire. Only that column changes; the plan and its limits
+ * Change the install org id that an org's licenses name, and audit it; returns the id in effect.
+ * Licenses already issued keep naming the old id until they expire. Only that column changes; the plan and its limits
  * stay as they are.
  */
 export async function setLicenseOrg(
@@ -45,10 +45,12 @@ export async function setLicenseOrg(
   licenseOrg: string,
   actor: string,
   now: Date,
-) {
+  /** Keep an id already stored (Stripe metadata must not overwrite an owner's choice). */
+  opts: { onlyIfUnset?: boolean } = {},
+): Promise<string> {
   // One transaction (a savepoint inside the caller's), with the row locked: two changes at once
   // are audited in the order they happened, and never without their audit row.
-  await db.transaction(async (tx) => {
+  return db.transaction(async (tx) => {
     // An org without a row gets Free; an existing row (and its plan) is left as it is.
     await tx
       .insert(orgEntitlements)
@@ -59,7 +61,8 @@ export async function setLicenseOrg(
       .from(orgEntitlements)
       .where(eq(orgEntitlements.orgId, orgId))
       .for('update');
-    if (current?.licenseOrg === licenseOrg) return;
+    if (current?.licenseOrg === licenseOrg) return licenseOrg;
+    if (opts.onlyIfUnset && current?.licenseOrg) return current.licenseOrg;
     await tx
       .update(orgEntitlements)
       .set({ licenseOrg, updatedAt: now })
@@ -72,6 +75,7 @@ export async function setLicenseOrg(
       data: { from: current?.licenseOrg ?? null, to: licenseOrg },
       at: now,
     });
+    return licenseOrg;
   });
 }
 
