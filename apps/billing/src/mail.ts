@@ -14,6 +14,7 @@ export function licenseMailer(connection: ValkeyClient) {
         {
           type: 'license_issued',
           orgId: m.orgId,
+          licenseOrg: m.licenseOrg,
           email: m.email,
           edition: m.edition,
           expiresAt: m.expiresAt,

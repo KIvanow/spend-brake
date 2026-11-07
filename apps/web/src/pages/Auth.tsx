@@ -199,6 +199,9 @@ function planSummary(p: Plan): string {
   return parts.join(', ');
 }
 
+/** Self-hosted licenses (the sign-up asks for the org id of the buyer's install). */
+const SELF_HOSTED_PLANS = ['business', 'enterprise'];
+
 /** Create an account: an org and its owner; paid plans continue to Stripe Checkout. */
 export function Signup() {
   const [plans, setPlans] = useState<Plan[] | null>(null);
@@ -231,7 +234,8 @@ export function Signup() {
 
   const paid = plan !== 'free';
   // A license installs only into the org it names, so it is issued for the buyer's own org id.
-  const selfHosted = plans?.find((p) => p.id === plan)?.selfHosted ?? false;
+  // Known from the plan id itself, so the field shows even before (or without) the plans list.
+  const selfHosted = SELF_HOSTED_PLANS.includes(plan);
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (paid && !acceptTerms) return;
@@ -244,7 +248,7 @@ export function Signup() {
           name: name.trim(),
           email: email.trim(),
           plan,
-          ...(selfHosted ? { orgId: installOrg.trim() } : {}),
+          ...(selfHosted ? { licenseOrg: installOrg.trim() } : {}),
           timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           ...(paid ? { acceptTerms } : {}),
         },
@@ -333,8 +337,8 @@ export function Signup() {
               value={installOrg}
               onChange={(e) => setInstallOrg(e.target.value)}
               placeholder="acme"
-              pattern="[A-Za-z0-9_\-]{3,64}"
-              title="3 to 64 letters, digits, - or _"
+              pattern="[A-Za-z0-9_\-]{1,64}"
+              title="Up to 64 letters, digits, - or _"
               autoComplete="off"
               required
             />

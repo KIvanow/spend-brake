@@ -331,6 +331,46 @@ describe('dashboard', () => {
     );
   });
 
+  it('shows the install org id licenses name, and lets the owner change it', async () => {
+    routes['GET /v1/billing'] = () => [
+      200,
+      {
+        plan: 'business',
+        planName: 'Business (self-hosted license)',
+        status: 'active',
+        currentPeriodEnd: null,
+        hasSubscription: true,
+        licenseOrg: 'acme',
+        limits: null,
+        usage: { keys: 0, providers: 0, agentSessionsThisMonth: 0, requestsThisMonth: 0 },
+        plans: [],
+        licenses: [
+          {
+            id: 'lic_1',
+            edition: 'business',
+            org: 'acme',
+            expiresAt: '2026-12-01T00:00:00.000Z',
+            issuedAt: '2026-11-01T00:00:00.000Z',
+          },
+        ],
+      },
+    ];
+    routes['PUT /v1/billing/license-org'] = () => [200, { licenseOrg: 'acme-prod' }];
+    const user = await signIn();
+    await user.click(screen.getByRole('button', { name: 'Billing' }));
+    expect(await screen.findByText('brake license install acme.license')).toBeTruthy();
+    const field = screen.getByLabelText(/^Org id on your install/);
+    await user.clear(field);
+    await user.type(field, 'acme-prod');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.url === '/v1/billing/license-org')).toMatchObject({
+        method: 'PUT',
+        body: { licenseOrg: 'acme-prod' },
+      }),
+    );
+  });
+
   it('tells admins that owners manage billing, without buy buttons', async () => {
     routes['GET /v1/auth/session'] = () => [200, { orgId: 'acme', role: 'admin', actor: 'u' }];
     routes['GET /v1/billing'] = () => [

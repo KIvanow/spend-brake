@@ -301,6 +301,11 @@ export const orgEntitlements = pgTable(
     /** Calls exported as OpenTelemetry spans to the org's own collector. */
     otelExport: boolean('otel_export').notNull().default(false),
     billingEmail: text('billing_email'),
+    /**
+     * Business / Enterprise: the org id of the buyer's own install, which licenses name. Not
+     * unique: installs are separate, so any number of customers can license `acme`.
+     */
+    licenseOrg: text('license_org'),
     stripeCustomerId: text('stripe_customer_id'),
     stripeSubscriptionId: text('stripe_subscription_id'),
     currentPeriodEnd: timestamp('current_period_end', { withTimezone: true }),

@@ -38,28 +38,25 @@ its features keep working for 14 days, then turn read-only. The proxy and caps n
 
 ## Buying a license
 
-Business ($299/month, 3 orgs per install) is bought online:
+Business is bought online ([pricing](https://spendbrake.dev/#pricing)):
 
 1. Open [Buy Business](https://app.spendbrake.dev/#/signup?plan=business). Give your work email
    and the **org id of your install**: the `--org` you gave `brake init`. The license names that
    org, and an install takes it only into the org with the same id (otherwise
-   `403 license_wrong_org`). If the id is taken on the hosted service, email
-   [support@spendbrake.dev](mailto:support@spendbrake.dev) and we license it for you.
-2. Pay through Stripe Checkout. The license file is emailed to you, and the Billing page of the
-   account (the sign-in link is in your email) has **Download the latest license**.
-3. Install it on your server with an owner token of that org:
-
-   ```sh
-   brake license install spend-brake.license
-   brake license status --pretty
-   ```
+   `403 license_wrong_org`).
+2. Pay through Stripe Checkout. The license file, `<org id>.license`, is emailed to you. Left the
+   payment page? Sign in to app.spendbrake.dev by email and buy it under Billing.
+3. Install it as [shown above](#business-and-enterprise), with an owner token of that org (the
+   one `brake init` printed): `BRAKE_ADMIN_TOKEN=<owner token> brake license install acme.license`.
 
 The account at app.spendbrake.dev is only the customer record (invoices, card, cancelling);
-your install never contacts it. Each license runs to the end of the month paid for, and every
+your install never contacts it. Its Billing page has **Download the latest license** and the
+org id licenses are issued for: change it there after a typo or a move to another install, and
+the next license names the new id. Each license runs to the end of the month paid for, and every
 renewal emails a new one: install it within the 14 days of grace, or the ee features turn
 read-only. Cancelling stops the renewals the same way.
 
-Enterprise (25 orgs per install, invoiced yearly) is arranged with
+Enterprise (invoiced yearly) is arranged with
 [support@spendbrake.dev](mailto:support@spendbrake.dev).
 
 ## Hosted plans

@@ -140,7 +140,10 @@ export async function processAlert(
       return 'none';
     }
     await sendMail(deps, job.email, message, [
-      { filename: `${String(job.orgId)}.license`, content: String(job.license) },
+      {
+        filename: `${String((job.licenseOrg as string | undefined) ?? job.orgId)}.license`,
+        content: String(job.license),
+      },
     ]);
     return 'email';
   }

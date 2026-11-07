@@ -235,7 +235,7 @@ export function buildMessage(alertId: string, job: AlertJob, o: LinkOptions): Me
       return {
         ...base,
         title: `Your Spend Brake ${String(job.edition)} license`,
-        text: `The license for org ${String(job.orgId)} is attached (valid until ${String(job.expiresAt).slice(0, 10)}). Install it with: brake license install ${String(job.orgId)}.license. It is also in the dashboard under Billing.`,
+        text: `The license for org ${String((job.licenseOrg as string | undefined) ?? job.orgId)} is attached (valid until ${String(job.expiresAt).slice(0, 10)}). Install it with an owner token of that org: brake license install ${String((job.licenseOrg as string | undefined) ?? job.orgId)}.license. It is also in the dashboard under Billing.`,
         actions: view('/#/billing'),
       };
     case 'login_link':

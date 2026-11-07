@@ -22,15 +22,22 @@ Free limits.
 
 ## Endpoints (behind the dashboard at `/v1/billing`)
 
-| Method | Path                   | Who    | What                                                                                                                  |
-| ------ | ---------------------- | ------ | --------------------------------------------------------------------------------------------------------------------- |
-| POST   | `/v1/billing/signup`   | public | Create a Free org and email its owner a sign-in link; a paid plan returns a Checkout URL (`BRAKE_HOSTED_SIGNUP=true`) |
-| GET    | `/v1/billing/plans`    | public | Plans with monthly prices and limits (the sign-up page and website read it)                                           |
-| GET    | `/v1/billing`          | viewer | Plan, status, usage against limits, licenses                                                                          |
-| POST   | `/v1/billing/checkout` | owner  | Stripe Checkout for a plan (first purchase)                                                                           |
-| POST   | `/v1/billing/portal`   | owner  | Stripe Customer Portal: card, plan change, cancel                                                                     |
-| GET    | `/v1/billing/license`  | owner  | The latest license file                                                                                               |
-| POST   | `/v1/billing/webhook`  | Stripe | Signed events, each applied once                                                                                      |
+| Method | Path                      | Who    | What                                                                                                                  |
+| ------ | ------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/v1/billing/signup`      | public | Create a Free org and email its owner a sign-in link; a paid plan returns a Checkout URL (`BRAKE_HOSTED_SIGNUP=true`) |
+| PUT    | `/v1/billing/license-org` | owner  | The org id of the install licenses are issued for (`licenseOrg`)                                                      |
+| GET    | `/v1/billing/plans`       | public | Plans with monthly prices and limits (the sign-up page and website read it)                                           |
+| GET    | `/v1/billing`             | viewer | Plan, status, usage against limits, licenses                                                                          |
+| POST   | `/v1/billing/checkout`    | owner  | Stripe Checkout for a plan (first purchase)                                                                           |
+| POST   | `/v1/billing/portal`      | owner  | Stripe Customer Portal: card, plan change, cancel                                                                     |
+| GET    | `/v1/billing/license`     | owner  | The latest license file                                                                                               |
+| POST   | `/v1/billing/webhook`     | Stripe | Signed events, each applied once                                                                                      |
+
+A license (Business sign-up or checkout) names the buyer's install: `licenseOrg`, the `--org`
+they gave `brake init` (400 `license_org_required` without one). It is stored on the hosted org
+(`org_entitlements.license_org`, not unique: installs are separate) and passed to Stripe as
+subscription metadata; the hosted org keeps a generated id. Licenses issued before it, and orgs
+without one, name the hosted org's id.
 
 A paid plan (sign-up or checkout) needs `"acceptTerms": true`: the buyer agrees to the Terms of
 Service and Privacy Policy and asks for the plan to start now, waiving the 14-day right of
@@ -45,7 +52,7 @@ and Enterprise lines, valid to the end of the paid period, emailed through the n
 downloadable in the dashboard), `invoice.payment_failed`.
 
 Enterprise is sold by hand: create the customer with metadata `orgId` (an org created through
-sign-up), then a Stripe invoice with a line on the "Spend Brake Enterprise" product (set
+sign-up) and `license_org` (the org id of their install), then a Stripe invoice with a line on the "Spend Brake Enterprise" product (set
 `org_units` in the product metadata, or leave the default). Paying the invoice issues the
 license.
 

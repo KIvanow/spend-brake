@@ -40,12 +40,13 @@ import { planOf, setPlan } from './entitlements.js';
 import {
   CHECKOUT_PLANS,
   type CheckoutPlan,
-  LICENSE_PLANS,
+  LICENSE_ORG,
   LIMITS,
   MONTHLY_CENTS,
   PLAN_NAMES,
   PLANS,
   PORTAL_METADATA,
+  isLicensePlan,
   lookupKey,
 } from './plans.js';
 import { type LicenseMail, applyEvent } from './webhooks.js';
@@ -192,6 +193,23 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
     return customer.id;
   }
 
+  const licenseOrgRequired = () =>
+    new ApiError(
+      400,
+      'license_org_required',
+      'A license needs the org id of your install (the --org you gave brake init): licenseOrg.',
+    );
+
+  /** The org a license file names (its payload is signed as is, so it is read, not rebuilt). */
+  const licensedOrg = (raw: string) => {
+    try {
+      const doc = JSON.parse(raw) as { payload: string };
+      return (JSON.parse(Buffer.from(doc.payload, 'base64url').toString()) as { org: string }).org;
+    } catch {
+      return null;
+    }
+  };
+
   /** Paid plans need the buyer's consent: the terms, and starting now without withdrawal. */
   const requireTerms = (acceptTerms: boolean | undefined) => {
     if (acceptTerms !== true) throw new ApiError(400, 'terms_required', TERMS_REQUIRED);
@@ -218,6 +236,7 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
     orgId: string,
     plan: CheckoutPlan,
     from: 'billing' | 'signup' = 'billing',
+    licenseOrg?: string,
   ) {
     const current = await planOf(deps.db, orgId);
     if (current?.stripeSubscriptionId) {
@@ -227,6 +246,17 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
         'This org already has a subscription: change plans in the billing portal.',
       );
     }
+    // A license installs only into the org it names: the buyer's own install.
+    const forLicense = isLicensePlan(plan) ? (licenseOrg ?? current?.licenseOrg) : undefined;
+    if (isLicensePlan(plan) && !forLicense) throw licenseOrgRequired();
+    if (forLicense && forLicense !== current?.licenseOrg) {
+      await setPlan(
+        deps.db,
+        orgId,
+        { plan: current?.plan ?? 'free', licenseOrg: forLicense },
+        now(),
+      );
+    }
     const customer = await customerFor(orgId, current?.billingEmail ?? null);
     const session = await deps.stripe.checkout.sessions.create({
       mode: 'subscription',
@@ -234,7 +264,12 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
       client_reference_id: orgId,
       line_items: [{ price: await priceId(plan), quantity: 1 }],
       subscription_data: {
-        metadata: { orgId, terms_version: TERMS_VERSION, withdrawal_waiver: 'true' },
+        metadata: {
+          orgId,
+          ...(forLicense ? { license_org: forLicense } : {}),
+          terms_version: TERMS_VERSION,
+          withdrawal_waiver: 'true',
+        },
       },
       custom_text: { submit: { message: CHECKOUT_WAIVER_MESSAGE } },
       // Invoices carry the buyer's address and VAT number (a business buyer's VAT ID can make the
@@ -266,7 +301,7 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
         name: PLAN_NAMES[id],
         monthlyUsd:
           id === 'free' ? 0 : id in MONTHLY_CENTS ? MONTHLY_CENTS[id as CheckoutPlan] / 100 : null,
-        selfHosted: id === 'business' || id === 'enterprise',
+        selfHosted: isLicensePlan(id),
         // Sold through Checkout (Enterprise is arranged with us).
         purchasable: id === 'free' || (CHECKOUT_PLANS as readonly string[]).includes(id),
         limits: {
@@ -341,6 +376,7 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
       .select({
         id: issuedLicenses.id,
         edition: issuedLicenses.edition,
+        raw: issuedLicenses.raw,
         expiresAt: issuedLicenses.expiresAt,
         issuedAt: issuedLicenses.issuedAt,
       })
@@ -395,18 +431,17 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
       orgCap.updatedAt <= signupMark.at,
     );
     // Where sign-up is open (the hosted service), self-hosted licenses are not offered to orgs
-    // that use the hosted plans; an org that already has one keeps seeing it.
+    // that use the hosted plans; an org that has one, or signed up for one, keeps seeing it.
     const licensed =
-      licenses.length > 0 || (LICENSE_PLANS as readonly string[]).includes(plan?.plan ?? '');
-    const offered = CHECKOUT_PLANS.filter(
-      (p) => !deps.signup || licensed || !(LICENSE_PLANS as readonly string[]).includes(p),
-    );
+      licenses.length > 0 || isLicensePlan(plan?.plan ?? 'free') || Boolean(plan?.licenseOrg);
+    const offered = CHECKOUT_PLANS.filter((p) => !deps.signup || licensed || !isLicensePlan(p));
     return {
       plan: plan?.plan ?? null,
       planName: plan ? PLAN_NAMES[plan.plan] : null,
       status: plan?.status ?? null,
       currentPeriodEnd: plan?.currentPeriodEnd?.toISOString() ?? null,
       hasSubscription: Boolean(plan?.stripeSubscriptionId),
+      licenseOrg: plan?.licenseOrg ?? null,
       limits: plan
         ? {
             ...limits,
@@ -417,8 +452,9 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
       usage,
       signupCap,
       plans: offered.map((p) => ({ id: p, name: PLAN_NAMES[p] })),
-      licenses: licenses.map((l) => ({
+      licenses: licenses.map(({ raw, ...l }) => ({
         ...l,
+        org: licensedOrg(raw),
         expiresAt: l.expiresAt.toISOString(),
         issuedAt: l.issuedAt.toISOString(),
       })),
@@ -428,11 +464,15 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
   app.post('/v1/billing/checkout', async (req) => {
     const a = await auth(req, 'owner');
     const body = parse(
-      z.object({ plan: z.enum(CHECKOUT_PLANS), acceptTerms: z.boolean().optional() }),
+      z.object({
+        plan: z.enum(CHECKOUT_PLANS),
+        licenseOrg: z.string().regex(LICENSE_ORG).optional(),
+        acceptTerms: z.boolean().optional(),
+      }),
       req.body,
     );
     requireTerms(body.acceptTerms);
-    const url = await checkout(a.orgId, body.plan);
+    const url = await checkout(a.orgId, body.plan, 'billing', body.licenseOrg);
     await recordTerms(a.orgId, a.actor, body.plan, 'billing');
     return { url };
   });
@@ -452,6 +492,21 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
     return { url: session.url };
   });
 
+  // The install a license names: renewals are issued for it, so a typo or a move to another
+  // install is fixed here and the next license names the new id.
+  app.put('/v1/billing/license-org', async (req) => {
+    const a = await auth(req, 'owner');
+    const body = parse(z.object({ licenseOrg: z.string().regex(LICENSE_ORG) }), req.body);
+    const current = await planOf(deps.db, a.orgId);
+    await setPlan(
+      deps.db,
+      a.orgId,
+      { plan: current?.plan ?? 'free', licenseOrg: body.licenseOrg },
+      now(),
+    );
+    return { licenseOrg: body.licenseOrg };
+  });
+
   app.get('/v1/billing/license', async (req, reply) => {
     const a = await auth(req, 'owner');
     const [latest] = await deps.db
@@ -463,7 +518,10 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
     if (!latest) throw new ApiError(404, 'not_found', 'No license has been issued to this org.');
     reply
       .type('application/json')
-      .header('content-disposition', `attachment; filename="${a.orgId}.license"`);
+      .header(
+        'content-disposition',
+        `attachment; filename="${licensedOrg(latest.raw) ?? a.orgId}.license"`,
+      );
     return latest.raw;
   });
 
@@ -471,6 +529,8 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
   // email (or, without email sign-in, an owner token shown once).
   const signupBody = z.object({
     orgId: z.string().regex(ORG_ID).optional(),
+    /** License plans: the org id of the buyer's install, which the license names. */
+    licenseOrg: z.string().regex(LICENSE_ORG).optional(),
     name: z.string().trim().min(1).max(200),
     email: z.string().trim().pipe(z.email().max(320)),
     plan: z.enum(['free', ...CHECKOUT_PLANS]).default('free'),
@@ -504,13 +564,13 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
       if (!deps.signup) throw new ApiError(404, 'not_found', 'Sign-up is not open here.');
       const body = parse(signupBody, req.body);
       if (body.plan !== 'free') requireTerms(body.acceptTerms);
-      // A license installs only into the org it names, so it must name the buyer's own install.
-      if ((LICENSE_PLANS as readonly string[]).includes(body.plan) && !body.orgId) {
-        throw new ApiError(
-          400,
-          'org_id_required',
-          'A license needs the org id of your install (the --org you gave brake init).',
-        );
+      const licenseOrg = isLicensePlan(body.plan) ? body.licenseOrg : undefined;
+      if (isLicensePlan(body.plan) && !licenseOrg) throw licenseOrgRequired();
+      const taken = async (db: Db, id: string) =>
+        (await db.select({ id: orgs.id }).from(orgs).where(eq(orgs.id, id)).limit(1)).length > 0;
+      // A taken id is refused before anything counts against the address's emails.
+      if (body.orgId && (await taken(deps.db, body.orgId))) {
+        throw new ApiError(409, 'conflict', 'That org id is taken.');
       }
       const email = body.email.trim().toLowerCase();
       // Each sign-up emails the address: keep anyone from flooding someone else's inbox.
@@ -521,19 +581,9 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
       const org = { id: orgId, name: body.name, timeZone: validZone(body.timeZone) };
       const created = await deps.db.transaction(async (tx) => {
         await tx.execute(sql`select pg_advisory_xact_lock(424242)`);
-        const [taken] = await tx
-          .select({ id: orgs.id })
-          .from(orgs)
-          .where(eq(orgs.id, orgId))
-          .limit(1);
-        if (taken) {
-          throw new ApiError(
-            409,
-            'conflict',
-            (LICENSE_PLANS as readonly string[]).includes(body.plan)
-              ? 'That org id is taken here. Email support@spendbrake.dev and we will license it for you.'
-              : 'That org id is taken.',
-          );
+        // Again under the lock: another sign-up may have taken it since.
+        if (await taken(tx as unknown as Db, orgId)) {
+          throw new ApiError(409, 'conflict', 'That org id is taken.');
         }
         const orgDeps = { db: tx as unknown as Db, registry: ctx.registry };
         const result = deps.signIn
@@ -544,7 +594,12 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
           .update(orgs)
           .set({ settings: { alertEmail: email } })
           .where(eq(orgs.id, orgId));
-        await setPlan(tx, orgId, { plan: 'free', billingEmail: email }, now());
+        await setPlan(
+          tx,
+          orgId,
+          { plan: 'free', billingEmail: email, ...(licenseOrg ? { licenseOrg } : {}) },
+          now(),
+        );
         return result;
       });
       // The Free plan protects up to its monthly amount from the first request.

@@ -262,8 +262,10 @@ export function App({
       </main>
     );
   }
+  // A sign-up link (the website's Buy Business, say) opens sign-up even for someone signed in:
+  // a license is bought by its own account, and a hosted org's Billing does not offer one.
+  if (publicRoute === 'signup') return <Signup />;
   if (!signedIn) {
-    if (publicRoute === 'signup') return <Signup />;
     if (publicRoute === 'welcome') return <Welcome />;
     if (!options) return null;
     return (

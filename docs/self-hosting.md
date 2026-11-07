@@ -277,7 +277,6 @@ search terms.
 
 ## 9. Business and Enterprise
 
-Single sign-on, more roles, two-person approvals, audit export, several orgs per install, the
-signed catalog feed and billing reconciliation need a license and the ee overlay. See
-[Editions and license](https://docs.spendbrake.dev/editions/#buying-a-license) for buying and
-installing one. Nothing else on this page needs a license.
+The [Business and Enterprise features](https://docs.spendbrake.dev/editions/#business-and-enterprise)
+need a license and the ee overlay; [buying one](https://docs.spendbrake.dev/editions/#buying-a-license)
+covers buying and installing it. Nothing else on this page needs a license.

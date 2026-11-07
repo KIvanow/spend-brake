@@ -57,6 +57,13 @@
       "when": 1793460415045,
       "tag": "0007_custom_apis",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1794053387634,
+      "tag": "0008_license_org",
+      "breakpoints": true
     }
   ]
 }

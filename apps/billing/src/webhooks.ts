@@ -3,14 +3,22 @@ import { type Db, eq, issuedLicenses, orgEntitlements, orgs, stripeEvents } from
 import { LICENSE_FEATURES, type LicensePayload, signLicense } from '@spend-brake/shared';
 import type Stripe from 'stripe';
 import { planOf, setPlan } from './entitlements.js';
-import type { LICENSE_PLANS } from './plans.js';
-import { DEFAULT_ORG_UNITS, PLAN_METADATA, type Plan, isPlan } from './plans.js';
+import {
+  DEFAULT_ORG_UNITS,
+  LICENSE_ORG,
+  type LicensePlan,
+  PLAN_METADATA,
+  type Plan,
+  isLicensePlan,
+  isPlan,
+} from './plans.js';
 
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
-type LicensePlan = (typeof LICENSE_PLANS)[number];
 
 export interface LicenseMail {
   orgId: string;
+  /** The install's org id, which the license names. */
+  licenseOrg: string;
   email: string | null;
   edition: LicensePlan;
   expiresAt: string;
@@ -197,6 +205,7 @@ async function invoicePaid(
   if (current?.status === 'past_due') {
     await setPlan(tx, orgId, { plan: current.plan, status: 'active' }, deps.now());
   }
+  let licenseOrg: string | undefined;
 
   // A license for each Business / Enterprise line, valid to the end of the period paid for.
   for (const line of invoice.lines.data) {
@@ -204,7 +213,7 @@ async function invoicePaid(
     if (!productId) continue;
     const product = await deps.stripe.products.retrieve(productId);
     const plan = product.metadata[PLAN_METADATA];
-    if (plan !== 'business' && plan !== 'enterprise') continue;
+    if (!plan || !isLicensePlan(plan)) continue;
     if (!deps.licenseKey) {
       deps.log?.warn(
         { orgId, invoice: invoice.id },
@@ -212,11 +221,12 @@ async function invoicePaid(
       );
       continue;
     }
+    licenseOrg ??= await licenseOrgFor(tx, deps, orgId, current?.licenseOrg ?? null, invoice);
     const units = Number(product.metadata.org_units ?? DEFAULT_ORG_UNITS[plan]);
     const expiresAt = new Date(line.period.end * 1000).toISOString();
     const license: LicensePayload = {
       id: `lic_${randomUUID().replaceAll('-', '').slice(0, 20)}`,
-      org: orgId,
+      org: licenseOrg,
       edition: plan,
       features: [...LICENSE_FEATURES],
       orgUnits: Number.isInteger(units) && units > 0 ? units : DEFAULT_ORG_UNITS[plan],
@@ -240,6 +250,7 @@ async function invoicePaid(
     if (issued.length) {
       mails.push({
         orgId,
+        licenseOrg,
         email: current?.billingEmail ?? invoice.customer_email ?? null,
         edition: plan,
         expiresAt,
@@ -249,4 +260,30 @@ async function invoicePaid(
     }
   }
   return 'applied';
+}
+
+/**
+ * The install a license names: the org's license_org; else, for subscriptions and hand-made
+ * Enterprise invoices, the subscription's or customer's `license_org` metadata (kept on the org
+ * from then on); else the hosted org's own id, as licenses issued before license_org named.
+ */
+async function licenseOrgFor(
+  tx: Tx,
+  deps: WebhookDeps,
+  orgId: string,
+  stored: string | null,
+  invoice: Stripe.Invoice,
+): Promise<string> {
+  if (stored) return stored;
+  let fromStripe: string | undefined =
+    invoice.parent?.subscription_details?.metadata?.license_org ?? undefined;
+  const customer = id(invoice.customer);
+  if (!fromStripe && customer) {
+    const c = await deps.stripe.customers.retrieve(customer);
+    if (!('deleted' in c && c.deleted)) fromStripe = (c as Stripe.Customer).metadata?.license_org;
+  }
+  if (!fromStripe || !LICENSE_ORG.test(fromStripe)) return orgId;
+  const current = await planOf(tx, orgId);
+  await setPlan(tx, orgId, { plan: current?.plan ?? 'free', licenseOrg: fromStripe }, deps.now());
+  return fromStripe;
 }
