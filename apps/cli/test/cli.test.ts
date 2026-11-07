@@ -372,6 +372,17 @@ describe('brake search', () => {
     expect(tooMany.code).toBe(EXIT.usage);
     expect(tooMany.f.calls).toHaveLength(0);
   });
+
+  it('stops, with the charge, when the provider timed out behind the proxy', async () => {
+    const f = fake(ENV, () => ({
+      status: 504,
+      body: { error: 'upstream_timeout', message: 'Provider did not answer in time.' },
+      headers: { 'x-brake-cost-micros': '8000' },
+    }));
+    // Exit 3, like a cap: a wrapper that retries on 1 would pay for it twice.
+    expect(await run(['search', 'tavily', 'q'], f.io)).toBe(EXIT.budget);
+    expect(f.err.join('')).toContain('STOP. The provider did not answer in time; charged $0.0080');
+  });
 });
 
 describe('brake license', () => {

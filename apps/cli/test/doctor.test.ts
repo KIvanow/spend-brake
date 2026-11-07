@@ -262,6 +262,7 @@ describe('brake doctor', () => {
   it('says what it could not check against an older server or an unreachable one', async () => {
     const old = await doctor({ BRAKE_KEY: KEY }, healthy(me({}, null)));
     expect(old.status('key.policy')).toBe('unknown');
+    expect(old.code).toBe(EXIT.error);
     expect(old.status('key.capped')).toBe('pass');
 
     const down = await doctor({ BRAKE_KEY: KEY }, () => ({ status: 503, body: { ok: false } }));
@@ -525,6 +526,18 @@ describe('brake doctor', () => {
     truncateSync(join(big, '.env.dump'), 10_000_001);
     const skipped = await doctor({ BRAKE_KEY: KEY }, healthy(me()), { cwd: big });
     expect(skipped.status('files.cwd')).toBe('unknown');
+    // What doctor could not read may hold a key: it does not vouch.
+    expect(skipped.report!.ok).toBe(false);
+
+    // A Mapbox public token in a front end's .env calls Mapbox around the proxy too.
+    const web = tmp('brake-doctor-cwd-');
+    writeFileSync(join(web, '.env'), `NEXT_PUBLIC_MAPBOX_TOKEN=pk.eyJ${rand(40)}\n`);
+    const pub = await doctor({ BRAKE_KEY: KEY }, healthy(me()), { cwd: web });
+    expect(pub.status('files.cwd')).toBe('fail');
+    expect(pub.report!.checks.find((c) => c.id === 'files.cwd')!.detail).toContain(
+      'NEXT_PUBLIC_MAPBOX_TOKEN (Mapbox public key)',
+    );
+    expect(skipped.code).toBe(EXIT.error);
   });
 
   it('finds the default saved config even when XDG_CONFIG_HOME points elsewhere', async () => {

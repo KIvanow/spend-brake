@@ -130,8 +130,8 @@ Each call prints `ok`, `status`, `costMicros`, `cost`, `remainingMicros`, `reque
 
 Checks what could let the workload spend past its caps, from where it runs. One JSON report
 (`ok`, `summary`, `checks`, `notVerified`) or, with `--pretty`, a readable one; exit code 1
-when a check fails, when it could not read the key's caps, when the workload can read another
-virtual key, or when `--prove` could not complete the probe.
+when a check fails, when it could not read the key's caps or policy or a `.env` file, when the
+workload can read another virtual key, or when `--prove` could not complete the probe.
 
 ```sh
 brake doctor --pretty
@@ -176,13 +176,13 @@ Cap scopes are `org`, `key:<id>`, `sku:<provider>:<sku>`, `env:<name>`, `agent:<
 
 ## Exit codes
 
-| Code | Meaning                                                                |
-| ---- | ---------------------------------------------------------------------- |
-| 0    | Success                                                                |
-| 1    | Other failure (provider error, proxy unreachable, session not started) |
-| 2    | Bad arguments                                                          |
-| 3    | **Stop:** budget exceeded, spending killed, or the route has no price  |
-| 4    | **Stop:** loop detected, the key is paused                             |
-| 5    | Missing, unknown, revoked or expired virtual key                       |
+| Code | Meaning                                                                                                                                        |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | Success                                                                                                                                        |
+| 1    | Other failure (provider error, proxy unreachable, session not started)                                                                         |
+| 2    | Bad arguments                                                                                                                                  |
+| 3    | **Stop:** budget exceeded, spending killed, the route has no price, or the provider timed out (it may have been charged: do not retry blindly) |
+| 4    | **Stop:** loop detected, the key is paused                                                                                                     |
+| 5    | Missing, unknown, revoked or expired virtual key                                                                                               |
 
 On 3 and 4, stderr carries one line that tells the agent to stop and ask the user.

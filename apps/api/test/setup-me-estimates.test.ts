@@ -391,6 +391,56 @@ describe('POST /v1/estimates/migration', () => {
 });
 
 describe('session keys follow their parent', () => {
+  it('limits $0 probe sessions an hour, so they cannot stand in for sessions', async () => {
+    const org = await newOrg(env);
+    const call = (url: string, payload: object) =>
+      env.app.inject({ method: 'POST', url, headers: bearer(org.admin), payload });
+    const cred = (
+      await call('/v1/providers/credentials', { provider: 'acme', name: 'c', secret: 's' })
+    ).json<{ id: string }>().id;
+    const parentKeyId = (await call('/v1/keys', { name: 'p', credentials: { acme: cred } })).json<{
+      id: string;
+    }>().id;
+    const probe = { parentKeyId, budgetMicros: '0', dayBudgetMicros: '0', ttlSec: 60 };
+    for (let i = 0; i < 30; i++) expect((await call('/v1/sessions', probe)).statusCode).toBe(201);
+    const over = await call('/v1/sessions', probe);
+    expect(over.statusCode).toBe(429);
+    expect(over.json()).toMatchObject({ error: 'rate_limited' });
+    // A session with a budget is not a probe and is not held back by this.
+    expect(
+      (await call('/v1/sessions', { parentKeyId, budgetMicros: '1000', ttlSec: 60 })).statusCode,
+    ).toBe(201);
+  });
+
+  it("stay their parent key's agent, so its agent caps keep applying", async () => {
+    const org = await newOrg(env);
+    const call = (url: string, payload: object) =>
+      env.app.inject({ method: 'POST', url, headers: bearer(org.admin), payload });
+    const cred = (
+      await call('/v1/providers/credentials', { provider: 'acme', name: 'c', secret: 's' })
+    ).json<{ id: string }>().id;
+    const parent = (
+      await call('/v1/keys', {
+        name: 'p',
+        credentials: { acme: cred },
+        agentId: 'x',
+        canMintSessions: true,
+      })
+    ).json<{ token: string }>();
+    const mint = (agentId?: string) =>
+      env.app.inject({
+        method: 'POST',
+        url: '/v1/sessions',
+        headers: { 'x-brake-key': parent.token },
+        payload: agentId ? { agentId } : {},
+      });
+    const other = await mint('y');
+    expect(other.statusCode).toBe(403);
+    expect(other.json()).toMatchObject({ message: expect.stringContaining('agent x') as string });
+    expect((await mint('x')).json()).toMatchObject({ agentId: 'x' });
+    expect((await mint()).json()).toMatchObject({ agentId: 'x' });
+  });
+
   it('are updated with the parent and revoked with it', async () => {
     const org = await newOrg(env);
     const call = (

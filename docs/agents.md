@@ -31,7 +31,8 @@ Claude Code (or anything else after `--`) runs with a session key in `BRAKE_KEY`
 - is revoked when the command exits, and expires after `--ttl` (default `12h`) even if `brake`
   itself is killed.
 
-`--agent` names the agent (default: the parent key's agent, or `cli`). When the command exits,
+`--agent` names the agent (default: the parent key's agent, or `cli`; a key that has an agent
+mints sessions for that agent only, so its agent caps always apply). When the command exits,
 `brake` prints a JSON summary on stderr (`{"brakeSession":{"spent":"$0.0120",...}}`) and exits
 with the command's exit code.
 
@@ -62,14 +63,14 @@ prints one line on stderr telling it to stop and ask you:
 brake: STOP. Spend cap reached for sess:sess_ab12 (cap $5.00). Do not retry; ask the user to raise the cap.
 ```
 
-| Code | Meaning                                                                |
-| ---- | ---------------------------------------------------------------------- |
-| 0    | Success                                                                |
-| 1    | Other failure (provider error, proxy unreachable, session not started) |
-| 2    | Bad arguments                                                          |
-| 3    | **Stop:** budget exceeded, spending killed, or the route has no price  |
-| 4    | **Stop:** loop detected, the key is paused                             |
-| 5    | Missing, unknown, revoked or expired virtual key                       |
+| Code | Meaning                                                                                                                                        |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | Success                                                                                                                                        |
+| 1    | Other failure (provider error, proxy unreachable, session not started)                                                                         |
+| 2    | Bad arguments                                                                                                                                  |
+| 3    | **Stop:** budget exceeded, spending killed, the route has no price, or the provider timed out (it may have been charged: do not retry blindly) |
+| 4    | **Stop:** loop detected, the key is paused                                                                                                     |
+| 5    | Missing, unknown, revoked or expired virtual key                                                                                               |
 
 Agents that call the proxy over HTTP get the same message in the `message` field of the `402`,
 `403` or `429` body.
@@ -122,7 +123,8 @@ skipped, and a provider the proxy refuses for another reason first (killed, unpr
 doctor try the next. The repository runs the same probe against a counting mock provider and
 checks it receives no request (`apps/cli/test/e2e.test.ts`).
 
-Doctor exits 1 when a check fails, and also when it could not read the key's caps, when the
+Doctor exits 1 when a check fails, and also when it could not read the key's caps, its policy
+or a `.env` file, when the
 workload can read another virtual key (whose caps it did not check) or, with `--prove`, when it
 could not complete the probe: it exits 0 only for what it actually saw. A session key, or a key
 that may not mint sessions, cannot run the probe, so run `--prove` with the parent key. A clean

@@ -2114,6 +2114,16 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "The key is revoked, or is a $0 probe session (only its name can change)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         }
       },
@@ -2356,6 +2366,16 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "A $0 probe session (brake doctor --prove): its caps cannot change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         }
       },
@@ -2450,6 +2470,16 @@
           },
           "403": {
             "description": "Role too low",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A $0 probe session (brake doctor --prove): its caps cannot change",
             "content": {
               "application/json": {
                 "schema": {

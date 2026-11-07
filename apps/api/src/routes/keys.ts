@@ -304,6 +304,7 @@ export function keyRoutes(r: Router, ctx: Ctx): void {
     role: 'admin',
     tag: 'Keys',
     summary: 'Update a virtual key',
+    errors: { 409: 'The key is revoked, or is a $0 probe session (only its name can change)' },
     params: z.object({ id }),
     body: patchBody,
     response: keyView,

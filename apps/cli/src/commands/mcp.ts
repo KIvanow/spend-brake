@@ -247,6 +247,8 @@ async function budget(io: Io, structured: boolean): Promise<ToolResult> {
   return result(
     {
       killed: me.killed,
+      // Providers switched off on their own: calls to them stop even while killed is false.
+      killedProviders: me.killedProviders ?? [],
       // A key sees its own, its session's, its parent's and its agent's caps, not these.
       notShown: 'Org, environment and SKU caps also apply and are not visible to a key.',
       caps: me.scopes

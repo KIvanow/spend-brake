@@ -117,7 +117,7 @@ export function refusal(r: ProxyResult): { message: string; code: number } | nul
     case 'upstream_timeout':
       return {
         message: `STOP. The provider did not answer in time${charged}. It may have done the request anyway: do not retry it blindly; check the budget and ask the user.`,
-        code: EXIT.error,
+        code: EXIT.budget,
       };
     case 'invalid_key':
       return { message: e.message ?? 'invalid virtual key', code: EXIT.auth };

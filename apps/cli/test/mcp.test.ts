@@ -237,6 +237,7 @@ describe('brake mcp', () => {
         keyId: 'key_1',
         sessionId: 'sess_1',
         killed: false,
+        killedProviders: ['exa'],
         scopes: [
           {
             scope: 'key:key_1',
@@ -260,6 +261,7 @@ describe('brake mcp', () => {
     expect(m.f.calls[0]).toMatchObject({ url: 'http://api/v1/me', method: 'GET' });
     expect(JSON.parse(m.byId(2).result!.content![0]!.text)).toEqual({
       killed: false,
+      killedProviders: ['exa'],
       notShown: 'Org, environment and SKU caps also apply and are not visible to a key.',
       caps: [
         {

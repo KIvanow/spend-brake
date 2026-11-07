@@ -55,6 +55,8 @@ const VIRTUAL_KEY = /^sb_live_[0-9A-Za-z]{22}$/;
 const PROVIDER_KEY_SHAPES: [string, RegExp][] = [
   ['Tavily', /^tvly-[0-9A-Za-z-]{16,}$/],
   ['Mapbox secret', /^sk\.eyJ[0-9A-Za-z._-]+$/],
+  // Public tokens are billable too (geocoding, search), and a URL restriction is only a header.
+  ['Mapbox public', /^pk\.eyJ[0-9A-Za-z._-]+$/],
 ];
 /**
  * A Google API key may be for Gemini, not Maps: only a warning, unless the variable names Maps.
@@ -855,9 +857,15 @@ export function doctorCommand(program: Command, io: Io, done: (code: number) => 
       const passed = (id: string) => checks.some((c) => c.id === id && c.status === 'pass');
       // Another readable virtual key has caps doctor did not check.
       const otherKey = checks.some((c) => c.id.startsWith('virtual-keys.') && c.status !== 'pass');
+      // A .env file too big to read, or a server that does not report the key's policy: what
+      // doctor did not see may be what lets the workload spend.
+      const unread = checks.some(
+        (c) => (c.id === 'files.cwd' || c.id === 'key.policy') && c.status === 'unknown',
+      );
       const ok =
         summary.fail === 0 &&
         !otherKey &&
+        !unread &&
         passed('key.capped') &&
         (!o.prove || passed('enforcement.exhausted-budget'));
       if (!pretty) {
@@ -882,7 +890,7 @@ export function doctorCommand(program: Command, io: Io, done: (code: number) => 
               ? 'Fix the failed checks above; until then doctor cannot vouch for this workload.'
               : otherKey
                 ? 'Doctor checked the caps of BRAKE_KEY only, and the workload can read another virtual key, so it cannot vouch for this workload.'
-                : 'Doctor could not check the caps (or the --prove probe) above, so it cannot vouch for this workload.',
+                : 'Doctor could not check all of the above (caps, policy, .env files or the --prove probe), so it cannot vouch for this workload.',
         );
         io.stdout(`${lines.join('\n')}\n`);
       }

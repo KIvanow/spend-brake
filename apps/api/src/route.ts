@@ -40,6 +40,8 @@ interface RouteDef<B extends z.ZodType, Q extends z.ZodType, P extends z.ZodType
   /** Media type of a successful response (default JSON). The handler sets the header. */
   contentType?: string;
   status?: number;
+  /** Errors this route answers besides 400, 401 and 403 (status: when). */
+  errors?: Record<number, string>;
   handler: (ctx: {
     auth: Auth;
     body: z.output<B>;
@@ -105,6 +107,12 @@ export class Router {
           description: 'Role too low',
           content: { 'application/json': { schema: errorSchema } },
         },
+        ...Object.fromEntries(
+          Object.entries(def.errors ?? {}).map(([code, description]) => [
+            code,
+            { description, content: { 'application/json': { schema: errorSchema } } },
+          ]),
+        ),
       },
     });
 

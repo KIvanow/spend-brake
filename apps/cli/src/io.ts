@@ -28,7 +28,10 @@ export const EXIT = {
   ok: 0,
   error: 1,
   usage: 2,
-  /** Budget exhausted, spending killed or route unpriced: stop and ask the user. */
+  /**
+   * Budget exhausted, spending killed, route unpriced, or a charged call the provider did not
+   * answer in time: stop and ask the user.
+   */
   budget: 3,
   /** Loop detected: the key is paused. Stop and ask the user. */
   loop: 4,

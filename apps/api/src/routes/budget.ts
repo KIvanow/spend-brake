@@ -53,6 +53,7 @@ export function budgetRoutes(r: Router, ctx: Ctx): void {
     role: 'admin',
     tag: 'Caps',
     summary: 'Set hard / soft caps for a scope, per day and/or month (null removes a limit)',
+    errors: { 409: 'A $0 probe session (brake doctor --prove): its caps cannot change' },
     params: z.object({ scope: scopeLabel }),
     body: z
       .object({ day: capValues.optional(), month: capValues.optional() })
@@ -138,6 +139,7 @@ export function budgetRoutes(r: Router, ctx: Ctx): void {
     role: 'admin',
     tag: 'Caps',
     summary: 'Remove the caps of a scope',
+    errors: { 409: 'A $0 probe session (brake doctor --prove): its caps cannot change' },
     params: z.object({ scope: scopeLabel }),
     query: z.object({ kind: z.enum(['d', 'm']).optional() }),
     response: z.object({

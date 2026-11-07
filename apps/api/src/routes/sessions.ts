@@ -4,7 +4,7 @@ import {
   hashVirtualKey,
   windowsFor,
 } from '@spend-brake/budget';
-import { and, caps, eq, virtualKeys } from '@spend-brake/db';
+import { and, caps, eq, gte, sql, virtualKeys } from '@spend-brake/db';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Auth, Authenticator } from '../auth.js';
@@ -34,6 +34,8 @@ const createBody = z.object({
 
 /** The longest $0 session that is a probe (`brake doctor --prove` mints 60 seconds). */
 export const PROBE_TTL_SEC = 300;
+/** Probes an org may mint an hour: plenty for doctor on every deploy, too few to use as sessions. */
+export const PROBES_PER_HOUR = 30;
 
 const sessionView = z
   .object({
@@ -139,6 +141,25 @@ export function sessionRoutes(
     // payment or a spent request allowance still stops it. Kept short so that probes cannot stand
     // in for sessions on routes priced at $0.
     const probe = body.budgetMicros === 0n && body.ttlSec <= PROBE_TTL_SEC;
+    if (probe) {
+      const [row] = await ctx.db
+        .select({ n: sql<string>`count(*)::text` })
+        .from(virtualKeys)
+        .where(
+          and(
+            eq(virtualKeys.orgId, orgId),
+            gte(virtualKeys.createdAt, new Date(ctx.now().getTime() - 3600_000)),
+            sql`${virtualKeys.config}->>'probe' = 'true'`,
+          ),
+        );
+      if (Number(row?.n ?? 0) >= PROBES_PER_HOUR) {
+        throw new ApiError(
+          429,
+          'rate_limited',
+          `At most ${PROBES_PER_HOUR} $0 probe sessions an hour (brake doctor --prove uses one per run). Try again later.`,
+        );
+      }
+    }
     await requireCapacity(ctx, orgId, probe ? 'probe' : 'session');
 
     let parent: KeyRecord;
@@ -169,6 +190,19 @@ export function sessionRoutes(
         parent.expiresAt ? Date.parse(parent.expiresAt) : Number.MAX_SAFE_INTEGER,
       ),
     );
+    // A key's sessions stay its agent's: another agent id would leave that agent's caps behind.
+    if (
+      c.kind === 'key' &&
+      parent.agentId &&
+      body.agentId !== undefined &&
+      body.agentId !== parent.agentId
+    ) {
+      throw new ApiError(
+        403,
+        'forbidden',
+        `This key belongs to agent ${parent.agentId}: the sessions it mints are that agent's too.`,
+      );
+    }
     const agentId = body.agentId ?? parent.agentId ?? 'cli';
     const name = body.name ?? `session ${sessionId}`;
     const record: KeyRecord = {
