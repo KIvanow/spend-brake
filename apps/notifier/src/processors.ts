@@ -15,7 +15,7 @@ import type { Queue } from 'bullmq';
 import type { ValkeyClient as Redis } from '@spend-brake/budget';
 import type { Transporter } from 'nodemailer';
 import { type WebhookClient, postWebhook } from './deliver.js';
-import { type LinkOptions, type Message, buildMessage } from './message.js';
+import { type LinkOptions, type Message, buildMessage, licenseOrgOf } from './message.js';
 import { render } from './presets.js';
 
 export interface DeliveryJob {
@@ -141,7 +141,7 @@ export async function processAlert(
     }
     await sendMail(deps, job.email, message, [
       {
-        filename: `${String((job.licenseOrg as string | undefined) ?? job.orgId)}.license`,
+        filename: `${licenseOrgOf(job)}.license`,
         content: String(job.license),
       },
     ]);

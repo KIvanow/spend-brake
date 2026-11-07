@@ -52,6 +52,10 @@ export const usd = (micros: unknown): string => {
   return `$${cents / 100n}.${String(cents % 100n).padStart(2, '0')}`;
 };
 
+/** The org a license email's file names: the install's, else (older jobs) the hosted org. */
+export const licenseOrgOf = (job: AlertJob): string =>
+  String((job.licenseOrg as string | undefined) ?? job.orgId);
+
 /**
  * A kill target, raise or mute scope as people know it: a key by its name where the notifier
  * found one, a provider by its name; anything else as the label itself.
@@ -231,13 +235,15 @@ export function buildMessage(alertId: string, job: AlertJob, o: LinkOptions): Me
         actions: view('/#/spend'),
       };
     }
-    case 'license_issued':
+    case 'license_issued': {
+      const org = licenseOrgOf(job);
       return {
         ...base,
         title: `Your Spend Brake ${String(job.edition)} license`,
-        text: `The license for org ${String((job.licenseOrg as string | undefined) ?? job.orgId)} is attached (valid until ${String(job.expiresAt).slice(0, 10)}). Install it with an owner token of that org: brake license install ${String((job.licenseOrg as string | undefined) ?? job.orgId)}.license. It is also in the dashboard under Billing.`,
+        text: `The license for org ${org} is attached (valid until ${String(job.expiresAt).slice(0, 10)}). Install it with an owner token of that org: brake license install ${org}.license. It is also in the dashboard under Billing.`,
         actions: view('/#/billing'),
       };
+    }
     case 'login_link':
       return { ...base, data: {}, ...loginMessage(job) };
     case 'catalog_drift':

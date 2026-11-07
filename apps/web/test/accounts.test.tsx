@@ -802,6 +802,15 @@ describe('sign-up', () => {
     expect(await screen.findByRole('heading', { name: 'Check your email' })).toBeTruthy();
     expect(screen.getByText(/You're on Free and can upgrade/)).toBeTruthy();
   });
+
+  it('welcomes someone signed in to another org back from Checkout, to the new account', async () => {
+    setToken('tok');
+    window.location.hash = '/welcome';
+    render(<App client={client()} />);
+    expect(await screen.findByRole('heading', { name: 'Check your email' })).toBeTruthy();
+    expect(screen.getByText(/not the one you are signed in to/)).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Back to the dashboard' })).toBeTruthy();
+  });
 });
 
 describe('team', () => {

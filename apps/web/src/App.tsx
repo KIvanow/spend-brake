@@ -264,9 +264,10 @@ export function App({
   }
   // A sign-up link (the website's Buy Business, say) opens sign-up even for someone signed in:
   // a license is bought by its own account, and a hosted org's Billing does not offer one.
+  // Checkout returns them to the welcome page, so it shows signed in too.
   if (publicRoute === 'signup') return <Signup />;
+  if (publicRoute === 'welcome') return <Welcome signedIn={signedIn} />;
   if (!signedIn) {
-    if (publicRoute === 'welcome') return <Welcome />;
     if (!options) return null;
     return (
       <SignIn

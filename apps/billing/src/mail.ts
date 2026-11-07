@@ -21,7 +21,8 @@ export function licenseMailer(connection: ValkeyClient) {
           license: m.license,
         },
         {
-          jobId: `license|${m.invoiceId}|${m.orgId}`,
+          // One job per license: an invoice with several license lines sends each.
+          jobId: `license|${m.invoiceId}|${m.licenseId}`,
           attempts: 50,
           backoff: { type: 'exponential', delay: 5_000 },
           removeOnComplete: { age: 2 * 24 * 3600 },

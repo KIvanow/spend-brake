@@ -199,8 +199,8 @@ function planSummary(p: Plan): string {
   return parts.join(', ');
 }
 
-/** Self-hosted licenses (the sign-up asks for the org id of the buyer's install). */
-const SELF_HOSTED_PLANS = ['business', 'enterprise'];
+/** The self-hosted license sign-up sells (Enterprise is arranged with us, not bought here). */
+const SIGNUP_LICENSE_PLANS = ['business'];
 
 /** Create an account: an org and its owner; paid plans continue to Stripe Checkout. */
 export function Signup() {
@@ -234,8 +234,9 @@ export function Signup() {
 
   const paid = plan !== 'free';
   // A license installs only into the org it names, so it is issued for the buyer's own org id.
-  // Known from the plan id itself, so the field shows even before (or without) the plans list.
-  const selfHosted = SELF_HOSTED_PLANS.includes(plan);
+  // The plans list says which plans are licenses; before (or without) it, the one sign-up sells.
+  const selfHosted =
+    plans?.find((p) => p.id === plan)?.selfHosted ?? SIGNUP_LICENSE_PLANS.includes(plan);
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (paid && !acceptTerms) return;
@@ -377,18 +378,28 @@ export function Signup() {
   );
 }
 
-/** Where Stripe Checkout returns a new customer, before they have signed in. */
-export function Welcome() {
+/**
+ * Where Stripe Checkout returns a new customer, before they have signed in to the new account.
+ * Someone signed in to another org (who bought a license from the website, say) is told the
+ * purchase is the new account's, not the one they are signed in to.
+ */
+export function Welcome({ signedIn = false }: { signedIn?: boolean }) {
   return (
     <Shell>
       <h2>Check your email</h2>
       <p>Your account is ready and we emailed you a sign-in link. Open it to finish setting up.</p>
+      {signedIn && (
+        <p className="notice">
+          Your purchase is for the new account you just created, not the one you are signed in to:
+          its plan and license show under Billing once you sign in to it with that link.
+        </p>
+      )}
       <p className="muted">
         Paid? Your plan shows under Billing once Stripe confirms it, usually within a minute. Left
         the payment page? You're on Free and can upgrade under Billing any time.
       </p>
       <a href="#/" onClick={() => go('/')}>
-        Back to sign in
+        {signedIn ? 'Back to the dashboard' : 'Back to sign in'}
       </a>
     </Shell>
   );

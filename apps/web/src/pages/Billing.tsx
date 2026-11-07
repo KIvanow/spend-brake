@@ -1,7 +1,8 @@
+import { LICENSE_ORG } from '@spend-brake/shared/license-org';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { track } from '../analytics.js';
-import { type Cap, api, usd } from '../api.js';
+import { type Cap, api, download as downloadFile, usd } from '../api.js';
 import { useRole } from '../role.js';
 import { Table, TermsConsent, Time } from '../ui.js';
 
@@ -32,7 +33,8 @@ interface BillingView {
   };
   /** The org month cap is still the one sign-up set, unchanged since. */
   signupCap?: boolean;
-  plans: { id: string; name: string }[];
+  /** selfHosted: a license, which needs the install's org id (absent from older services). */
+  plans: { id: string; name: string; selfHosted?: boolean }[];
   licenses: {
     id: string;
     edition: string;
@@ -68,12 +70,16 @@ export function Billing() {
     (c) => c.scope === 'org' && c.kind === 'm' && c.hard !== null,
   );
   const go = useMutation({
-    mutationFn: (to: { checkout: string } | 'portal') =>
+    mutationFn: (to: { checkout: string; licenseOrg?: string } | 'portal') =>
       to === 'portal'
         ? api<{ url: string }>('/v1/billing/portal', { method: 'POST', body: {} })
         : api<{ url: string }>('/v1/billing/checkout', {
             method: 'POST',
-            body: { plan: to.checkout, acceptTerms },
+            body: {
+              plan: to.checkout,
+              ...(to.licenseOrg ? { licenseOrg: to.licenseOrg } : {}),
+              acceptTerms,
+            },
           }),
     onSuccess: (r, to) => {
       if (to !== 'portal') track('checkout_started', { plan: to.checkout });
@@ -83,21 +89,16 @@ export function Billing() {
   const saveInstallOrg = useMutation({
     mutationFn: (licenseOrg: string) =>
       api('/v1/billing/license-org', { method: 'PUT', body: { licenseOrg } }),
-    onSuccess: () => {
+    // The field goes back to the saved value once it has been fetched, not before (it would
+    // show the old one in between).
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['billing'] });
       setInstallOrg(null);
-      void queryClient.invalidateQueries({ queryKey: ['billing'] });
     },
   });
+  // Saved under the name the API gives the file (the org the license names).
   const download = useMutation({
-    mutationFn: async () => {
-      const license = await api<unknown>('/v1/billing/license');
-      const blob = new Blob([`${JSON.stringify(license)}\n`], { type: 'application/json' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = licenseFile;
-      a.click();
-      URL.revokeObjectURL(a.href);
-    },
+    mutationFn: (fallbackName: string) => downloadFile('/v1/billing/license', fallbackName),
   });
 
   if (billing.isError) {
@@ -118,7 +119,28 @@ export function Billing() {
         <h2>Billing</h2>
       </section>
     );
-  const licenseFile = `${b.licenses[0]?.org ?? b.licenseOrg ?? 'spend-brake'}.license`;
+  const latest = b.licenses[0];
+  const licenseFile = `${latest?.org ?? b.licenseOrg ?? 'spend-brake'}.license`;
+  // The install's org id: as typed, else as stored. A license plan is bought for it.
+  const installValue = (installOrg ?? b.licenseOrg ?? '').trim();
+  const installValid = LICENSE_ORG.test(installValue);
+  const licenseSection = b.licenses.length > 0 || Boolean(b.licenseOrg);
+  const buying = can('owner') && !b.hasSubscription;
+  const installField = (hint: string) => (
+    <label>
+      Org id on your install
+      <input
+        value={installOrg ?? b.licenseOrg ?? ''}
+        onChange={(e) => setInstallOrg(e.target.value)}
+        placeholder="acme"
+        pattern="[A-Za-z0-9_\-]{1,64}"
+        title="Up to 64 letters, digits, - or _"
+        autoComplete="off"
+        required
+      />
+      <span className="muted">{hint}</span>
+    </label>
+  );
   return (
     <section>
       <h2>Billing</h2>
@@ -180,7 +202,15 @@ export function Billing() {
         />
       )}
       {!can('owner') && <p className="muted">Owners manage billing.</p>}
-      {can('owner') && !b.hasSubscription && b.plans.length > 0 && (
+      {buying && !licenseSection && b.plans.some((p) => p.selfHosted) && (
+        // Nowhere else to give it yet: the License section shows once there is one.
+        <div className="row">
+          {installField(
+            'For a self-hosted license: the --org you gave brake init. The license installs only into the org with this id.',
+          )}
+        </div>
+      )}
+      {buying && b.plans.length > 0 && (
         <TermsConsent checked={acceptTerms} onChange={setAcceptTerms} />
       )}
       <div className="row actions">
@@ -193,8 +223,12 @@ export function Billing() {
             <button
               key={p.id}
               type="button"
-              disabled={go.isPending || !acceptTerms}
-              onClick={() => go.mutate({ checkout: p.id })}
+              disabled={go.isPending || !acceptTerms || (p.selfHosted === true && !installValid)}
+              onClick={() =>
+                go.mutate(
+                  p.selfHosted ? { checkout: p.id, licenseOrg: installValue } : { checkout: p.id },
+                )
+              }
             >
               Buy {p.name}
             </button>
@@ -202,37 +236,40 @@ export function Billing() {
         )}
       </div>
       {go.error && <p className="error">{go.error.message}</p>}
-      {(b.licenses.length > 0 || b.licenseOrg) && (
+      {licenseSection && (
         <>
           <h3>License</h3>
-          {b.licenseOrg && (
+          {/* Licenses already issued keep the id they were issued for; only the next changes. */}
+          {latest?.org ? (
             <p>
-              Licenses name the org <code>{b.licenseOrg}</code> on your install.
+              Your current license names the org <code>{latest.org}</code> on your install.
+              {b.licenseOrg && b.licenseOrg !== latest.org && (
+                <>
+                  {' '}
+                  The next license issued will name <code>{b.licenseOrg}</code>.
+                </>
+              )}
             </p>
+          ) : (
+            b.licenseOrg && (
+              <p>
+                Licenses will name the org <code>{b.licenseOrg}</code> on your install.
+              </p>
+            )
           )}
           {can('owner') && (
             <form
               className="row"
               onSubmit={(e) => {
                 e.preventDefault();
-                if (installOrg) saveInstallOrg.mutate(installOrg.trim());
+                if (installOrg !== null && installValid) saveInstallOrg.mutate(installValue);
               }}
             >
-              <label>
-                Org id on your install
-                <input
-                  value={installOrg ?? b.licenseOrg ?? ''}
-                  onChange={(e) => setInstallOrg(e.target.value)}
-                  pattern="[A-Za-z0-9_\-]{1,64}"
-                  title="Up to 64 letters, digits, - or _"
-                  autoComplete="off"
-                  required
-                />
-                <span className="muted">
-                  The --org you gave brake init. Renewals are issued for this id.
-                </span>
-              </label>
-              <button type="submit" disabled={saveInstallOrg.isPending || installOrg === null}>
+              {installField('The --org you gave brake init. Renewals are issued for this id.')}
+              <button
+                type="submit"
+                disabled={saveInstallOrg.isPending || installOrg === null || !installValid}
+              >
                 Save
               </button>
             </form>
@@ -254,7 +291,11 @@ export function Billing() {
             ]}
           />
           {can('owner') && (
-            <button type="button" onClick={() => download.mutate()} disabled={download.isPending}>
+            <button
+              type="button"
+              onClick={() => download.mutate(licenseFile)}
+              disabled={download.isPending}
+            >
               Download the latest license
             </button>
           )}

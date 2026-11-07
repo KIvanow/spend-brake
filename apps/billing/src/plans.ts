@@ -11,8 +11,6 @@ export const LICENSE_PLANS = ['business', 'enterprise'] as const;
 export type LicensePlan = (typeof LICENSE_PLANS)[number];
 export const isLicensePlan = (p: string): p is LicensePlan =>
   (LICENSE_PLANS as readonly string[]).includes(p);
-/** An install's org id, as `brake init --org` and the license format accept it. */
-export const LICENSE_ORG = /^[A-Za-z0-9_-]{1,64}$/;
 export const PLANS = ['free', ...HOSTED_PLANS, ...LICENSE_PLANS] as const;
 export type Plan = (typeof PLANS)[number];
 /** Plans sold through Checkout (Enterprise is invoiced by hand). */

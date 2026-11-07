@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { LICENSE_ORG } from './license-org.js';
 import { signDocument } from './signed-document.js';
 
 // The license file format: a public contract between whoever issues licenses (the billing
@@ -21,7 +22,7 @@ export type LicenseFeature = (typeof LICENSE_FEATURES)[number];
 export const licensePayload = z.strictObject({
   id: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
   /** The org this install's license belongs to; its owners manage the license and other orgs. */
-  org: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
+  org: z.string().regex(LICENSE_ORG),
   edition: z.enum(['business', 'enterprise']),
   features: z.array(z.enum(LICENSE_FEATURES)),
   /** Orgs this install may hold. */

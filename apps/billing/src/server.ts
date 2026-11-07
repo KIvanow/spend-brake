@@ -33,6 +33,7 @@ import {
   usageEvents,
   virtualKeys,
 } from '@spend-brake/db';
+import { LICENSE_ORG } from '@spend-brake/shared';
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import type Stripe from 'stripe';
 import { z } from 'zod';
@@ -40,7 +41,6 @@ import { planOf, setLicenseOrg, setPlan } from './entitlements.js';
 import {
   CHECKOUT_PLANS,
   type CheckoutPlan,
-  LICENSE_ORG,
   LIMITS,
   MONTHLY_CENTS,
   PLAN_NAMES,
@@ -200,16 +200,6 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
       'A license needs the org id of your install (the --org you gave brake init): licenseOrg.',
     );
 
-  /** The org a license file names (its payload is signed as is, so it is read, not rebuilt). */
-  const licensedOrg = (raw: string) => {
-    try {
-      const doc = JSON.parse(raw) as { payload: string };
-      return (JSON.parse(Buffer.from(doc.payload, 'base64url').toString()) as { org: string }).org;
-    } catch {
-      return null;
-    }
-  };
-
   /** Paid plans need the buyer's consent: the terms, and starting now without withdrawal. */
   const requireTerms = (acceptTerms: boolean | undefined) => {
     if (acceptTerms !== true) throw new ApiError(400, 'terms_required', TERMS_REQUIRED);
@@ -250,13 +240,13 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
     // A license installs only into the org it names: the buyer's own install.
     const forLicense = isLicensePlan(plan) ? (licenseOrg ?? current?.licenseOrg) : undefined;
     if (isLicensePlan(plan) && !forLicense) throw licenseOrgRequired();
-    if (forLicense) await setLicenseOrg(deps.db, orgId, forLicense, actor, now());
+    const price = await priceId(plan);
     const customer = await customerFor(orgId, current?.billingEmail ?? null);
     const session = await deps.stripe.checkout.sessions.create({
       mode: 'subscription',
       customer,
       client_reference_id: orgId,
-      line_items: [{ price: await priceId(plan), quantity: 1 }],
+      line_items: [{ price, quantity: 1 }],
       subscription_data: {
         metadata: {
           orgId,
@@ -280,6 +270,8 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
         from === 'signup' ? `${dashboard}/#/welcome` : `${dashboard}/#/billing?checkout=cancelled`,
     });
     if (!session.url) throw new ApiError(502, 'stripe_error', 'Stripe returned no checkout URL.');
+    // Kept only once Checkout is open: a checkout that failed leaves the install id as it was.
+    if (forLicense) await setLicenseOrg(deps.db, orgId, forLicense, actor, now());
     return session.url;
   }
 
@@ -370,7 +362,7 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
       .select({
         id: issuedLicenses.id,
         edition: issuedLicenses.edition,
-        raw: issuedLicenses.raw,
+        org: issuedLicenses.licenseOrg,
         expiresAt: issuedLicenses.expiresAt,
         issuedAt: issuedLicenses.issuedAt,
       })
@@ -445,10 +437,10 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
         : null,
       usage,
       signupCap,
-      plans: offered.map((p) => ({ id: p, name: PLAN_NAMES[p] })),
-      licenses: licenses.map(({ raw, ...l }) => ({
+      // A self-hosted plan's checkout needs the install's org id (licenseOrg).
+      plans: offered.map((p) => ({ id: p, name: PLAN_NAMES[p], selfHosted: isLicensePlan(p) })),
+      licenses: licenses.map((l) => ({
         ...l,
-        org: licensedOrg(raw),
         expiresAt: l.expiresAt.toISOString(),
         issuedAt: l.issuedAt.toISOString(),
       })),
@@ -487,11 +479,25 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
   });
 
   // The install a license names: renewals are issued for it, so a typo or a move to another
-  // install is fixed here and the next license names the new id.
+  // install is fixed here and the next license names the new id. The stored id is what licenses
+  // name; the Stripe customer gets a copy, so Stripe's records say the same.
   app.put('/v1/billing/license-org', async (req) => {
     const a = await auth(req, 'owner');
     const body = parse(z.object({ licenseOrg: z.string().regex(LICENSE_ORG) }), req.body);
     await setLicenseOrg(deps.db, a.orgId, body.licenseOrg, a.actor, now());
+    const customer = (await planOf(deps.db, a.orgId))?.stripeCustomerId;
+    if (customer) {
+      try {
+        await deps.stripe.customers.update(customer, {
+          metadata: { license_org: body.licenseOrg },
+        });
+      } catch (err) {
+        app.log.warn(
+          { err: (err as Error).message, orgId: a.orgId },
+          'license_org not copied to the Stripe customer',
+        );
+      }
+    }
     return { licenseOrg: body.licenseOrg };
   });
 
@@ -508,7 +514,7 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
       .type('application/json')
       .header(
         'content-disposition',
-        `attachment; filename="${licensedOrg(latest.raw) ?? a.orgId}.license"`,
+        `attachment; filename="${latest.licenseOrg ?? a.orgId}.license"`,
       );
     return latest.raw;
   });
@@ -582,12 +588,11 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
           .update(orgs)
           .set({ settings: { alertEmail: email } })
           .where(eq(orgs.id, orgId));
-        await setPlan(
-          tx,
-          orgId,
-          { plan: 'free', billingEmail: email, ...(licenseOrg ? { licenseOrg } : {}) },
-          now(),
-        );
+        await setPlan(tx, orgId, { plan: 'free', billingEmail: email }, now());
+        if (licenseOrg) {
+          const actor = result.ownerId ? `user:${result.ownerId}` : 'system';
+          await setLicenseOrg(tx, orgId, licenseOrg, actor, now());
+        }
         return result;
       });
       // The Free plan protects up to its monthly amount from the first request.
