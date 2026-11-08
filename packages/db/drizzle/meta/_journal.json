@@ -57,6 +57,34 @@
       "when": 1793460415045,
       "tag": "0007_custom_apis",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1794053387634,
+      "tag": "0008_license_org",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1794057901760,
+      "tag": "0009_license_org_issued",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1794129175114,
+      "tag": "0010_license_org_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1794139697435,
+      "tag": "0011_hold_since",
+      "breakpoints": true
     }
   ]
 }

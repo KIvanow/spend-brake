@@ -274,3 +274,9 @@ in [Telemetry](https://docs.spendbrake.dev/telemetry/)):
 
 Neither ever includes query strings or request bodies: those hold addresses, phone numbers and
 search terms.
+
+## 9. Business and Enterprise
+
+The [Business and Enterprise features](https://docs.spendbrake.dev/editions/#business-and-enterprise)
+need a license and the ee overlay; [buying one](https://docs.spendbrake.dev/editions/#buying-a-license)
+covers buying and installing it. Nothing else on this page needs a license.

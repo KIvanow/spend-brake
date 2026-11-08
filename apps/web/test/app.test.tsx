@@ -331,6 +331,176 @@ describe('dashboard', () => {
     );
   });
 
+  it('shows the install org id licenses name, and lets the owner change it', async () => {
+    routes['GET /v1/billing'] = () => [
+      200,
+      {
+        plan: 'business',
+        planName: 'Business (self-hosted license)',
+        status: 'active',
+        currentPeriodEnd: null,
+        hasSubscription: true,
+        licenseOrg: 'acme',
+        limits: null,
+        usage: { keys: 0, providers: 0, agentSessionsThisMonth: 0, requestsThisMonth: 0 },
+        plans: [],
+        licenses: [
+          {
+            id: 'lic_1',
+            edition: 'business',
+            org: 'acme',
+            expiresAt: '2026-12-01T00:00:00.000Z',
+            issuedAt: '2026-11-01T00:00:00.000Z',
+          },
+        ],
+      },
+    ];
+    routes['PUT /v1/billing/license-org'] = () => [200, { licenseOrg: 'acme-prod' }];
+    const user = await signIn();
+    await user.click(screen.getByRole('button', { name: 'Billing' }));
+    expect(await screen.findByText('brake license install acme.license')).toBeTruthy();
+    const field = screen.getByLabelText(/^Org id on your install/);
+    await user.clear(field);
+    await user.type(field, 'acme-prod');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.url === '/v1/billing/license-org')).toMatchObject({
+        method: 'PUT',
+        body: { licenseOrg: 'acme-prod' },
+      }),
+    );
+  });
+
+  it('asks for the install org id to buy Business, and sends it with the checkout', async () => {
+    routes['GET /v1/billing'] = () => [
+      200,
+      {
+        plan: 'free',
+        planName: 'Free',
+        status: 'active',
+        currentPeriodEnd: null,
+        hasSubscription: false,
+        licenseOrg: null,
+        limits: null,
+        usage: { keys: 0, providers: 0, agentSessionsThisMonth: 0, requestsThisMonth: 0 },
+        plans: [
+          { id: 'indie', name: 'Indie', selfHosted: false },
+          { id: 'business', name: 'Business', selfHosted: true },
+        ],
+        licenses: [],
+      },
+    ];
+    routes['POST /v1/billing/checkout'] = () => [200, { url: 'about:blank' }];
+    const user = await signIn();
+    await user.click(screen.getByRole('button', { name: 'Billing' }));
+    await user.click(
+      await screen.findByRole('checkbox', { name: /I agree to the Terms of Service/ }),
+    );
+    const business = screen.getByRole('button', { name: 'Buy Business' });
+    expect(screen.getByRole('button', { name: 'Buy Indie' })).toHaveProperty('disabled', false);
+    expect(business).toHaveProperty('disabled', true);
+    const field = screen.getByLabelText(/^Org id on your install/);
+    await user.type(field, 'acme prod');
+    expect(business).toHaveProperty('disabled', true);
+    await user.clear(field);
+    // Surrounding spaces are dropped, as on the server.
+    await user.type(field, ' acme-prod ');
+    await user.click(business);
+    await waitFor(() =>
+      expect(calls.find((c) => c.url === '/v1/billing/checkout')).toMatchObject({
+        body: { plan: 'business', licenseOrg: 'acme-prod', acceptTerms: true },
+      }),
+    );
+  });
+
+  it('lets a license subscriber with no install id stored set one', async () => {
+    routes['GET /v1/billing'] = () => [
+      200,
+      {
+        plan: 'business',
+        planName: 'Business (self-hosted license)',
+        status: 'active',
+        currentPeriodEnd: null,
+        hasSubscription: true,
+        licenseOrg: null,
+        limits: null,
+        usage: { keys: 0, providers: 0, agentSessionsThisMonth: 0, requestsThisMonth: 0 },
+        plans: [],
+        licenses: [],
+      },
+    ];
+    routes['PUT /v1/billing/license-org'] = () => [200, { licenseOrg: 'acme' }];
+    const user = await signIn();
+    await user.click(screen.getByRole('button', { name: 'Billing' }));
+    const field = await screen.findByLabelText(/^Org id on your install/);
+    await user.type(field, 'acme');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.url === '/v1/billing/license-org')).toMatchObject({
+        body: { licenseOrg: 'acme' },
+      }),
+    );
+  });
+
+  it('says which org the current license and the next one name, and saves the file as named', async () => {
+    routes['GET /v1/billing'] = () => [
+      200,
+      {
+        plan: 'business',
+        planName: 'Business (self-hosted license)',
+        status: 'active',
+        currentPeriodEnd: null,
+        hasSubscription: true,
+        licenseOrg: 'acme-prod',
+        limits: null,
+        usage: { keys: 0, providers: 0, agentSessionsThisMonth: 0, requestsThisMonth: 0 },
+        plans: [],
+        licenses: [
+          {
+            id: 'lic_1',
+            edition: 'business',
+            org: 'acme',
+            expiresAt: '2026-12-01T00:00:00.000Z',
+            issuedAt: '2026-11-01T00:00:00.000Z',
+          },
+        ],
+      },
+    ];
+    const json = globalThis.fetch;
+    vi.stubGlobal('fetch', (input: string, init: RequestInit = {}) =>
+      String(input) === '/v1/billing/license'
+        ? Promise.resolve(
+            new Response('{"format":"spend-brake-license/1"}\n', {
+              headers: {
+                'content-type': 'application/json',
+                'content-disposition': 'attachment; filename="from-server.license"',
+              },
+            }),
+          )
+        : json(input, init),
+    );
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL: () => 'blob:test/2',
+      revokeObjectURL: () => undefined,
+    });
+    const clicked: HTMLAnchorElement[] = [];
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+      this: HTMLAnchorElement,
+    ) {
+      clicked.push(this);
+    });
+    const user = await signIn();
+    await user.click(screen.getByRole('button', { name: 'Billing' }));
+    expect(await screen.findByText(/Your current license names the org/)).toBeTruthy();
+    expect(screen.getByText(/The next license issued will name/)).toBeTruthy();
+    // The command installs the license there is, which still names the old id.
+    expect(screen.getByText('brake license install acme.license')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Download the latest license' }));
+    await waitFor(() => expect(clicked[0]?.download).toBe('from-server.license'));
+    click.mockRestore();
+  });
+
   it('tells admins that owners manage billing, without buy buttons', async () => {
     routes['GET /v1/auth/session'] = () => [200, { orgId: 'acme', role: 'admin', actor: 'u' }];
     routes['GET /v1/billing'] = () => [

@@ -1,3 +1,4 @@
+import { LICENSE_ORG } from '@spend-brake/shared/license-org';
 import { type FormEvent, type ReactNode, useEffect, useState } from 'react';
 import { track } from '../analytics.js';
 import { ApiError, type AuthOptions, api, setToken } from '../api.js';
@@ -199,6 +200,9 @@ function planSummary(p: Plan): string {
   return parts.join(', ');
 }
 
+/** The self-hosted license sign-up sells (Enterprise is arranged with us, not bought here). */
+const SIGNUP_LICENSE_PLANS = ['business'];
+
 /** Create an account: an org and its owner; paid plans continue to Stripe Checkout. */
 export function Signup() {
   const [plans, setPlans] = useState<Plan[] | null>(null);
@@ -207,6 +211,7 @@ export function Signup() {
   const [unknownPlan, setUnknownPlan] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [installOrg, setInstallOrg] = useState('');
   const [acceptTerms, setAcceptTerms] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -229,9 +234,19 @@ export function Signup() {
   }, [wanted]);
 
   const paid = plan !== 'free';
+  // A license installs only into the org it names, so it is issued for the buyer's own org id.
+  // The plans list says which plans are licenses; before (or without) it, the one sign-up sells.
+  const selfHosted =
+    plans?.find((p) => p.id === plan)?.selfHosted ?? SIGNUP_LICENSE_PLANS.includes(plan);
+  // Checked as trimmed, which is what is sent (as under Billing).
+  const installValid = LICENSE_ORG.test(installOrg.trim());
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (paid && !acceptTerms) return;
+    if (selfHosted && !installValid) {
+      setError('The org id on your install is up to 64 letters, digits, - or _.');
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -241,6 +256,7 @@ export function Signup() {
           name: name.trim(),
           email: email.trim(),
           plan,
+          ...(selfHosted ? { licenseOrg: installOrg.trim() } : {}),
           timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           ...(paid ? { acceptTerms } : {}),
         },
@@ -322,6 +338,23 @@ export function Signup() {
             <p className="muted">Prices exclude VAT where applicable.</p>
           )}
         </fieldset>
+        {selfHosted && (
+          <label>
+            Org id on your install
+            <input
+              value={installOrg}
+              onChange={(e) => setInstallOrg(e.target.value)}
+              placeholder="acme"
+              aria-invalid={installOrg.trim() !== '' && !installValid}
+              title="Up to 64 letters, digits, - or _"
+              autoComplete="off"
+              required
+            />
+            <span className="muted">
+              The --org you gave brake init. The license installs only into the org with this id.
+            </span>
+          </label>
+        )}
         {paid ? (
           <TermsConsent checked={acceptTerms} onChange={setAcceptTerms} />
         ) : (
@@ -352,18 +385,28 @@ export function Signup() {
   );
 }
 
-/** Where Stripe Checkout returns a new customer, before they have signed in. */
-export function Welcome() {
+/**
+ * Where Stripe Checkout returns a new customer, before they have signed in to the new account.
+ * Someone signed in to another org (who bought a license from the website, say) is told the
+ * purchase is the new account's, not the one they are signed in to.
+ */
+export function Welcome({ signedIn = false }: { signedIn?: boolean }) {
   return (
     <Shell>
       <h2>Check your email</h2>
       <p>Your account is ready and we emailed you a sign-in link. Open it to finish setting up.</p>
+      {signedIn && (
+        <p className="notice">
+          The account you just created is a new one, not the one you are signed in to: its plan, and
+          its license if you paid, show under Billing once you sign in to it with that link.
+        </p>
+      )}
       <p className="muted">
         Paid? Your plan shows under Billing once Stripe confirms it, usually within a minute. Left
         the payment page? You're on Free and can upgrade under Billing any time.
       </p>
       <a href="#/" onClick={() => go('/')}>
-        Back to sign in
+        {signedIn ? 'Back to the dashboard' : 'Back to sign in'}
       </a>
     </Shell>
   );

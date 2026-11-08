@@ -58,6 +58,9 @@ interface Status {
   remaining: number | null;
 }
 
+/** A path as one shell word, safe to paste. */
+const shellWord = (s: string) => (/^[\w./-]+$/.test(s) ? s : `'${s.replaceAll("'", "'\\''")}'`);
+
 /** Caps as a table with --pretty (list and set answer with the same items). */
 function printCaps(io: Io, r: { items: Cap[]; pending?: unknown[] }, asTable: boolean) {
   print(
@@ -382,7 +385,20 @@ export function adminCommands(program: Command, io: Io, done: (code: number) => 
       } catch {
         throw new CliError(`cannot read ${file}`, EXIT.usage);
       }
-      print(io, await apiCall(io, 'POST', '/v1/license', { license: text }), pretty(cmd));
+      let installed: unknown;
+      try {
+        installed = await apiCall(io, 'POST', '/v1/license', { license: text });
+      } catch (err) {
+        // The saved config holds an admin token; installing takes the owner token init printed.
+        if (err instanceof ApiRefusal && err.status === 403 && err.error === 'forbidden') {
+          throw new CliError(
+            `${err.message} Run it with the owner token \`brake init\` printed, read without echo so it stays out of your shell history and this command only (bash or zsh): read -rs t && BRAKE_ADMIN_TOKEN="$t" brake license install ${shellWord(file)}; unset t`,
+            err.code,
+          );
+        }
+        throw err;
+      }
+      print(io, installed, pretty(cmd));
       done(EXIT.ok);
     });
   leaf(lic, 'status').action(async (_o: unknown, cmd: Command) => {

@@ -196,6 +196,8 @@ export function App({
       setPending(false);
       setSignedIn(change.token !== null);
       setLinkError(change.token === null ? 'You signed out in another tab. Sign in again.' : null);
+      // Signed in from the emailed link in another tab: the welcome page has done its job here.
+      if (change.token !== null && route() === 'welcome') window.location.hash = '/';
       setSession((n) => n + 1);
     };
     window.addEventListener('hashchange', onHash);
@@ -262,9 +264,14 @@ export function App({
       </main>
     );
   }
+  // The website's Buy Business link opens sign-up even for someone signed in: a license is
+  // bought by its own account, and a hosted org's Billing does not offer one. Other sign-up links
+  // take someone signed in to their dashboard. Checkout returns them to the welcome page, so it
+  // shows signed in too.
+  const licenseLink = /[?&]plan=business\b/.test(window.location.hash);
+  if (publicRoute === 'signup' && (!signedIn || licenseLink)) return <Signup />;
+  if (publicRoute === 'welcome') return <Welcome signedIn={signedIn} />;
   if (!signedIn) {
-    if (publicRoute === 'signup') return <Signup />;
-    if (publicRoute === 'welcome') return <Welcome />;
     if (!options) return null;
     return (
       <SignIn

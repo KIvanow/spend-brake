@@ -804,6 +804,9 @@ td.no {
   font-size: 24px;
   margin: 6px 0 2px;
 }
+.selfhost .btn {
+  margin-top: 12px;
+}
 .pricenote {
   margin-top: 14px;
   font-size: 14px;

@@ -22,15 +22,26 @@ Free limits.
 
 ## Endpoints (behind the dashboard at `/v1/billing`)
 
-| Method | Path                   | Who    | What                                                                                                                  |
-| ------ | ---------------------- | ------ | --------------------------------------------------------------------------------------------------------------------- |
-| POST   | `/v1/billing/signup`   | public | Create a Free org and email its owner a sign-in link; a paid plan returns a Checkout URL (`BRAKE_HOSTED_SIGNUP=true`) |
-| GET    | `/v1/billing/plans`    | public | Plans with monthly prices and limits (the sign-up page and website read it)                                           |
-| GET    | `/v1/billing`          | viewer | Plan, status, usage against limits, licenses                                                                          |
-| POST   | `/v1/billing/checkout` | owner  | Stripe Checkout for a plan (first purchase)                                                                           |
-| POST   | `/v1/billing/portal`   | owner  | Stripe Customer Portal: card, plan change, cancel                                                                     |
-| GET    | `/v1/billing/license`  | owner  | The latest license file                                                                                               |
-| POST   | `/v1/billing/webhook`  | Stripe | Signed events, each applied once                                                                                      |
+| Method | Path                      | Who    | What                                                                                                                  |
+| ------ | ------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/v1/billing/signup`      | public | Create a Free org and email its owner a sign-in link; a paid plan returns a Checkout URL (`BRAKE_HOSTED_SIGNUP=true`) |
+| PUT    | `/v1/billing/license-org` | owner  | The org id of the install licenses are issued for (`licenseOrg`)                                                      |
+| GET    | `/v1/billing/plans`       | public | Plans with monthly prices and limits (the sign-up page and website read it)                                           |
+| GET    | `/v1/billing`             | viewer | Plan, status, usage against limits, licenses                                                                          |
+| POST   | `/v1/billing/checkout`    | owner  | Stripe Checkout for a plan (first purchase)                                                                           |
+| POST   | `/v1/billing/portal`      | owner  | Stripe Customer Portal: card, plan change, cancel                                                                     |
+| GET    | `/v1/billing/license`     | owner  | The latest license file                                                                                               |
+| POST   | `/v1/billing/webhook`     | Stripe | Signed events, each applied once                                                                                      |
+
+A license (Business sign-up or checkout) names the buyer's install: `licenseOrg`, the `--org`
+they gave `brake init` (400 `license_org_required` without one). It is stored on the hosted org
+(`org_entitlements.license_org`, not unique: installs are separate) at sign-up, or, bought from
+Billing, once Checkout opens; it is passed to Stripe as subscription metadata and copied to the
+Stripe customer's metadata. The hosted org keeps a generated id. The stored id is what licenses
+name: changing it (`PUT /v1/billing/license-org`, every change audited as
+`billing.license_org_set`) copies the new id to the Stripe customer too; the subscription's
+metadata keeps the id it was bought with. Licenses issued before license_org named the hosted
+org's id, and their renewals keep it; a first license is issued only once an id is set.
 
 A paid plan (sign-up or checkout) needs `"acceptTerms": true`: the buyer agrees to the Terms of
 Service and Privacy Policy and asks for the plan to start now, waiving the 14-day right of
@@ -45,9 +56,28 @@ and Enterprise lines, valid to the end of the paid period, emailed through the n
 downloadable in the dashboard), `invoice.payment_failed`.
 
 Enterprise is sold by hand: create the customer with metadata `orgId` (an org created through
-sign-up), then a Stripe invoice with a line on the "Spend Brake Enterprise" product (set
+sign-up) and `license_org` (the org id of their install), then a Stripe invoice with a line on the "Spend Brake Enterprise" product (set
 `org_units` in the product metadata, or leave the default). Paying the invoice issues the
-license.
+license, and the org keeps that `license_org` from then on (change it later with
+`PUT /v1/billing/license-org`, not in Stripe). An id already stored on the org (from sign-up or
+Billing) wins over the customer's metadata: check it under Billing before sending the invoice.
+A first license needs a `license_org` (renewals of a license issued before it keep the id that
+license named). Without one, or with one that is not a valid org id, no license is issued: the webhook answers 500 and logs a
+warning, so Stripe retries the event (a failed payment's hold is still lifted). Fix the id in
+the customer's metadata, or store one with `PUT /v1/billing/license-org` as the org's owner (a
+stored id wins over any metadata). A bad id in a subscription's metadata is copied into each
+event, so fixing it on the subscription does not change a retry; fixing it on the customer does
+(the first valid id wins). The next retry, or **Resend** on the event in the Stripe Dashboard,
+then issues the license for the period paid.
+
+Stripe retries a failed live event for up to three days. After that, **Resend** in the
+Dashboard works for events up to 30 days old (`stripe events resend <evt_…>` with the CLI). An
+invoice older than that needs its license issued by hand: sign one with the release key for the
+org's `license_org` and the paid period, and send it to the customer.
+
+Without a signing key (`BRAKE_LICENSE_SIGNING_KEY` / `_FILE`) licenses are not sold: Business
+is not offered and its checkout and sign-up answer `409 license_unavailable`. A license invoice
+paid anyway (Enterprise by hand) is retried by Stripe while the retries last (see above).
 
 ## Tax
 

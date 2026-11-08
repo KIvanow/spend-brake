@@ -1,7 +1,8 @@
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { LICENSE_ORG } from '@spend-brake/shared/license-org';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { track } from '../analytics.js';
-import { type Cap, api, usd } from '../api.js';
+import { type Cap, api, download as downloadFile, usd } from '../api.js';
 import { useRole } from '../role.js';
 import { Table, TermsConsent, Time } from '../ui.js';
 
@@ -11,6 +12,8 @@ interface BillingView {
   status: 'active' | 'past_due' | null;
   currentPeriodEnd: string | null;
   hasSubscription: boolean;
+  /** Business / Enterprise: the org id of the install licenses name. */
+  licenseOrg?: string | null;
   limits: {
     maxKeys: number | null;
     maxProviders: number | null;
@@ -30,8 +33,16 @@ interface BillingView {
   };
   /** The org month cap is still the one sign-up set, unchanged since. */
   signupCap?: boolean;
-  plans: { id: string; name: string }[];
-  licenses: { id: string; edition: string; expiresAt: string; issuedAt: string }[];
+  /** selfHosted: a license, which needs the install's org id (absent from older services). */
+  plans: { id: string; name: string; selfHosted?: boolean }[];
+  licenses: {
+    id: string;
+    edition: string;
+    /** The org the license names (absent from older billing services). */
+    org?: string | null;
+    expiresAt: string;
+    issuedAt: string;
+  }[];
 }
 
 const of = (used: number, max: number | null | undefined) =>
@@ -40,7 +51,9 @@ const of = (used: number, max: number | null | undefined) =>
 /** The hosted plan: usage against limits, buying and managing it, license files. */
 export function Billing() {
   const { can } = useRole();
+  const queryClient = useQueryClient();
   const [acceptTerms, setAcceptTerms] = useState(false);
+  const [installOrg, setInstallOrg] = useState<string | null>(null);
   const billing = useQuery({
     queryKey: ['billing'],
     queryFn: () => api<BillingView>('/v1/billing'),
@@ -57,28 +70,35 @@ export function Billing() {
     (c) => c.scope === 'org' && c.kind === 'm' && c.hard !== null,
   );
   const go = useMutation({
-    mutationFn: (to: { checkout: string } | 'portal') =>
+    mutationFn: (to: { checkout: string; licenseOrg?: string } | 'portal') =>
       to === 'portal'
         ? api<{ url: string }>('/v1/billing/portal', { method: 'POST', body: {} })
         : api<{ url: string }>('/v1/billing/checkout', {
             method: 'POST',
-            body: { plan: to.checkout, acceptTerms },
+            body: {
+              plan: to.checkout,
+              ...(to.licenseOrg ? { licenseOrg: to.licenseOrg } : {}),
+              acceptTerms,
+            },
           }),
     onSuccess: (r, to) => {
       if (to !== 'portal') track('checkout_started', { plan: to.checkout });
       window.location.assign(r.url);
     },
   });
-  const download = useMutation({
-    mutationFn: async () => {
-      const license = await api<unknown>('/v1/billing/license');
-      const blob = new Blob([`${JSON.stringify(license)}\n`], { type: 'application/json' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = 'spend-brake.license';
-      a.click();
-      URL.revokeObjectURL(a.href);
+  const saveInstallOrg = useMutation({
+    mutationFn: (licenseOrg: string) =>
+      api('/v1/billing/license-org', { method: 'PUT', body: { licenseOrg } }),
+    // The field goes back to the saved value once it has been fetched, not before (it would
+    // show the old one in between).
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['billing'] });
+      setInstallOrg(null);
     },
+  });
+  // Saved under the name the API gives the file (the org the license names).
+  const download = useMutation({
+    mutationFn: (fallbackName: string) => downloadFile('/v1/billing/license', fallbackName),
   });
 
   if (billing.isError) {
@@ -99,6 +119,36 @@ export function Billing() {
         <h2>Billing</h2>
       </section>
     );
+  const latest = b.licenses[0];
+  const licenseFile = `${latest?.org ?? b.licenseOrg ?? 'spend-brake'}.license`;
+  // The install's org id: as typed, else as stored. A license plan is bought for it.
+  const installValue = (installOrg ?? b.licenseOrg ?? '').trim();
+  const installValid = LICENSE_ORG.test(installValue);
+  // Also for a license plan with no id stored yet (bought before the id was asked for): its
+  // owner sets the id here, and Stripe's next retry of the paid invoice issues the license.
+  const licenseSection =
+    b.licenses.length > 0 ||
+    Boolean(b.licenseOrg) ||
+    b.plan === 'business' ||
+    b.plan === 'enterprise';
+  const buying = can('owner') && !b.hasSubscription;
+  const installField = (hint: string) => (
+    <label>
+      Org id on your install
+      <input
+        value={installOrg ?? b.licenseOrg ?? ''}
+        onChange={(e) => setInstallOrg(e.target.value)}
+        placeholder="acme"
+        // Checked as trimmed (installValid), which is what is sent: a pattern would refuse
+        // "acme " while Save stays enabled.
+        aria-invalid={installOrg !== null && !installValid}
+        title="Up to 64 letters, digits, - or _"
+        autoComplete="off"
+        required
+      />
+      <span className="muted">{hint}</span>
+    </label>
+  );
   return (
     <section>
       <h2>Billing</h2>
@@ -160,7 +210,15 @@ export function Billing() {
         />
       )}
       {!can('owner') && <p className="muted">Owners manage billing.</p>}
-      {can('owner') && !b.hasSubscription && b.plans.length > 0 && (
+      {buying && !licenseSection && b.plans.some((p) => p.selfHosted) && (
+        // Nowhere else to give it yet: the License section shows once there is one.
+        <div className="row">
+          {installField(
+            'For a self-hosted license: the --org you gave brake init. The license installs only into the org with this id.',
+          )}
+        </div>
+      )}
+      {buying && b.plans.length > 0 && (
         <TermsConsent checked={acceptTerms} onChange={setAcceptTerms} />
       )}
       <div className="row actions">
@@ -173,8 +231,12 @@ export function Billing() {
             <button
               key={p.id}
               type="button"
-              disabled={go.isPending || !acceptTerms}
-              onClick={() => go.mutate({ checkout: p.id })}
+              disabled={go.isPending || !acceptTerms || (p.selfHosted === true && !installValid)}
+              onClick={() =>
+                go.mutate(
+                  p.selfHosted ? { checkout: p.id, licenseOrg: installValue } : { checkout: p.id },
+                )
+              }
             >
               Buy {p.name}
             </button>
@@ -182,11 +244,52 @@ export function Billing() {
         )}
       </div>
       {go.error && <p className="error">{go.error.message}</p>}
-      {b.licenses.length > 0 && (
+      {licenseSection && (
         <>
           <h3>License</h3>
+          {/* Licenses already issued keep the id they were issued for; only the next changes. */}
+          {latest?.org ? (
+            <p>
+              Your current license names the org <code>{latest.org}</code> on your install.
+              {b.licenseOrg && b.licenseOrg !== latest.org && (
+                <>
+                  {' '}
+                  The next license issued will name <code>{b.licenseOrg}</code>.
+                </>
+              )}
+            </p>
+          ) : (
+            b.licenseOrg && (
+              <p>
+                Licenses will name the org <code>{b.licenseOrg}</code> on your install.
+              </p>
+            )
+          )}
+          {can('owner') && (
+            <form
+              className="row"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (installOrg !== null && installValid) saveInstallOrg.mutate(installValue);
+              }}
+            >
+              {installField('The --org you gave brake init. Renewals are issued for this id.')}
+              <button
+                type="submit"
+                disabled={saveInstallOrg.isPending || installOrg === null || !installValid}
+              >
+                Save
+              </button>
+            </form>
+          )}
+          {saveInstallOrg.error && <p className="error">{saveInstallOrg.error.message}</p>}
+        </>
+      )}
+      {b.licenses.length > 0 && (
+        <>
           <p className="muted">
-            Install on your server with <code>brake license install spend-brake.license</code>.
+            Install on your server with an owner token of that org:{' '}
+            <code>brake license install {licenseFile}</code>.
           </p>
           <Table
             rows={b.licenses}
@@ -196,7 +299,11 @@ export function Billing() {
             ]}
           />
           {can('owner') && (
-            <button type="button" onClick={() => download.mutate()} disabled={download.isPending}>
+            <button
+              type="button"
+              onClick={() => download.mutate(licenseFile)}
+              disabled={download.isPending}
+            >
               Download the latest license
             </button>
           )}

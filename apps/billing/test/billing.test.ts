@@ -1,4 +1,5 @@
 import { generateKeyPairSync, randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { type LoginMail, buildApi, redeemLoginLink } from '@spend-brake/api';
 import { BudgetEngine, connectValkey, type ValkeyClient } from '@spend-brake/budget';
 import {
@@ -11,6 +12,7 @@ import {
   migrate,
   orgEntitlements,
   orgs,
+  sql,
   stripeEvents,
   virtualKeys,
 } from '@spend-brake/db';
@@ -23,11 +25,13 @@ import {
 import type { FastifyInstance } from 'fastify';
 import Stripe from 'stripe';
 import { GenericContainer, type StartedTestContainer, Wait } from 'testcontainers';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { setLicenseOrg } from '../src/entitlements.js';
+import { licenseMailer } from '../src/mail.js';
 import { PLAN_METADATA, type Plan, lookupKey } from '../src/plans.js';
 import { CHECKOUT_WAIVER_MESSAGE, TERMS_VERSION, buildServer } from '../src/server.js';
 import { stripeClient } from '../src/stripe.js';
-import type { LicenseMail } from '../src/webhooks.js';
+import { type LicenseMail, applyEvent } from '../src/webhooks.js';
 
 const SECRET = 'whsec_test_secret';
 const NOW = new Date('2026-10-30T12:00:00Z');
@@ -50,6 +54,8 @@ const products: Record<string, { id: string; metadata: Record<string, string> }>
   prod_team: { id: 'prod_team', metadata: { [PLAN_METADATA]: 'team' } },
 };
 let customerSeq = 0;
+/** Set to make Stripe calls fail: the price lookup ('prices') or opening Checkout ('checkout'). */
+let stripeDown: 'prices' | 'checkout' | null = null;
 const fakeStripe = {
   customers: {
     create: (p: Stripe.CustomerCreateParams) => {
@@ -61,11 +67,19 @@ const fakeStripe = {
       customers.set(c.id, c);
       return Promise.resolve(c);
     },
-    retrieve: (id: string) => Promise.resolve(customers.get(id)!),
+    // Like Stripe, every customer an event names exists (with no metadata unless set here).
+    retrieve: (id: string) =>
+      Promise.resolve(customers.get(id) ?? ({ id, metadata: {} } as unknown as Stripe.Customer)),
+    update: (id: string, p: Stripe.CustomerUpdateParams) => {
+      const c = customers.get(id)!;
+      c.metadata = { ...c.metadata, ...(p.metadata as Record<string, string>) };
+      return Promise.resolve(c);
+    },
   },
   checkout: {
     sessions: {
       create: (p: Stripe.Checkout.SessionCreateParams) => {
+        if (stripeDown === 'checkout') return Promise.reject(new Error('Stripe is down'));
         checkouts.push(p);
         return Promise.resolve({
           id: `cs_${checkouts.length}`,
@@ -93,7 +107,12 @@ const fakeStripe = {
   },
   prices: {
     list: (p: { lookup_keys: string[] }) =>
-      Promise.resolve({ data: p.lookup_keys.map((k) => ({ id: `price_${k}`, lookup_key: k })) }),
+      Promise.resolve({
+        data:
+          stripeDown === 'prices'
+            ? []
+            : p.lookup_keys.map((k) => ({ id: `price_${k}`, lookup_key: k })),
+      }),
   },
   products: { retrieve: (id: string) => Promise.resolve(products[id]!) },
   webhooks,
@@ -160,20 +179,31 @@ afterAll(async () => {
 let seq = 0;
 const bearer = (t: string) => ({ authorization: `Bearer ${t}` });
 
-async function signup(plan: Plan | 'free' = 'free', remoteAddress?: string) {
-  const orgId = `org_${++seq}_${randomBytes(2).toString('hex')}`;
-  const res = await billing.inject({
+/** The org id licenses name in these tests: the buyer's install, not the hosted org. */
+const installOf = (orgId: string) => `install_${orgId}`;
+
+function signupRequest(payload: object, remoteAddress?: string) {
+  return billing.inject({
     method: 'POST',
     url: '/v1/billing/signup',
     ...(remoteAddress ? { remoteAddress } : {}),
-    payload: {
+    payload,
+  });
+}
+
+async function signup(plan: Plan | 'free' = 'free', remoteAddress?: string) {
+  const orgId = `org_${++seq}_${randomBytes(2).toString('hex')}`;
+  const res = await signupRequest(
+    {
       orgId,
       name: orgId,
       email: `${orgId}@example.com`,
       plan,
       ...(plan === 'free' ? {} : { acceptTerms: true }),
+      ...(plan === 'business' ? { licenseOrg: installOf(orgId) } : {}),
     },
-  });
+    remoteAddress,
+  );
   expect(res.statusCode, res.body).toBe(201);
   return { orgId, ...res.json<{ ownerToken: string; checkoutUrl?: string }>() };
 }
@@ -291,6 +321,195 @@ describe('Stripe webhooks', () => {
 });
 
 describe('sign-up and checkout', () => {
+  it('stores the org id of the install for a license, and lets the buyer retry', async () => {
+    const payload = {
+      name: 'Acme',
+      email: 'license@example.com',
+      plan: 'business',
+      acceptTerms: true,
+    };
+    // Its own client address: sign-up is rate limited per client.
+    const remoteAddress = '203.0.113.77';
+    const missing = await signupRequest(payload, remoteAddress);
+    expect(missing.statusCode).toBe(400);
+    expect(missing.json()).toMatchObject({ error: 'license_org_required' });
+
+    // The hosted org gets its own id; any number of buyers can license `acme`, and a buyer who
+    // left Checkout signs up again. Install ids as short as `brake init` takes are fine.
+    const first = await signupRequest({ ...payload, licenseOrg: 'acme' }, remoteAddress);
+    const again = await signupRequest({ ...payload, licenseOrg: 'acme' }, remoteAddress);
+    const short = await signupRequest({ ...payload, licenseOrg: 'io' }, remoteAddress);
+    for (const r of [first, again, short]) expect(r.statusCode, r.body).toBe(201);
+    const { orgId } = first.json<{ orgId: string }>();
+    expect(orgId).not.toBe('acme');
+    expect(again.json<{ orgId: string }>().orgId).not.toBe(orgId);
+    expect(await plan(orgId)).toMatchObject({ plan: 'free', licenseOrg: 'acme' });
+    expect(checkouts.at(-2)).toMatchObject({
+      subscription_data: { metadata: { orgId: again.json<{ orgId: string }>().orgId } },
+    });
+    expect(checkouts.at(-1)).toMatchObject({
+      subscription_data: { metadata: { license_org: 'io' } },
+    });
+  });
+
+  it('refuses a taken hosted org id before counting an email to the address', async () => {
+    // With email sign-in, where each sign-up counts against the address's emails an hour.
+    const hosted = await buildServer({
+      db,
+      valkey,
+      stripe: fakeStripe,
+      webhookSecret: SECRET,
+      dashboardUrl: 'https://app.example.com',
+      licenseKey: null,
+      sendLicense: () => Promise.resolve(),
+      signup: true,
+      signIn: {
+        dashboardUrl: 'https://app.example.com',
+        mailer: { send: () => Promise.resolve() },
+      },
+      now: () => NOW,
+    });
+    const email = `taken-${randomBytes(3).toString('hex')}@example.com`;
+    const attempt = (orgId: string) =>
+      hosted.inject({
+        method: 'POST',
+        url: '/v1/billing/signup',
+        remoteAddress: '203.0.113.78',
+        payload: { orgId, name: 'x', email },
+      });
+    const orgId = `org_${++seq}_${randomBytes(2).toString('hex')}`;
+    expect((await attempt(orgId)).statusCode).toBe(201);
+    // More refusals than the address's emails an hour: none of them counted.
+    for (let i = 0; i < 5; i++) {
+      const taken = await attempt(orgId);
+      expect(taken.statusCode).toBe(409);
+      expect(taken.json()).toMatchObject({ error: 'conflict', message: 'That org id is taken.' });
+    }
+    expect((await attempt(`${orgId}_2`)).statusCode).toBe(201);
+    await hosted.close();
+  });
+
+  it('offers Business under Billing to an org that signed up for it but left Checkout', async () => {
+    const { orgId, ownerToken } = await signup('business', '203.0.113.79');
+    const view = () => billing.inject({ url: '/v1/billing', headers: bearer(ownerToken) });
+    expect((await view()).json<{ plans: { id: string }[] }>().plans.map((p) => p.id)).toContain(
+      'business',
+    );
+    const set = await billing.inject({
+      method: 'PUT',
+      url: '/v1/billing/license-org',
+      headers: bearer(ownerToken),
+      payload: { licenseOrg: 'acme-prod' },
+    });
+    expect(set.statusCode, set.body).toBe(200);
+    expect((await view()).json()).toMatchObject({ licenseOrg: 'acme-prod' });
+    const res = await billing.inject({
+      method: 'POST',
+      url: '/v1/billing/checkout',
+      headers: bearer(ownerToken),
+      payload: { plan: 'business', acceptTerms: true },
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(checkouts.at(-1)).toMatchObject({
+      subscription_data: { metadata: { license_org: 'acme-prod' } },
+    });
+    // The Stripe customer gets a copy of the id.
+    const customer = (await plan(orgId)).stripeCustomerId!;
+    expect(customers.get(customer)!.metadata).toMatchObject({ license_org: 'acme-prod' });
+  });
+
+  it('changes nothing about the install org id when Checkout fails to open', async () => {
+    const { orgId, ownerToken } = await signup('free', '203.0.113.82');
+    const buy = () =>
+      billing.inject({
+        method: 'POST',
+        url: '/v1/billing/checkout',
+        headers: bearer(ownerToken),
+        payload: { plan: 'business', licenseOrg: 'hq', acceptTerms: true },
+      });
+    const audited = () =>
+      db
+        .select()
+        .from(auditLog)
+        .where(and(eq(auditLog.orgId, orgId), eq(auditLog.action, 'billing.license_org_set')));
+    try {
+      stripeDown = 'prices';
+      expect((await buy()).statusCode).toBe(503);
+      stripeDown = 'checkout';
+      expect((await buy()).statusCode).toBe(500);
+    } finally {
+      stripeDown = null;
+    }
+    expect((await plan(orgId)).licenseOrg).toBeNull();
+    expect(await audited()).toEqual([]);
+    expect((await buy()).statusCode).toBe(200);
+    expect((await plan(orgId)).licenseOrg).toBe('hq');
+    expect(await audited()).toHaveLength(1);
+  });
+
+  it('needs the install org id to buy a license from Billing', async () => {
+    const { ownerToken } = await signup('free', '203.0.113.80');
+    const buy = (extra: object) =>
+      billing.inject({
+        method: 'POST',
+        url: '/v1/billing/checkout',
+        headers: bearer(ownerToken),
+        payload: { plan: 'business', acceptTerms: true, ...extra },
+      });
+    expect((await buy({})).json()).toMatchObject({ error: 'license_org_required' });
+    expect((await buy({ licenseOrg: 'hq' })).statusCode).toBe(200);
+    expect(checkouts.at(-1)).toMatchObject({
+      subscription_data: { metadata: { license_org: 'hq' } },
+    });
+    // Copied to the Stripe customer at checkout too, not only when changed later.
+    const customer = checkouts.at(-1)!.customer as string;
+    expect(customers.get(customer)!.metadata).toMatchObject({ license_org: 'hq' });
+    // Only an owner may change the id licenses name.
+    for (const role of ['admin', 'viewer']) {
+      const token = (
+        await api.inject({
+          method: 'POST',
+          url: '/v1/tokens',
+          headers: bearer(ownerToken),
+          payload: { name: role, role },
+        })
+      ).json<{ token: string }>().token;
+      const res = await billing.inject({
+        method: 'PUT',
+        url: '/v1/billing/license-org',
+        headers: bearer(token),
+        payload: { licenseOrg: 'other' },
+      });
+      expect(res.statusCode, role).toBe(403);
+    }
+  });
+
+  it('audits a change of the install org id and leaves the plan and its limits as they are', async () => {
+    const { orgId, ownerToken } = await signup('business', '203.0.113.81');
+    await db.update(orgEntitlements).set({ maxKeys: 7 }).where(eq(orgEntitlements.orgId, orgId));
+    const put = (licenseOrg: string) =>
+      billing.inject({
+        method: 'PUT',
+        url: '/v1/billing/license-org',
+        headers: bearer(ownerToken),
+        payload: { licenseOrg },
+      });
+    expect((await put('acme-prod')).statusCode).toBe(200);
+    expect((await put('acme-prod')).statusCode).toBe(200);
+    expect(await plan(orgId)).toMatchObject({ licenseOrg: 'acme-prod', maxKeys: 7 });
+    const rows = await db
+      .select({ actor: auditLog.actor, data: auditLog.data })
+      .from(auditLog)
+      .where(and(eq(auditLog.orgId, orgId), eq(auditLog.action, 'billing.license_org_set')))
+      .orderBy(auditLog.id);
+    // Sign-up's, then the change once: saving the same id again changes nothing.
+    expect(rows.map((r) => r.data)).toEqual([
+      { from: null, to: installOf(orgId) },
+      { from: installOf(orgId), to: 'acme-prod' },
+    ]);
+    expect(rows[1]!.actor).not.toBe('system');
+  });
+
   it('creates a Free org with its protected spend, and opens Checkout for a paid plan', async () => {
     const { orgId, ownerToken } = await signup();
     expect(await plan(orgId)).toMatchObject({
@@ -819,13 +1038,14 @@ describe('licenses', () => {
     let rows = await db.select().from(issuedLicenses).where(eq(issuedLicenses.orgId, orgId));
     expect(rows).toHaveLength(1);
     expect(verify(rows[0]!.raw)).toMatchObject({
-      org: orgId,
+      org: installOf(orgId),
       edition: 'business',
       orgUnits: 3,
       expiresAt: first.toISOString(),
     });
     expect(mails.at(-1)).toMatchObject({
       orgId,
+      licenseOrg: installOf(orgId),
       edition: 'business',
       email: `${orgId}@example.com`,
     });
@@ -838,8 +1058,25 @@ describe('licenses', () => {
       url: '/v1/billing/license',
       headers: bearer(ownerToken),
     });
-    expect(download.headers['content-disposition']).toBe(`attachment; filename="${orgId}.license"`);
+    expect(download.headers['content-disposition']).toBe(
+      `attachment; filename="${installOf(orgId)}.license"`,
+    );
     expect(verify(download.body).expiresAt).toBe(second.toISOString());
+
+    // A typo fixed under Billing: the next renewal names the new id.
+    await billing.inject({
+      method: 'PUT',
+      url: '/v1/billing/license-org',
+      headers: bearer(ownerToken),
+      payload: { licenseOrg: 'acme-prod' },
+    });
+    const third = new Date('2027-01-30T12:00:00Z');
+    await post(event('invoice.paid', invoice('in_b3', 'cus_b', 'prod_business', third)));
+    const [latest] = await db
+      .select()
+      .from(issuedLicenses)
+      .where(and(eq(issuedLicenses.orgId, orgId), eq(issuedLicenses.invoiceId, 'in_b3:il_in_b3')));
+    expect(verify(latest!.raw).org).toBe('acme-prod');
     // Hosted plans get no license.
     const hosted = await signup();
     await post(event('invoice.paid', invoice('in_t', 'cus_hosted', 'prod_team', second)));
@@ -850,7 +1087,10 @@ describe('licenses', () => {
 
   it('issues Enterprise licenses from hand-made invoices, with the org units on the product', async () => {
     const { orgId } = await signup();
-    customers.set('cus_ent', { id: 'cus_ent', metadata: { orgId } } as unknown as Stripe.Customer);
+    customers.set('cus_ent', {
+      id: 'cus_ent',
+      metadata: { orgId, license_org: 'bigcorp' },
+    } as unknown as Stripe.Customer);
     await post(
       event(
         'invoice.paid',
@@ -858,7 +1098,357 @@ describe('licenses', () => {
       ),
     );
     const [row] = await db.select().from(issuedLicenses).where(eq(issuedLicenses.orgId, orgId));
-    expect(verify(row!.raw)).toMatchObject({ edition: 'enterprise', orgUnits: 40 });
+    expect(verify(row!.raw)).toMatchObject({ org: 'bigcorp', edition: 'enterprise', orgUnits: 40 });
+    expect(row!.licenseOrg).toBe('bigcorp');
+    expect((await plan(orgId)).licenseOrg).toBe('bigcorp');
+  });
+
+  it('refuses license_org metadata that is not an org id, so Stripe retries once it is fixed', async () => {
+    const { orgId, ownerToken } = await signup('free', '203.0.113.83');
+    // A failed payment earlier: paying lifts its hold even while the license waits, and leaves
+    // the org's own limits as they are.
+    await db
+      .update(orgEntitlements)
+      .set({ status: 'past_due', maxKeys: 7 })
+      .where(eq(orgEntitlements.orgId, orgId));
+    customers.set('cus_typo', {
+      id: 'cus_typo',
+      metadata: { orgId, license_org: 'big corp' },
+    } as unknown as Stripe.Customer);
+    const warned: string[] = [];
+    const before = mails.length;
+    const paid = event(
+      'invoice.paid',
+      invoice('in_typo', 'cus_typo', 'prod_enterprise', new Date('2027-10-30T00:00:00Z')),
+    ) as unknown as Stripe.Event;
+    const apply = () =>
+      applyEvent(
+        {
+          db,
+          stripe: fakeStripe,
+          licenseKey: signer.privateKey,
+          now: () => NOW,
+          sendLicense: (m) => Promise.resolve(void mails.push(m)),
+          log: { warn: (_o, msg) => void warned.push(msg) },
+        },
+        paid,
+      );
+    // Not recorded: the endpoint answers 500 and Stripe sends the event again.
+    await expect(apply()).rejects.toThrow(/not a valid org id/);
+    expect(warned).toEqual([
+      'license_org metadata is not a valid org id: license not issued, the event will be retried',
+    ]);
+    expect(await db.select().from(issuedLicenses).where(eq(issuedLicenses.orgId, orgId))).toEqual(
+      [],
+    );
+    expect(mails).toHaveLength(before);
+    expect(await db.select().from(stripeEvents).where(eq(stripeEvents.id, paid.id))).toEqual([]);
+    expect(await plan(orgId)).toMatchObject({ status: 'active', maxKeys: 7 });
+    // The owner fixes the id under Billing; Stripe's retry issues the license for the paid period.
+    await billing.inject({
+      method: 'PUT',
+      url: '/v1/billing/license-org',
+      headers: bearer(ownerToken),
+      payload: { licenseOrg: 'bigcorp' },
+    });
+    expect(await apply()).toBe('applied');
+    const [row] = await db.select().from(issuedLicenses).where(eq(issuedLicenses.orgId, orgId));
+    expect(verify(row!.raw).org).toBe('bigcorp');
+    expect(mails).toHaveLength(before + 1);
+  });
+
+  it('sells no license without a signing key, and retries a license invoice paid anyway', async () => {
+    const keyless = await buildServer({
+      db,
+      valkey,
+      stripe: fakeStripe,
+      webhookSecret: SECRET,
+      dashboardUrl: 'https://app.example.com',
+      licenseKey: null,
+      sendLicense: () => Promise.resolve(),
+      signup: true,
+      now: () => NOW,
+    });
+    onTestFinished(() => keyless.close());
+    const plans = (await keyless.inject('/v1/billing/plans')).json<{
+      plans: { id: string; purchasable: boolean }[];
+    }>().plans;
+    expect(plans.find((p) => p.id === 'business')).toMatchObject({ purchasable: false });
+    expect(plans.find((p) => p.id === 'team')).toMatchObject({ purchasable: true });
+    const buy = await keyless.inject({
+      method: 'POST',
+      url: '/v1/billing/signup',
+      remoteAddress: '203.0.113.90',
+      payload: {
+        name: 'x',
+        email: `keyless-${randomBytes(3).toString('hex')}@example.com`,
+        plan: 'business',
+        licenseOrg: 'acme',
+        acceptTerms: true,
+      },
+    });
+    expect(buy.statusCode).toBe(409);
+    expect(buy.json()).toMatchObject({ error: 'license_unavailable' });
+
+    // Enterprise invoiced by hand anyway: not recorded, so Stripe retries once a key is set.
+    const { orgId } = await signup('free', '203.0.113.91');
+    customers.set('cus_keyless', {
+      id: 'cus_keyless',
+      metadata: { orgId, license_org: 'bigcorp' },
+    } as unknown as Stripe.Customer);
+    const paid = event(
+      'invoice.paid',
+      invoice('in_keyless', 'cus_keyless', 'prod_enterprise', new Date('2027-10-30T00:00:00Z')),
+    ) as unknown as Stripe.Event;
+    const deps = { db, stripe: fakeStripe, now: () => NOW, sendLicense: () => Promise.resolve() };
+    await expect(applyEvent({ ...deps, licenseKey: null }, paid)).rejects.toThrow(
+      /no license signing key/,
+    );
+    expect(await db.select().from(stripeEvents).where(eq(stripeEvents.id, paid.id))).toEqual([]);
+    expect(await applyEvent({ ...deps, licenseKey: signer.privateKey }, paid)).toBe('applied');
+    const [row] = await db.select().from(issuedLicenses).where(eq(issuedLicenses.orgId, orgId));
+    expect(verify(row!.raw).org).toBe('bigcorp');
+  });
+
+  it('issues no first license without the install id, and renews an old one for the id it named', async () => {
+    const deps = {
+      db,
+      stripe: fakeStripe,
+      licenseKey: signer.privateKey,
+      now: () => NOW,
+      sendLicense: () => Promise.resolve(),
+    };
+    const paid = (inv: string, customer: string) =>
+      event(
+        'invoice.paid',
+        invoice(inv, customer, 'prod_enterprise', new Date('2027-10-30T00:00:00Z')),
+      ) as unknown as Stripe.Event;
+    // An Enterprise customer made by hand without license_org: a license for the hosted id would
+    // be refused by the buyer's install, so the event waits for the id.
+    const { orgId } = await signup('free', '203.0.113.92');
+    customers.set('cus_noid', {
+      id: 'cus_noid',
+      metadata: { orgId },
+    } as unknown as Stripe.Customer);
+    await expect(applyEvent(deps, paid('in_noid', 'cus_noid'))).rejects.toThrow(/no license_org/);
+    expect(await db.select().from(issuedLicenses).where(eq(issuedLicenses.orgId, orgId))).toEqual(
+      [],
+    );
+    // Set in Stripe by hand, with a stray space: the retry issues it for the trimmed id.
+    customers.get('cus_noid')!.metadata.license_org = ' bigcorp ';
+    expect(await applyEvent(deps, paid('in_noid', 'cus_noid'))).toBe('applied');
+    const [row] = await db.select().from(issuedLicenses).where(eq(issuedLicenses.orgId, orgId));
+    expect(verify(row!.raw).org).toBe('bigcorp');
+
+    // An org licensed before license_org existed (its license named the hosted id) renews as is.
+    const old = await signup('free', '203.0.113.93');
+    await db.insert(issuedLicenses).values({
+      id: `lic_old_${randomBytes(3).toString('hex')}`,
+      orgId: old.orgId,
+      edition: 'enterprise',
+      invoiceId: `in_old_${old.orgId}`,
+      raw: '{}',
+      licenseOrg: old.orgId,
+      expiresAt: NOW,
+      issuedAt: new Date(NOW.getTime() - 86_400_000),
+    });
+    customers.set('cus_old', {
+      id: 'cus_old',
+      metadata: { orgId: old.orgId },
+    } as unknown as Stripe.Customer);
+    expect(await applyEvent(deps, paid('in_old_renew', 'cus_old'))).toBe('applied');
+    const renewed = await db
+      .select()
+      .from(issuedLicenses)
+      .where(eq(issuedLicenses.invoiceId, 'in_old_renew:il_in_old_renew'));
+    expect(verify(renewed[0]!.raw).org).toBe(old.orgId);
+  });
+
+  it('emails every license even when one email cannot be queued, and logs that one', async () => {
+    const { orgId } = await signup('business', '203.0.113.94');
+    customers.set('cus_mail', {
+      id: 'cus_mail',
+      metadata: { orgId },
+    } as unknown as Stripe.Customer);
+    const two = invoice('in_mail', 'cus_mail', 'prod_business', new Date('2026-11-30T12:00:00Z'));
+    two.lines.data.push({ ...two.lines.data[0]!, id: 'il_in_mail_2' });
+    const queued: string[] = [];
+    const errors: string[] = [];
+    let first = true;
+    const outcome = await applyEvent(
+      {
+        db,
+        stripe: fakeStripe,
+        licenseKey: signer.privateKey,
+        now: () => NOW,
+        sendLicense: (m) => {
+          if (first) {
+            first = false;
+            return Promise.reject(new Error('valkey down'));
+          }
+          queued.push(m.licenseId);
+          return Promise.resolve();
+        },
+        log: { warn: () => undefined, error: (_o, msg) => void errors.push(msg) },
+      },
+      event('invoice.paid', two) as unknown as Stripe.Event,
+    );
+    expect(outcome).toBe('applied');
+    expect(queued).toHaveLength(1);
+    expect(errors).toEqual(['license email not queued: send the license to the customer by hand']);
+  });
+
+  it('backfills the stored install id from the latest license (migration 0010)', async () => {
+    const { orgId } = await signup('free', '203.0.113.95');
+    const lic = (id: string, licenseOrg: string, at: number) => ({
+      id,
+      orgId,
+      edition: 'business' as const,
+      invoiceId: `${id}:il`,
+      raw: '{}',
+      licenseOrg,
+      expiresAt: NOW,
+      issuedAt: new Date(at),
+    });
+    const tag = randomBytes(3).toString('hex');
+    await db
+      .insert(issuedLicenses)
+      .values([lic(`lic_a_${tag}`, 'old-install', 1_000), lic(`lic_b_${tag}`, 'acme', 2_000)]);
+    const backfill = readFileSync(
+      new URL('../../../packages/db/drizzle/0010_license_org_backfill.sql', import.meta.url),
+      'utf8',
+    );
+    await db.execute(sql.raw(backfill));
+    expect((await plan(orgId)).licenseOrg).toBe('acme');
+    // An id already stored is kept.
+    await setLicenseOrg(db, orgId, 'kept', 'system', NOW);
+    await db.execute(sql.raw(backfill));
+    expect((await plan(orgId)).licenseOrg).toBe('kept');
+  });
+
+  it('lifts a hold with any payment after its latest failure, not with an older one', async () => {
+    const { orgId } = await signup('free', '203.0.113.96');
+    customers.set('cus_hold', {
+      id: 'cus_hold',
+      metadata: { orgId },
+    } as unknown as Stripe.Customer);
+    const deps = {
+      db,
+      stripe: fakeStripe,
+      licenseKey: signer.privateKey,
+      now: () => NOW,
+      sendLicense: () => Promise.resolve(),
+    };
+    const t = (hours: number) => Math.floor(NOW.getTime() / 1000) + hours * 3600;
+    const failed = (invoiceId: string, at: number) =>
+      applyEvent(deps, {
+        ...event('invoice.payment_failed', {
+          id: invoiceId,
+          object: 'invoice',
+          customer: 'cus_hold',
+          lines: { data: [] },
+        }),
+        created: at,
+      } as unknown as Stripe.Event);
+    const paid = (invoiceId: string, paidAt: number) =>
+      applyEvent(
+        deps,
+        event('invoice.paid', {
+          id: invoiceId,
+          object: 'invoice',
+          customer: 'cus_hold',
+          status_transitions: { paid_at: paidAt },
+          lines: { data: [] },
+        }) as unknown as Stripe.Event,
+      );
+    // Invoice A fails, then B: the hold dates from B's failure.
+    await failed('in_a', t(1));
+    await failed('in_b', t(3));
+    expect(await plan(orgId)).toMatchObject({
+      status: 'past_due',
+      holdSince: new Date(t(3) * 1000),
+    });
+    // A payment made before B failed (an old event, retried) leaves the hold.
+    await paid('in_a', t(2));
+    expect((await plan(orgId)).status).toBe('past_due');
+    // A payment after it lifts it, even of another invoice (A voided, C sent and paid), and keeps
+    // the org's own limits.
+    await db.update(orgEntitlements).set({ maxKeys: 9 }).where(eq(orgEntitlements.orgId, orgId));
+    await paid('in_c', t(4));
+    expect(await plan(orgId)).toMatchObject({ status: 'active', holdSince: null, maxKeys: 9 });
+  });
+
+  it('ignores a paid invoice for a customer that is no org, without reading its products', async () => {
+    const reads = vi.spyOn(fakeStripe.products, 'retrieve');
+    onTestFinished(() => reads.mockRestore());
+    const outcome = await applyEvent(
+      {
+        db,
+        stripe: fakeStripe,
+        licenseKey: signer.privateKey,
+        now: () => NOW,
+        sendLicense: () => Promise.resolve(),
+      },
+      event(
+        'invoice.paid',
+        invoice('in_stranger', 'cus_stranger', 'prod_business', new Date('2026-11-30T12:00:00Z')),
+      ) as unknown as Stripe.Event,
+    );
+    expect(outcome).toBe('ignored');
+    expect(reads).not.toHaveBeenCalled();
+  });
+
+  it('takes a valid license_org from the customer over an invalid one on the subscription', async () => {
+    const { orgId } = await signup('free', '203.0.113.97');
+    customers.set('cus_both', {
+      id: 'cus_both',
+      metadata: { orgId, license_org: 'acme' },
+    } as unknown as Stripe.Customer);
+    const inv = {
+      ...invoice('in_both', 'cus_both', 'prod_enterprise', new Date('2027-10-30T00:00:00Z')),
+      parent: { subscription_details: { metadata: { license_org: 'acme corp' } } },
+    };
+    expect(
+      await applyEvent(
+        {
+          db,
+          stripe: fakeStripe,
+          licenseKey: signer.privateKey,
+          now: () => NOW,
+          sendLicense: () => Promise.resolve(),
+        },
+        event('invoice.paid', inv) as unknown as Stripe.Event,
+      ),
+    ).toBe('applied');
+    const [row] = await db.select().from(issuedLicenses).where(eq(issuedLicenses.orgId, orgId));
+    expect(verify(row!.raw).org).toBe('acme');
+  });
+
+  it('emails each license on an invoice with several license lines', async () => {
+    const { orgId } = await signup('business', '203.0.113.84');
+    await post(
+      event('customer.subscription.created', subscription(orgId, 'cus_two', 'business', 'active')),
+    );
+    const two = invoice('in_two', 'cus_two', 'prod_business', new Date('2026-11-30T12:00:00Z'));
+    two.lines.data.push({ ...two.lines.data[0]!, id: 'il_in_two_2' });
+    await post(event('invoice.paid', two));
+    const sent = mails.filter((m) => m.invoiceId === 'in_two');
+    expect(sent).toHaveLength(2);
+    expect(new Set(sent.map((m) => m.licenseId)).size).toBe(2);
+
+    // The notifier's queue keeps one job per license, and still drops a repeat of one.
+    const connection = connectValkey(`redis://${vk.getHost()}:${vk.getMappedPort(6379)}`, {
+      maxRetriesPerRequest: null,
+    });
+    const mailer = licenseMailer(connection);
+    try {
+      for (const m of [...sent, sent[0]!]) await mailer.send(m);
+      const jobs = await mailer.queue.getJobs(['waiting', 'delayed', 'active']);
+      expect(jobs.filter((j) => j.id?.startsWith('license|in_two|'))).toHaveLength(2);
+    } finally {
+      await mailer.queue.close();
+      await connection.quit();
+    }
   });
 });
 

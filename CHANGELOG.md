@@ -63,6 +63,27 @@ images for linux/amd64 and linux/arm64
 - A `$0` probe session records no agent day cap, so it makes no `$0` day-cap template for the
   parent's agent.
 
+### Fixed
+
+- Buying Business online: the sign-up page asks for the org id of your install, so the license
+  it issues installs there (before, it named a new hosted org id, and installing it answered
+  `403 license_wrong_org`). Billing shows that id and lets the owner change it, and the next
+  license names the new id; existing subscriptions can set it there too. The pricing page links
+  to it, and [Editions and license](https://docs.spendbrake.dev/editions/#buying-a-license)
+  explains buying, installing and renewing.
+- `brake license install` refused with the admin token `brake init` saves now says how to run
+  it with the owner token `brake init` printed, read without echo so it stays out of the shell
+  history.
+- Billing refuses to start in live mode with a license signing key that released ee builds do
+  not trust (every license it signed would be refused), and warns about one in test mode.
+- A paid Enterprise invoice whose `license_org` is missing or not a valid org id is retried by
+  Stripe instead of being recorded without a license, or with one for the hosted org's id that
+  the install would refuse: setting the id issues the license for the period paid. Billing
+  shows the id field to every Business and Enterprise org, and orgs licensed before the id was
+  stored get it from their latest license (migration 0010).
+- Without a license signing key, billing does not sell Business (it is not offered, and
+  checkout answers `409 license_unavailable`), and a license invoice paid anyway is retried by Stripe (for up to three days) so it is issued once a key is configured.
+
 ## [0.2.1] - 2026-11-02
 
 ### Fixed

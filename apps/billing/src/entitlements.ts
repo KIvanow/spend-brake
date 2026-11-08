@@ -1,4 +1,4 @@
-import { type Db, eq, orgEntitlements } from '@spend-brake/db';
+import { type Db, auditLog, eq, orgEntitlements, sql } from '@spend-brake/db';
 import { LIMITS, type Plan } from './plans.js';
 
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
@@ -10,6 +10,8 @@ export interface PlanChange {
   stripeSubscriptionId?: string | null;
   currentPeriodEnd?: Date | null;
   billingEmail?: string | null;
+  /** With status past_due: when the failure happened (Stripe's event time). */
+  holdAt?: Date;
 }
 
 /** Write an org's plan and the limits that come with it. */
@@ -26,10 +28,66 @@ export async function setPlan(db: Db | Tx, orgId: string, change: PlanChange, no
     ...(change.billingEmail !== undefined ? { billingEmail: change.billingEmail } : {}),
     updatedAt: now,
   };
+  // A hold keeps the time of its latest failure; lifting it clears it.
+  const holdAt = change.holdAt ?? now;
+  const hold =
+    change.status === 'past_due'
+      ? {
+          insert: { holdSince: holdAt },
+          update: { holdSince: sql`greatest(${orgEntitlements.holdSince}, ${holdAt})` },
+        }
+      : change.status === 'active'
+        ? { insert: { holdSince: null }, update: { holdSince: null } }
+        : { insert: {}, update: {} };
   await db
     .insert(orgEntitlements)
-    .values({ orgId, status: 'active', ...values })
-    .onConflictDoUpdate({ target: orgEntitlements.orgId, set: values });
+    .values({ orgId, status: 'active', ...values, ...hold.insert })
+    .onConflictDoUpdate({ target: orgEntitlements.orgId, set: { ...values, ...hold.update } });
+}
+
+/**
+ * Change the install org id that an org's licenses name, and audit it; returns the id in effect.
+ * Licenses already issued keep naming the old id until they expire. Only that column changes; the plan and its limits
+ * stay as they are.
+ */
+export async function setLicenseOrg(
+  db: Db | Tx,
+  orgId: string,
+  licenseOrg: string,
+  actor: string,
+  now: Date,
+  /** Keep an id already stored (Stripe metadata must not overwrite an owner's choice). */
+  opts: { onlyIfUnset?: boolean } = {},
+): Promise<string> {
+  // One transaction (a savepoint inside the caller's), with the row locked: two changes at once
+  // are audited in the order they happened, and never without their audit row.
+  return db.transaction(async (tx) => {
+    // An org without a row gets Free; an existing row (and its plan) is left as it is.
+    await tx
+      .insert(orgEntitlements)
+      .values({ orgId, plan: 'free', status: 'active', ...LIMITS.free, updatedAt: now })
+      .onConflictDoNothing({ target: orgEntitlements.orgId });
+    const [current] = await tx
+      .select({ licenseOrg: orgEntitlements.licenseOrg })
+      .from(orgEntitlements)
+      .where(eq(orgEntitlements.orgId, orgId))
+      .for('update');
+    if (current?.licenseOrg === licenseOrg) return licenseOrg;
+    if (opts.onlyIfUnset && current?.licenseOrg) return current.licenseOrg;
+    await tx
+      .update(orgEntitlements)
+      .set({ licenseOrg, updatedAt: now })
+      .where(eq(orgEntitlements.orgId, orgId));
+    await tx.insert(auditLog).values({
+      orgId,
+      actor,
+      action: 'billing.license_org_set',
+      target: `license_org:${licenseOrg}`,
+      data: { from: current?.licenseOrg ?? null, to: licenseOrg },
+      at: now,
+    });
+    return licenseOrg;
+  });
 }
 
 export async function planOf(db: Db | Tx, orgId: string) {

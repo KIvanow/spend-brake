@@ -443,6 +443,27 @@ describe('brake license', () => {
     expect(f.out.at(-1)).toContain('active  business  acme');
     expect(await run(['license', 'install', '/no/such/file'], f.io)).toBe(EXIT.usage);
   });
+
+  it('says to use the owner token init printed when the saved admin token is refused', async () => {
+    const { mkdtempSync, writeFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    // A path with a space and a quote still pastes as one word.
+    const file = join(mkdtempSync(join(tmpdir(), "lic it's-")), 'acme.license');
+    writeFileSync(file, '{"format":"spend-brake-license/1","payload":"e30","signature":"AA"}\n');
+    const f = fake({ ...ENV, BRAKE_ADMIN_TOKEN: `sbt_${'a'.repeat(32)}` }, () => ({
+      status: 403,
+      body: { error: 'forbidden', message: 'This needs the owner role.' },
+    }));
+    expect(await run(['license', 'install', file], f.io)).toBe(EXIT.error);
+    const err = f.err.join('');
+    // The token is read without echo, never typed into the command line.
+    // Scoped to this one command: not exported to the rest of the shell session.
+    expect(err).toContain('read -rs t && BRAKE_ADMIN_TOKEN="$t" brake license install');
+    expect(err).toContain('; unset t');
+    expect(err).not.toContain('export');
+    expect(err).toContain(`brake license install '${file.replaceAll("'", "'\\''")}'`);
+  });
 });
 
 describe('brake custom-apis', () => {

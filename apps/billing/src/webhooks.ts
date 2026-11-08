@@ -1,16 +1,41 @@
 import { randomUUID } from 'node:crypto';
-import { type Db, eq, issuedLicenses, orgEntitlements, orgs, stripeEvents } from '@spend-brake/db';
-import { LICENSE_FEATURES, type LicensePayload, signLicense } from '@spend-brake/shared';
+import {
+  type Db,
+  and,
+  desc,
+  eq,
+  isNull,
+  lte,
+  issuedLicenses,
+  or,
+  orgEntitlements,
+  orgs,
+  stripeEvents,
+} from '@spend-brake/db';
+import {
+  LICENSE_FEATURES,
+  LICENSE_ORG,
+  type LicensePayload,
+  signLicense,
+} from '@spend-brake/shared';
 import type Stripe from 'stripe';
-import { planOf, setPlan } from './entitlements.js';
-import type { LICENSE_PLANS } from './plans.js';
-import { DEFAULT_ORG_UNITS, PLAN_METADATA, type Plan, isPlan } from './plans.js';
+import { planOf, setLicenseOrg, setPlan } from './entitlements.js';
+import {
+  DEFAULT_ORG_UNITS,
+  type LicensePlan,
+  PLAN_METADATA,
+  type Plan,
+  isLicensePlan,
+  isPlan,
+} from './plans.js';
 
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
-type LicensePlan = (typeof LICENSE_PLANS)[number];
 
 export interface LicenseMail {
   orgId: string;
+  licenseId: string;
+  /** The install's org id, which the license names. */
+  licenseOrg: string;
   email: string | null;
   edition: LicensePlan;
   expiresAt: string;
@@ -27,7 +52,7 @@ export interface WebhookDeps {
   now: () => Date;
   /** Called after the event's changes are committed, once per new license. */
   sendLicense: (mail: LicenseMail) => Promise<void>;
-  log?: { warn(obj: object, msg: string): void };
+  log?: { warn(obj: object, msg: string): void; error?(obj: object, msg: string): void };
 }
 
 export type Outcome = 'applied' | 'duplicate' | 'ignored';
@@ -38,12 +63,22 @@ export { HANDLED_EVENTS } from './events.js';
 const id = (v: string | { id: string } | null | undefined) =>
   v === null || v === undefined ? null : typeof v === 'string' ? v : v.id;
 
-/** The org a Stripe customer belongs to: our row, else the customer's metadata. */
+/** A Stripe customer, or null once deleted. */
+async function retrieveCustomer(deps: WebhookDeps, customer: string) {
+  const c = await deps.stripe.customers.retrieve(customer);
+  return 'deleted' in c && c.deleted ? null : (c as Stripe.Customer);
+}
+
+/**
+ * The org a Stripe customer belongs to: our row, else the customer's metadata (the customer
+ * fetched already, when the caller has it).
+ */
 async function orgForCustomer(
   tx: Tx,
   deps: WebhookDeps,
   customer: string | null,
   metadata?: Stripe.Metadata | null,
+  fetched?: Stripe.Customer | null,
 ): Promise<string | null> {
   if (metadata?.orgId) return metadata.orgId;
   if (!customer) return null;
@@ -53,8 +88,8 @@ async function orgForCustomer(
     .where(eq(orgEntitlements.stripeCustomerId, customer))
     .limit(1);
   if (row) return row.orgId;
-  const c = await deps.stripe.customers.retrieve(customer);
-  return 'deleted' in c && c.deleted ? null : ((c as Stripe.Customer).metadata.orgId ?? null);
+  const c = fetched !== undefined ? fetched : await retrieveCustomer(deps, customer);
+  return c?.metadata.orgId ?? null;
 }
 
 function planOfPrice(price: Stripe.Price): Plan | null {
@@ -82,13 +117,94 @@ function subscriptionPlan(sub: Stripe.Subscription): { plan: Plan; status: 'acti
   }
 }
 
+/** A paid invoice whose license cannot be issued yet: the event is left for Stripe to retry. */
+export class LicenseNotIssued extends Error {
+  constructor(
+    readonly orgId: string,
+    reason: string,
+  ) {
+    super(`license not issued: ${reason}`);
+  }
+}
+
 /**
  * Apply one verified Stripe event. Each event id is applied once (Stripe retries and may send
  * an event twice): the id is recorded in the same transaction as its effects.
  */
 export async function applyEvent(deps: WebhookDeps, event: Stripe.Event): Promise<Outcome> {
+  const [seen] = await deps.db
+    .select({ id: stripeEvents.id })
+    .from(stripeEvents)
+    .where(eq(stripeEvents.id, event.id))
+    .limit(1);
+  if (seen) return 'duplicate';
+  // A paid invoice's Stripe reads happen before the transaction, so it holds no locks while
+  // Stripe answers; they only read, so a retry after a failure repeats them harmlessly.
+  const reads = event.type === 'invoice.paid' ? await invoiceReads(deps, event.data.object) : null;
   const mails: LicenseMail[] = [];
-  const outcome = await deps.db.transaction(async (tx): Promise<Outcome> => {
+  let outcome: Outcome;
+  try {
+    outcome = await applyInTransaction(deps, event, reads, mails);
+  } catch (err) {
+    // The payment still went through: a failed payment's hold is lifted now, while the license
+    // waits for the retry.
+    if (err instanceof LicenseNotIssued && event.type === 'invoice.paid') {
+      // A failure here must not hide why the license waits: that error is the one rethrown.
+      await liftHold(deps.db, err.orgId, event.data.object, deps.now()).catch((e: unknown) =>
+        deps.log?.warn({ orgId: err.orgId, err: String(e) }, 'payment hold not lifted'),
+      );
+    }
+    throw err;
+  }
+  // Every license is emailed, each on its own: the event is recorded, so a retry would send
+  // nothing, and a failed one is logged for support (the dashboard has the latest license).
+  const sent = await Promise.allSettled(mails.map((m) => deps.sendLicense(m)));
+  sent.forEach((r, i) => {
+    if (r.status === 'rejected') {
+      deps.log?.error?.(
+        { orgId: mails[i]!.orgId, license: mails[i]!.licenseId, err: String(r.reason) },
+        'license email not queued: send the license to the customer by hand',
+      );
+    }
+  });
+  return outcome;
+}
+
+/**
+ * Lift a failed payment's hold once an invoice is paid: the status alone, in one statement, so
+ * the org's limits are kept. Any payment made after the latest failure lifts it (another invoice
+ * paid in its place included; a subscription still past due puts the hold back with its next
+ * event), but not one made before it: a retried event of an old payment leaves a newer hold.
+ * Both times are Stripe's.
+ */
+async function liftHold(db: Db | Tx, orgId: string, invoice: Stripe.Invoice, now: Date) {
+  const paidAt = invoice.status_transitions?.paid_at;
+  await db
+    .update(orgEntitlements)
+    .set({ status: 'active', holdSince: null, updatedAt: now })
+    .where(
+      and(
+        eq(orgEntitlements.orgId, orgId),
+        eq(orgEntitlements.status, 'past_due'),
+        ...(paidAt
+          ? [
+              or(
+                isNull(orgEntitlements.holdSince),
+                lte(orgEntitlements.holdSince, new Date(paidAt * 1000)),
+              ),
+            ]
+          : []),
+      ),
+    );
+}
+
+function applyInTransaction(
+  deps: WebhookDeps,
+  event: Stripe.Event,
+  reads: InvoiceReads | null,
+  mails: LicenseMail[],
+): Promise<Outcome> {
+  return deps.db.transaction(async (tx): Promise<Outcome> => {
     const fresh = await tx
       .insert(stripeEvents)
       .values({ id: event.id, type: event.type, processedAt: deps.now() })
@@ -100,19 +216,17 @@ export async function applyEvent(deps: WebhookDeps, event: Stripe.Event): Promis
         return checkoutCompleted(tx, deps, event.data.object);
       case 'customer.subscription.created':
       case 'customer.subscription.updated':
-        return subscriptionChanged(tx, deps, event.data.object);
+        return subscriptionChanged(tx, deps, event.data.object, stripeTime(event, deps.now()));
       case 'customer.subscription.deleted':
         return subscriptionDeleted(tx, deps, event.data.object);
       case 'invoice.payment_failed':
-        return paymentFailed(tx, deps, event.data.object);
+        return paymentFailed(tx, deps, event.data.object, stripeTime(event, deps.now()));
       case 'invoice.paid':
-        return invoicePaid(tx, deps, event.data.object, mails);
+        return invoicePaid(tx, deps, event.data.object, reads!, mails);
       default:
         return 'ignored';
     }
   });
-  for (const m of mails) await deps.sendLicense(m);
-  return outcome;
 }
 
 async function checkoutCompleted(tx: Tx, deps: WebhookDeps, s: Stripe.Checkout.Session) {
@@ -136,7 +250,11 @@ async function checkoutCompleted(tx: Tx, deps: WebhookDeps, s: Stripe.Checkout.S
   return 'applied';
 }
 
-async function subscriptionChanged(tx: Tx, deps: WebhookDeps, sub: Stripe.Subscription) {
+/** When Stripe created the event: holds are timed by Stripe's clock, like payments. */
+const stripeTime = (event: Stripe.Event, now: Date) =>
+  Number.isFinite(event.created) ? new Date(event.created * 1000) : now;
+
+async function subscriptionChanged(tx: Tx, deps: WebhookDeps, sub: Stripe.Subscription, at: Date) {
   const orgId = await orgForCustomer(tx, deps, id(sub.customer), sub.metadata);
   if (!orgId) return 'ignored';
   const { plan, status } = subscriptionPlan(sub);
@@ -151,6 +269,7 @@ async function subscriptionChanged(tx: Tx, deps: WebhookDeps, sub: Stripe.Subscr
       stripeCustomerId: id(sub.customer),
       stripeSubscriptionId: ended ? null : sub.id,
       currentPeriodEnd: ended || !end ? null : new Date(end * 1000),
+      holdAt: at,
     },
     deps.now(),
   );
@@ -172,21 +291,64 @@ async function subscriptionDeleted(tx: Tx, deps: WebhookDeps, sub: Stripe.Subscr
   return 'applied';
 }
 
-async function paymentFailed(tx: Tx, deps: WebhookDeps, invoice: Stripe.Invoice) {
+async function paymentFailed(tx: Tx, deps: WebhookDeps, invoice: Stripe.Invoice, at: Date) {
   const orgId = await orgForCustomer(tx, deps, id(invoice.customer));
   const current = orgId ? await planOf(tx, orgId) : null;
   if (!orgId || !current) return 'ignored';
-  await setPlan(tx, orgId, { plan: current.plan, status: 'past_due' }, deps.now());
+  await setPlan(tx, orgId, { plan: current.plan, status: 'past_due', holdAt: at }, deps.now());
   return 'applied';
+}
+
+/** What a paid invoice needs from Stripe: its license lines' plans and products, the customer. */
+interface InvoiceReads {
+  lines: { line: Stripe.InvoiceLineItem; plan: LicensePlan; product: Stripe.Product }[];
+  /** Fetched when no row of ours names it, or its license_org may be needed; null once deleted. */
+  customer: Stripe.Customer | null | undefined;
+}
+
+async function invoiceReads(deps: WebhookDeps, invoice: Stripe.Invoice): Promise<InvoiceReads> {
+  // Ours first: an invoice for a customer that is no org's is ignored without reading products
+  // (a failed read would only fail an event we do not care about).
+  const customerId = id(invoice.customer);
+  const [row] = customerId
+    ? await deps.db
+        .select({ licenseOrg: orgEntitlements.licenseOrg })
+        .from(orgEntitlements)
+        .where(eq(orgEntitlements.stripeCustomerId, customerId))
+        .limit(1)
+    : [];
+  let customer: Stripe.Customer | null | undefined;
+  if (!row && customerId) {
+    customer = await retrieveCustomer(deps, customerId);
+    if (!customer?.metadata.orgId) return { lines: [], customer };
+  }
+  const lines: InvoiceReads['lines'] = [];
+  const products = await Promise.all(
+    invoice.lines.data.map((line) => {
+      const productId = line.pricing?.price_details?.product;
+      return productId ? deps.stripe.products.retrieve(productId) : Promise.resolve(null);
+    }),
+  );
+  invoice.lines.data.forEach((line, i) => {
+    const product = products[i];
+    const plan = product?.metadata[PLAN_METADATA];
+    if (product && plan && isLicensePlan(plan)) lines.push({ line, plan, product });
+  });
+  // The customer's metadata may name the install (license_org) when none is stored.
+  if (customer === undefined && customerId && lines.length > 0 && !row?.licenseOrg) {
+    customer = await retrieveCustomer(deps, customerId);
+  }
+  return { lines, customer };
 }
 
 async function invoicePaid(
   tx: Tx,
   deps: WebhookDeps,
   invoice: Stripe.Invoice,
+  reads: InvoiceReads,
   mails: LicenseMail[],
 ) {
-  const orgId = await orgForCustomer(tx, deps, id(invoice.customer));
+  const orgId = await orgForCustomer(tx, deps, id(invoice.customer), null, reads.customer);
   if (!orgId) return 'ignored';
   const [org] = await tx.select({ id: orgs.id }).from(orgs).where(eq(orgs.id, orgId)).limit(1);
   if (!org) {
@@ -194,29 +356,32 @@ async function invoicePaid(
     return 'ignored';
   }
   const current = await planOf(tx, orgId);
-  if (current?.status === 'past_due') {
-    await setPlan(tx, orgId, { plan: current.plan, status: 'active' }, deps.now());
+  if (current?.status === 'past_due') await liftHold(tx, orgId, invoice, deps.now());
+  if (reads.lines.length === 0) return 'applied';
+  if (!deps.licenseKey) {
+    // Paid for, so not recorded without its license: Stripe retries until a key is configured.
+    deps.log?.warn(
+      { orgId, invoice: invoice.id },
+      'no BRAKE_LICENSE_SIGNING_KEY: license not issued, the event will be retried',
+    );
+    throw new LicenseNotIssued(orgId, 'no license signing key');
   }
+  const licenseOrg = await licenseOrgFor(
+    tx,
+    deps,
+    orgId,
+    current?.licenseOrg ?? null,
+    invoice,
+    reads,
+  );
 
   // A license for each Business / Enterprise line, valid to the end of the period paid for.
-  for (const line of invoice.lines.data) {
-    const productId = line.pricing?.price_details?.product;
-    if (!productId) continue;
-    const product = await deps.stripe.products.retrieve(productId);
-    const plan = product.metadata[PLAN_METADATA];
-    if (plan !== 'business' && plan !== 'enterprise') continue;
-    if (!deps.licenseKey) {
-      deps.log?.warn(
-        { orgId, invoice: invoice.id },
-        'no BRAKE_LICENSE_SIGNING_KEY: license not issued',
-      );
-      continue;
-    }
+  for (const { line, plan, product } of reads.lines) {
     const units = Number(product.metadata.org_units ?? DEFAULT_ORG_UNITS[plan]);
     const expiresAt = new Date(line.period.end * 1000).toISOString();
     const license: LicensePayload = {
       id: `lic_${randomUUID().replaceAll('-', '').slice(0, 20)}`,
-      org: orgId,
+      org: licenseOrg,
       edition: plan,
       features: [...LICENSE_FEATURES],
       orgUnits: Number.isInteger(units) && units > 0 ? units : DEFAULT_ORG_UNITS[plan],
@@ -232,6 +397,7 @@ async function invoicePaid(
         edition: plan,
         invoiceId: `${invoice.id}:${line.id}`,
         raw,
+        licenseOrg,
         expiresAt: new Date(expiresAt),
         issuedAt: deps.now(),
       })
@@ -240,6 +406,8 @@ async function invoicePaid(
     if (issued.length) {
       mails.push({
         orgId,
+        licenseId: license.id,
+        licenseOrg,
         email: current?.billingEmail ?? invoice.customer_email ?? null,
         edition: plan,
         expiresAt,
@@ -249,4 +417,66 @@ async function invoicePaid(
     }
   }
   return 'applied';
+}
+
+/**
+ * The install a license names. The org's stored license_org wins: the buyer sets it (sign-up,
+ * checkout, Billing, which also copies it to the Stripe customer), or this sets it once from
+ * Stripe. Without one, the subscription's or customer's `license_org` metadata (hand-made
+ * Enterprise invoices) is stored and used; without that, the id the org's last license named
+ * (licenses issued before license_org named the hosted org). With none of these, or metadata
+ * that is not a valid id, nothing is issued rather than a license the buyer's install refuses:
+ * it throws, so the event is not recorded and Stripe retries it, and the retry after the id is
+ * set (under Billing, or in the customer's metadata) issues the license for the period paid.
+ */
+async function licenseOrgFor(
+  tx: Tx,
+  deps: WebhookDeps,
+  orgId: string,
+  stored: string | null,
+  invoice: Stripe.Invoice,
+  reads: InvoiceReads,
+): Promise<string> {
+  if (stored) return stored;
+  // Typed by hand in the Stripe Dashboard: surrounding spaces are not part of the id. The first
+  // valid one wins, so a bad subscription value does not hide a good one fixed on the customer
+  // (the subscription's is a copy frozen into the event, which a retry cannot change).
+  const given = [
+    invoice.parent?.subscription_details?.metadata?.license_org,
+    reads.customer?.metadata?.license_org,
+  ]
+    .map((v) => v?.trim())
+    .filter((v): v is string => Boolean(v));
+  const fromStripe = given.find((v) => LICENSE_ORG.test(v)) ?? given[0];
+  if (!fromStripe) {
+    // Renewals of licenses issued before license_org keep naming the id they named.
+    const [last] = await tx
+      .select({ licenseOrg: issuedLicenses.licenseOrg })
+      .from(issuedLicenses)
+      .where(eq(issuedLicenses.orgId, orgId))
+      .orderBy(desc(issuedLicenses.issuedAt))
+      .limit(1);
+    if (last?.licenseOrg) return last.licenseOrg;
+    // A first license needs the install it is for: a license for the hosted org's id would be
+    // refused by the buyer's install. Not recorded, so Stripe retries once the id is set.
+    deps.log?.warn(
+      { orgId, invoice: invoice.id },
+      'no license_org for a first license: license not issued, the event will be retried',
+    );
+    throw new LicenseNotIssued(orgId, 'no license_org: set the org id of the install');
+  }
+  if (!LICENSE_ORG.test(fromStripe)) {
+    // Not recorded as applied: the period is paid for, so Stripe retries the event, and once the
+    // id is fixed (under Billing, or in the customer's metadata) the retry issues the license.
+    deps.log?.warn(
+      { orgId, invoice: invoice.id, licenseOrg: fromStripe },
+      'license_org metadata is not a valid org id: license not issued, the event will be retried',
+    );
+    throw new LicenseNotIssued(
+      orgId,
+      `license_org ${JSON.stringify(fromStripe)} is not a valid org id`,
+    );
+  }
+  // Under the row lock: an id the owner saved meanwhile wins over the metadata.
+  return setLicenseOrg(tx, orgId, fromStripe, 'system', deps.now(), { onlyIfUnset: true });
 }

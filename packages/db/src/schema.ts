@@ -288,6 +288,11 @@ export const orgEntitlements = pgTable(
     status: text('status', { enum: ['active', 'past_due'] })
       .notNull()
       .default('active'),
+    /**
+     * When the latest failure behind the hold happened, by Stripe's clock: an invoice paid
+     * before it (an old payment's event, retried) does not lift the hold.
+     */
+    holdSince: timestamp('hold_since', { withTimezone: true }),
     maxKeys: bigint('max_keys', { mode: 'number' }),
     maxProviders: bigint('max_providers', { mode: 'number' }),
     maxCustomApis: bigint('max_custom_apis', { mode: 'number' }),
@@ -301,6 +306,11 @@ export const orgEntitlements = pgTable(
     /** Calls exported as OpenTelemetry spans to the org's own collector. */
     otelExport: boolean('otel_export').notNull().default(false),
     billingEmail: text('billing_email'),
+    /**
+     * Business / Enterprise: the org id of the buyer's own install, which licenses name. Not
+     * unique: installs are separate, so any number of customers can license `acme`.
+     */
+    licenseOrg: text('license_org'),
     stripeCustomerId: text('stripe_customer_id'),
     stripeSubscriptionId: text('stripe_subscription_id'),
     currentPeriodEnd: timestamp('current_period_end', { withTimezone: true }),
@@ -328,6 +338,8 @@ export const issuedLicenses = pgTable(
     /** The paid invoice this license covers: one license per invoice. */
     invoiceId: text('invoice_id').notNull().unique(),
     raw: text('raw').notNull(),
+    /** The install org id the license names (copied from its signed payload). */
+    licenseOrg: text('license_org'),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     issuedAt: timestamp('issued_at', { withTimezone: true }).notNull().defaultNow(),
   },

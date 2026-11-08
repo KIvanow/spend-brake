@@ -77,6 +77,7 @@ export {
   isNull,
   like,
   lt,
+  lte,
   ne,
   notInArray,
   or,

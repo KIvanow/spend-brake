@@ -38,6 +38,14 @@ const options = {
   egressIps: ['203.0.113.7'],
 };
 
+// The Free plan's limits; the self-hosted plans' hosted org keeps them too.
+const freeLimits = {
+  maxKeys: 1,
+  maxProviders: 1,
+  requestsPerMonth: 10_000,
+  maxOrgMonthCapMicros: 50_000_000,
+};
+
 beforeEach(() => {
   calls = [];
   window.sessionStorage.clear();
@@ -75,12 +83,7 @@ beforeEach(() => {
             monthlyUsd: 0,
             selfHosted: false,
             purchasable: true,
-            limits: {
-              maxKeys: 1,
-              maxProviders: 1,
-              requestsPerMonth: 10_000,
-              maxOrgMonthCapMicros: 50_000_000,
-            },
+            limits: freeLimits,
           },
           {
             id: 'team',
@@ -96,17 +99,20 @@ beforeEach(() => {
             },
           },
           {
+            id: 'business',
+            name: 'Business',
+            monthlyUsd: 299,
+            selfHosted: true,
+            purchasable: true,
+            limits: freeLimits,
+          },
+          {
             id: 'enterprise',
             name: 'Enterprise',
             monthlyUsd: null,
             selfHosted: true,
             purchasable: false,
-            limits: {
-              maxKeys: 1,
-              maxProviders: 1,
-              requestsPerMonth: 10_000,
-              maxOrgMonthCapMicros: 50_000_000,
-            },
+            limits: freeLimits,
           },
         ],
       },
@@ -682,8 +688,9 @@ describe('sign-up', () => {
     routes['POST /v1/billing/signup'] = () => [201, { orgId: 'acme-x1y2z3', emailSent: true }];
     render(<App client={client()} />);
     expect(await screen.findByText('Team')).toBeTruthy();
-    // Enterprise is arranged with us, not bought here.
+    // Enterprise is arranged with us, not bought here; Business is offered only from its link.
     expect(screen.queryByText('Enterprise')).toBeNull();
+    expect(screen.queryByText('Business')).toBeNull();
     expect(screen.getByText('Prices exclude VAT where applicable.')).toBeTruthy();
     await user.type(screen.getByLabelText('Work email'), 'ana@acme.test');
     await user.type(screen.getByLabelText('Team or project name'), 'Acme');
@@ -753,11 +760,78 @@ describe('sign-up', () => {
     );
   });
 
+  it('licenses Business to the org id of the install', async () => {
+    window.location.hash = '/signup?plan=business';
+    routes['POST /v1/billing/signup'] = () => [
+      201,
+      { orgId: 'acme', emailSent: true, checkoutUrl: 'about:blank' },
+    ];
+    const user = userEvent.setup();
+    render(<App client={client()} />);
+    expect(await screen.findByRole('radio', { name: /Business/ })).toHaveProperty('checked', true);
+    await user.type(screen.getByLabelText('Work email'), 'ana@acme.test');
+    await user.type(screen.getByLabelText('Team or project name'), 'Acme');
+    // Surrounding spaces are dropped, as under Billing and on the server.
+    await user.type(screen.getByLabelText(/^Org id on your install/), ' io ');
+    await user.click(screen.getByRole('checkbox', { name: /I agree to the Terms of Service/ }));
+    await user.click(screen.getByRole('button', { name: 'Continue to payment' }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.url === '/v1/billing/signup')!.body).toMatchObject({
+        plan: 'business',
+        licenseOrg: 'io',
+      }),
+    );
+  });
+
+  it('asks for the install org id even when the plans do not load', async () => {
+    window.location.hash = '/signup?plan=business';
+    routes['GET /v1/billing/plans'] = () => [500, { error: 'internal_error', message: 'x' }];
+    render(<App client={client()} />);
+    expect(await screen.findByLabelText(/^Org id on your install/)).toBeTruthy();
+  });
+
+  it('opens sign-up from a Buy Business link for someone already signed in', async () => {
+    setToken('tok');
+    window.location.hash = '/signup?plan=business';
+    render(<App client={client()} />);
+    expect(await screen.findByRole('heading', { name: 'Create your account' })).toBeTruthy();
+  });
+
+  it('keeps someone signed in on their dashboard for any other sign-up link', () => {
+    setToken('tok');
+    window.location.hash = '/signup?plan=team';
+    render(<App client={client()} />);
+    // The first render is the dashboard (this test's API answers nothing, which later signs out).
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Create your account' })).toBeNull();
+  });
+
+  it('leaves the welcome page once the emailed link signs them in in another tab', async () => {
+    window.location.hash = '/welcome';
+    render(<App client={client()} />);
+    expect(await screen.findByRole('heading', { name: 'Check your email' })).toBeTruthy();
+    window.localStorage.setItem('brake.adminToken', 'sbt_new');
+    window.dispatchEvent(
+      new StorageEvent('storage', { key: 'brake.adminToken', oldValue: null, newValue: 'sbt_new' }),
+    );
+    await waitFor(() => expect(window.location.hash).toBe('#/'));
+    expect(screen.queryByText(/not the one you are signed in to/)).toBeNull();
+  });
+
   it('welcomes people back from Checkout before they sign in', async () => {
     window.location.hash = '/welcome';
     render(<App client={client()} />);
     expect(await screen.findByRole('heading', { name: 'Check your email' })).toBeTruthy();
     expect(screen.getByText(/You're on Free and can upgrade/)).toBeTruthy();
+  });
+
+  it('welcomes someone signed in to another org back from Checkout, to the new account', async () => {
+    setToken('tok');
+    window.location.hash = '/welcome';
+    render(<App client={client()} />);
+    expect(await screen.findByRole('heading', { name: 'Check your email' })).toBeTruthy();
+    expect(screen.getByText(/not the one you are signed in to/)).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Back to the dashboard' })).toBeTruthy();
   });
 });
 

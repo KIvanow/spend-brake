@@ -1,4 +1,6 @@
+import { createPrivateKey, createPublicKey } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { LICENSE_PUBLIC_KEY } from '@spend-brake/shared';
 import { z } from 'zod';
 import { assertStripeKeyMode } from './stripe.js';
 
@@ -28,8 +30,28 @@ const envSchema = z.object({
   BRAKE_HOSTED_SIGNUP: z.stringbool().default(false),
 });
 
+/** Whether a signing key (PEM) is the one released ee builds trust. */
+export function isReleasedLicenseKey(privateKeyPem: string): boolean {
+  let key;
+  try {
+    key = createPrivateKey(privateKeyPem);
+  } catch (err) {
+    throw new Error(
+      `BRAKE_LICENSE_SIGNING_KEY is not a readable private key (PEM): ${(err as Error).message}`,
+      { cause: err },
+    );
+  }
+  const pub = createPublicKey(key).export({
+    type: 'spki',
+    format: 'pem',
+  });
+  return pub.toString().trim() === LICENSE_PUBLIC_KEY.trim();
+}
+
 export type BillingEnv = z.output<typeof envSchema> & {
   licenseKey: string | null;
+  /** The signing key is the released one (licenses it signs install). */
+  releasedLicenseKey: boolean;
   automaticTax: boolean;
 };
 
@@ -38,14 +60,24 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): BillingEnv {
     Object.fromEntries(Object.entries(env).filter(([, v]) => v !== '')),
   );
   assertStripeKeyMode(parsed.STRIPE_SECRET_KEY, parsed.BILLING_LIVE_MODE);
-  const licenseKey =
+  // An empty key (or key file) is no key: billing runs and sells no license.
+  const keyText =
     parsed.BRAKE_LICENSE_SIGNING_KEY ??
     (parsed.BRAKE_LICENSE_SIGNING_KEY_FILE
       ? readFileSync(parsed.BRAKE_LICENSE_SIGNING_KEY_FILE, 'utf8')
-      : null);
+      : '');
+  const licenseKey = keyText.trim() ? keyText : null;
+  const releasedLicenseKey = licenseKey !== null && isReleasedLicenseKey(licenseKey);
+  // Real payments for licenses no install accepts: refuse to start instead.
+  if (parsed.BILLING_LIVE_MODE && licenseKey !== null && !releasedLicenseKey) {
+    throw new Error(
+      'BRAKE_LICENSE_SIGNING_KEY is not the key released ee builds verify licenses with: in live mode every license it signed would be refused.',
+    );
+  }
   return {
     ...parsed,
     licenseKey,
+    releasedLicenseKey,
     automaticTax: parsed.BILLING_AUTOMATIC_TAX ?? parsed.BILLING_LIVE_MODE,
   };
 }

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { LICENSE_ORG } from './license-org.js';
 import { signDocument } from './signed-document.js';
 
 // The license file format: a public contract between whoever issues licenses (the billing
@@ -6,6 +7,15 @@ import { signDocument } from './signed-document.js';
 // enforcing a license lives in ee/; issuing one only needs the format and the private key.
 
 export const LICENSE_FORMAT = 'spend-brake-license/1';
+
+/**
+ * Public half of the key that signs licenses, which released ee builds verify them with (and the
+ * billing service checks its signing key against). The private key never enters this repository.
+ */
+export const LICENSE_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEASqhKChiRmMqLgza2CWI05G51ehMzE9pc8Ej5Y4b8S6c=
+-----END PUBLIC KEY-----
+`;
 
 export const LICENSE_FEATURES = [
   'sso',
@@ -21,7 +31,7 @@ export type LicenseFeature = (typeof LICENSE_FEATURES)[number];
 export const licensePayload = z.strictObject({
   id: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
   /** The org this install's license belongs to; its owners manage the license and other orgs. */
-  org: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
+  org: z.string().regex(LICENSE_ORG),
   edition: z.enum(['business', 'enterprise']),
   features: z.array(z.enum(LICENSE_FEATURES)),
   /** Orgs this install may hold. */

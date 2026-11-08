@@ -1,4 +1,5 @@
 import { timingSafeEqual } from 'node:crypto';
+import { LICENSE_ORG } from '@spend-brake/shared/license-org';
 import { orgs, sql } from '@spend-brake/db';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -8,7 +9,7 @@ import { ApiError, type Router, errorSchema } from '../route.js';
 
 const body = z.object({
   setupToken: z.string().min(1).max(500),
-  orgId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
+  orgId: z.string().regex(LICENSE_ORG),
   name: z.string().min(1).max(200),
   timeZone: z.string().default('UTC'),
 });

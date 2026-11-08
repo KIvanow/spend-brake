@@ -13,6 +13,10 @@
       "types": "./dist/providers.d.ts",
       "default": "./dist/providers.js"
     },
+    "./license-org": {
+      "types": "./dist/license-org.d.ts",
+      "default": "./dist/license-org.js"
+    },
     "./telemetry": {
       "types": "./dist/telemetry.d.ts",
       "default": "./dist/telemetry.js"

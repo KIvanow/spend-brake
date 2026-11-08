@@ -342,6 +342,7 @@ describe('fallbacks and mutes', () => {
     await alert({
       type: 'license_issued',
       orgId: o.id,
+      licenseOrg: 'acme',
       email: 'billing@example.com',
       edition: 'business',
       expiresAt: '2026-11-30T12:00:00.000Z',
@@ -350,9 +351,11 @@ describe('fallbacks and mutes', () => {
     await until(() => mails.some((m) => m.to === 'billing@example.com'));
     const m = mails.find((x) => x.to === 'billing@example.com')!;
     expect(m.subject).toBe('[Spend Brake] Your Spend Brake business license');
+    // Named for the install's org, which the license names (not the hosted customer record).
+    expect(m.text).toContain('brake license install acme.license');
     expect(m.attachments).toMatchObject([
       {
-        filename: `${o.id}.license`,
+        filename: 'acme.license',
         content: '{"format":"spend-brake-license/1","payload":"e30","signature":"AA"}\n',
       },
     ]);
