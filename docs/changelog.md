@@ -22,10 +22,10 @@ images for linux/amd64 and linux/arm64
   providers whose unpriced routes are forwarded. `--prove` mints a $0 session and shows that
   the proxy refuses a priced call before forwarding it, spending nothing. Every report lists
   what doctor cannot verify; it never reports a workload as protected. It exits 1 on a failed
-  check, and also when it could not read the key's caps, its policy or a `.env` file, when the
-  workload can read another virtual key, or when it could not complete `--prove` (which needs a
-  key that may mint sessions, not a session key). Mapbox public tokens (`pk.eyJ…`) count as
-  provider keys.
+  check, and also when it could not read the key's caps, its policy, the working directory or a
+  `.env` file, when the workload can read another virtual key, or when it could not complete
+  `--prove` (which needs a key that may mint sessions, not a session key, and a 0.3.0 server).
+  Mapbox public tokens (`pk.eyJ…`) count as provider keys.
 - `brake mcp`, a stdio MCP server with capped `tavily_search` and `exa_search` tools and a
   read-only `brake_budget` tool, to replace a Tavily or Exa MCP server entry without changing
   the agent (preview). Also published on its own as `@spend-brake/mcp`

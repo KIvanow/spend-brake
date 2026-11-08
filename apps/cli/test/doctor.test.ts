@@ -277,6 +277,9 @@ describe('brake doctor', () => {
     expect(d.status('key.killed')).toBe('fail');
     expect(c.detail).toContain('tavily');
     expect(c.fix).toContain('brake unkill prov:tavily');
+    // /v1/me cannot say whether the key or the org is killed as well.
+    expect(c.fix).toContain('brake unkill key:key_1');
+    expect(c.fix).toContain('brake unkill org');
 
     const key = await doctor(
       { BRAKE_KEY: KEY },
@@ -334,6 +337,37 @@ describe('brake doctor', () => {
     );
     expect(old.status('api.reachable')).toBe('pass');
     expect(old.f.calls.some((c) => c.url === 'https://api/readyz')).toBe(true);
+
+    // An older API behind the dashboard: its own JSON 404 on /v1/readyz, the dashboard's page on
+    // /readyz. The API answers, so the key is still checked.
+    const behind = await doctor({ BRAKE_KEY: KEY }, (c) =>
+      c.url === 'https://api/v1/readyz'
+        ? {
+            status: 404,
+            body: {
+              message: 'Route GET:/v1/readyz not found',
+              error: 'Not Found',
+              statusCode: 404,
+            },
+          }
+        : c.url === 'https://api/readyz'
+          ? { status: 200, body: html }
+          : healthy(me())(c),
+    );
+    expect(behind.status('api.reachable')).toBe('warn');
+    expect(behind.status('key.valid')).toBe('pass');
+    expect(behind.status('key.capped')).toBe('pass');
+
+    // The web server in front answers for an API that is down.
+    const down = await doctor({ BRAKE_KEY: KEY }, (c) =>
+      c.url.startsWith('https://api/') && c.url.endsWith('/readyz')
+        ? { status: 502, body: '<html>502 Bad Gateway</html>' }
+        : healthy(me())(c),
+    );
+    expect(down.status('api.reachable')).toBe('fail');
+    expect(down.report!.checks.find((c) => c.id === 'api.reachable')!.detail).toMatch(
+      /HTTP 502 .*may be down/,
+    );
   });
 
   it('fails a BRAKE_SESSION the proxy would refuse', async () => {
@@ -439,6 +473,21 @@ describe('brake doctor', () => {
       expect(d.status('enforcement.exhausted-budget')).toBe('fail');
     });
 
+    it('fails when the $0 session holds money for a call', async () => {
+      const d = await doctor(
+        { BRAKE_KEY: KEY },
+        healthy(minting, (c) => {
+          if (c.url.endsWith('/v1/sessions')) return session;
+          if (c.method === 'DELETE')
+            return { status: 200, body: { spentMicros: 0, heldMicros: 5000 } };
+          throw new Error('connection reset');
+        }),
+        { args: ['--prove'] },
+      );
+      expect(d.status('enforcement.exhausted-budget')).toBe('fail');
+      expect(d.code).toBe(EXIT.error);
+    });
+
     it('keeps the report and ends the session when the probe gets no answer', async () => {
       const d = await doctor(
         { BRAKE_KEY: KEY },
@@ -514,6 +563,53 @@ describe('brake doctor', () => {
       expect(all.f.calls.some((c) => c.url.endsWith('/v1/sessions'))).toBe(false);
     });
 
+    it('probes when only the session the client names is killed, not when the key is', async () => {
+      const probe = healthy(minting, (c) => {
+        if (c.url.endsWith('/v1/sessions')) return session;
+        if (c.method === 'DELETE') return { status: 200, body: { spentMicros: 0 } };
+        return {
+          status: 402,
+          body: { error: 'budget_exceeded' },
+          headers: { 'x-brake-cost-micros': '0' },
+        };
+      });
+      const withSession =
+        (keyKilled: boolean): Responder =>
+        (c) =>
+          c.url.endsWith('/v1/me')
+            ? {
+                status: 200,
+                body: { ...minting, killed: keyKilled || Boolean(c.headers['x-brake-session']) },
+              }
+            : probe(c);
+      const sess = await doctor({ BRAKE_KEY: KEY, BRAKE_SESSION: 'run-1' }, withSession(false), {
+        args: ['--prove'],
+      });
+      expect(sess.status('enforcement.exhausted-budget')).toBe('pass');
+      const key = await doctor({ BRAKE_KEY: KEY, BRAKE_SESSION: 'run-1' }, withSession(true), {
+        args: ['--prove'],
+      });
+      expect(key.status('enforcement.exhausted-budget')).toBe('unknown');
+      expect(key.f.calls.some((c) => c.url.endsWith('/v1/sessions'))).toBe(false);
+    });
+
+    it('mints nothing on a server too old for --prove, or for a provider it has no probe for', async () => {
+      const old = await doctor({ BRAKE_KEY: KEY }, healthy(me({}, null)), { args: ['--prove'] });
+      expect(old.status('enforcement.exhausted-budget')).toBe('unknown');
+      expect(
+        old.report!.checks.find((c) => c.id === 'enforcement.exhausted-budget')!.detail,
+      ).toMatch(/too old for --prove/);
+      expect(old.f.calls.some((c) => c.url.endsWith('/v1/sessions'))).toBe(false);
+
+      const odd = await doctor(
+        { BRAKE_KEY: KEY },
+        healthy(me({}, { canMintSessions: true, providers: ['constructor'] })),
+        { args: ['--prove'] },
+      );
+      expect(odd.status('enforcement.exhausted-budget')).toBe('unknown');
+      expect(odd.f.calls.some((c) => c.url.endsWith('/v1/sessions'))).toBe(false);
+    });
+
     it('cannot prove anything with a key that may not mint sessions, or a session key', async () => {
       const plain = await doctor({ BRAKE_KEY: KEY }, healthy(me()), { args: ['--prove'] });
       expect(plain.status('enforcement.exhausted-budget')).toBe('unknown');
@@ -564,6 +660,21 @@ describe('brake doctor', () => {
       'NEXT_PUBLIC_MAPBOX_TOKEN (Mapbox public key)',
     );
     expect(skipped.code).toBe(EXIT.error);
+
+    // A Google key found elsewhere is only a warning; the file not read still stops the vouching.
+    writeFileSync(join(big, '.env'), `GOOGLE_API_KEY=AIza${rand(35)}\n`);
+    const mixed = await doctor({ BRAKE_KEY: KEY }, healthy(me()), { cwd: big });
+    expect(mixed.status('files.cwd')).toBe('unknown');
+    expect(mixed.code).toBe(EXIT.error);
+
+    const gone = await doctor({ BRAKE_KEY: KEY }, healthy(me()), {
+      cwd: join(tmp('brake-doctor-cwd-'), 'missing'),
+    });
+    expect(gone.status('files.cwd')).toBe('unknown');
+    expect(gone.report!.checks.find((c) => c.id === 'files.cwd')!.detail).toContain(
+      'could not be read',
+    );
+    expect(gone.code).toBe(EXIT.error);
   });
 
   it('finds the default saved config even when XDG_CONFIG_HOME points elsewhere', async () => {

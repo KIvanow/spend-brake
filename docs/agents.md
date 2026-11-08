@@ -125,11 +125,12 @@ skipped, and a provider the proxy refuses for another reason first (killed, unpr
 doctor try the next. The repository runs the same probe against a counting mock provider and
 checks it receives no request (`apps/cli/test/e2e.test.ts`).
 
-Doctor exits 1 when a check fails, and also when it could not read the key's caps, its policy
-or a `.env` file, when the
+Doctor exits 1 when a check fails, and also when it could not read the key's caps, its policy,
+the working directory or a `.env` file (even one it skipped for size), when the
 workload can read another virtual key (whose caps it did not check) or, with `--prove`, when it
 could not complete the probe: it exits 0 only for what it actually saw. A session key, or a key
-that may not mint sessions, cannot run the probe, so run `--prove` with the parent key. A clean
+that may not mint sessions, cannot run the probe, so run `--prove` with the parent key; a server
+before 0.3.0 has no probe sessions, so doctor mints nothing there. A clean
 report is not a guarantee: it always lists what a client cannot see, such as HTTP clients that
 skip the proxy, credentials kept elsewhere, the org-wide cap, and network egress. Blocking the
 providers' own hosts at the firewall is what makes the proxy the only way out.

@@ -110,10 +110,14 @@ export function dotenvValue(raw: string): string {
 /** Bigger files are not read, and are reported as not checked. */
 const MAX_DOTENV_BYTES = 10_000_000;
 
-/** `.env*` files in the working directory, as name/value pairs, and the ones too big to read. */
+/**
+ * `.env*` files in the working directory, as name/value pairs, and the ones too big to read.
+ * `listed` is false when the directory itself could not be read.
+ */
 function dotenvFiles(dir: string): {
   files: { file: string; vars: [string, string][] }[];
   skipped: string[];
+  listed: boolean;
 } {
   const files: { file: string; vars: [string, string][] }[] = [];
   const skipped: string[] = [];
@@ -121,7 +125,7 @@ function dotenvFiles(dir: string): {
   try {
     names = readdirSync(dir).filter((f) => /^\.env/.test(f));
   } catch {
-    return { files, skipped };
+    return { files, skipped, listed: false };
   }
   for (const f of names.sort()) {
     const path = join(dir, f);
@@ -142,7 +146,7 @@ function dotenvFiles(dir: string): {
       // unreadable: not reachable by this user either
     }
   }
-  return { files, skipped };
+  return { files, skipped, listed: true };
 }
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -288,7 +292,8 @@ export function localChecks(io: Io, cwd: string): Check[] {
     hits.length
       ? {
           id: 'files.cwd',
-          status: severe ? 'fail' : 'warn',
+          // A file doctor could not read may hold what the others do not: no vouching for it.
+          status: severe ? 'fail' : scan.skipped.length ? 'unknown' : 'warn',
           title: 'Secrets in .env files the workload can read',
           detail:
             hits
@@ -296,19 +301,26 @@ export function localChecks(io: Io, cwd: string): Check[] {
               .join('; ') + notRead,
           fix: 'Move the secrets out of the workspace the agent works in.',
         }
-      : scan.skipped.length
+      : !scan.listed
         ? {
             id: 'files.cwd',
             status: 'unknown',
-            title: 'Some .env files in the working directory were not checked',
-            detail: `Looked at ${plural(files.length, 'file')} in ${cwd}.${notRead}`,
+            title: 'Could not list the working directory',
+            detail: `${cwd} could not be read, so its .env files were not checked.`,
           }
-        : {
-            id: 'files.cwd',
-            status: 'pass',
-            title: 'No secrets in .env files in the working directory',
-            detail: `Looked at ${plural(files.length, 'file')} in ${cwd} (not subfolders).`,
-          },
+        : scan.skipped.length
+          ? {
+              id: 'files.cwd',
+              status: 'unknown',
+              title: 'Some .env files in the working directory were not checked',
+              detail: `Looked at ${plural(files.length, 'file')} in ${cwd}.${notRead}`,
+            }
+          : {
+              id: 'files.cwd',
+              status: 'pass',
+              title: 'No secrets in .env files in the working directory',
+              detail: `Looked at ${plural(files.length, 'file')} in ${cwd} (not subfolders).`,
+            },
   );
 
   for (const [name, which, url] of [
@@ -341,13 +353,17 @@ const TIMEOUT_MS = 10_000;
 /**
  * Readiness at the first of `paths` the server knows (a 404 tries the next). Only a JSON answer
  * counts: a web server in front, such as the dashboard's, answers any path with its own page.
+ * `unchecked` is set when the service answered but has no readiness report doctor can reach.
  */
 async function ready(
   io: Io,
   base: string,
   paths: string[] = ['/readyz'],
-): Promise<{ ok: boolean; detail: string }> {
+): Promise<{ ok: boolean; detail: string; unchecked?: boolean }> {
   let detail = '';
+  // The API's own JSON 404 on /v1/readyz: an API before 0.3.0, which only the dashboard's /v1
+  // forwarding may reach, so its /readyz may be the dashboard's page.
+  let older = '';
   for (const path of paths) {
     let res: Response;
     let body: string;
@@ -358,20 +374,35 @@ async function ready(
       return { ok: false, detail: `cannot reach ${base}: ${(err as Error).message}` };
     }
     detail = `${base}${path} answered HTTP ${res.status} ${body.slice(0, 200)}`;
-    if (res.status === 404) continue;
     let json: unknown;
     try {
       json = JSON.parse(body);
     } catch {
       json = null;
     }
-    if (typeof json !== 'object' || json === null) {
+    const isJson = typeof json === 'object' && json !== null;
+    if (res.status === 404) {
+      if (isJson && path === '/v1/readyz') older = `${base}${path}`;
+      continue;
+    }
+    if (!isJson) {
+      if (older) break;
       return {
         ok: false,
-        detail: `${base}${path} answered HTTP ${res.status} with a page, not a Spend Brake readiness report: is this URL a website in front of the service?`,
+        detail:
+          res.status >= 500
+            ? `${base}${path} answered HTTP ${res.status} with a page: a web server in front of the service answered, and the service behind it may be down.`
+            : `${base}${path} answered HTTP ${res.status} with a page, not a Spend Brake readiness report: is this URL a website in front of the service?`,
       };
     }
     return { ok: res.ok && (json as { ok?: unknown }).ok !== false, detail };
+  }
+  if (older) {
+    return {
+      ok: true,
+      unchecked: true,
+      detail: `${older} answered with the API's own 404: it is reachable, but older than 0.3.0, so its readiness was not checked.`,
+    };
   }
   return { ok: false, detail };
 }
@@ -419,7 +450,17 @@ async function prove(io: Io, me: Me | null): Promise<Check> {
       fix: 'Run `brake doctor --prove` with the parent key.',
     };
   }
-  if (me.policy && !me.policy.canMintSessions) {
+  // Before 0.3.0 the server has no probe sessions: a $0 session would count against the plan.
+  if (!me.policy) {
+    return {
+      id,
+      status: 'unknown',
+      title,
+      detail: 'The server is older than 0.3.0, too old for --prove: it has no $0 probe sessions.',
+      fix: 'Upgrade the Spend Brake server to 0.3.0 or later.',
+    };
+  }
+  if (!me.policy.canMintSessions) {
     return {
       id,
       status: 'unknown',
@@ -428,7 +469,18 @@ async function prove(io: Io, me: Me | null): Promise<Check> {
       fix: 'Run `brake doctor --prove` with a key created with --can-mint-sessions.',
     };
   }
-  if (me.killed) {
+  let killed = me.killed;
+  // Killed may mean the BRAKE_SESSION this client names, which the probe does not use: ask again
+  // without it.
+  if (killed && cfg.session) {
+    try {
+      const res = await io.fetch(`${cfg.apiUrl}/v1/me`, { headers: { 'x-brake-key': cfg.key! } });
+      if (res.ok) killed = ((await res.json()) as Me).killed;
+    } catch {
+      // keep what /v1/me said
+    }
+  }
+  if (killed) {
     return {
       id,
       status: 'unknown',
@@ -437,7 +489,7 @@ async function prove(io: Io, me: Me | null): Promise<Check> {
         'Spending is switched off for this key, so the proxy refuses the probe whatever its caps.',
     };
   }
-  const allowed = (me.policy?.providers ?? Object.keys(PROBES)).filter((p) => p in PROBES);
+  const allowed = me.policy.providers.filter((p) => Object.hasOwn(PROBES, p));
   if (allowed.length === 0) {
     return {
       id,
@@ -547,18 +599,21 @@ async function prove(io: Io, me: Me | null): Promise<Check> {
       break;
     }
   } finally {
-    let end: { spentMicros?: number } = {};
+    let end: { spentMicros?: number; heldMicros?: number } = {};
     try {
       end = await endSession(io, minted);
     } catch {
       // the session expires in 60 s anyway
     }
-    if (end.spentMicros) {
+    // A hold is a charge reserved for a forwarded call: on a $0 session there must be none.
+    if (end.spentMicros || end.heldMicros) {
       result = {
         id,
         status: 'fail',
         title,
-        detail: `The $0 probe session spent ${microsToUsd(end.spentMicros)}.`,
+        detail: end.spentMicros
+          ? `The $0 probe session spent ${microsToUsd(end.spentMicros)}.`
+          : `The $0 probe session holds ${microsToUsd(end.heldMicros!)} for a call in flight.`,
         fix: 'Report this: caps are not being enforced on this install.',
       };
     }
@@ -594,8 +649,10 @@ export async function remoteChecks(
     },
     {
       id: 'api.reachable',
-      status: api.ok ? 'pass' : 'fail',
-      title: 'The admin API is ready',
+      status: !api.ok ? 'fail' : api.unchecked ? 'warn' : 'pass',
+      title: api.unchecked
+        ? 'The admin API answers; its readiness was not checked'
+        : 'The admin API is ready',
       detail: api.detail,
     },
   );
@@ -675,8 +732,9 @@ export async function remoteChecks(
           id: 'key.killed',
           status: 'fail',
           title: "Every one of this key's providers is switched off",
-          detail: `${me.killedProviders!.join(', ')}: every call is refused.`,
-          fix: `Expected after a kill; resume them with ${me.killedProviders!.map((p) => `\`brake unkill prov:${p}\``).join(', ')} when ready.`,
+          // /v1/me says killed, not by what: the key, its parent or the org may be killed too.
+          detail: `${me.killedProviders!.join(', ')}: every call is refused. The key, its parent or the org may be killed as well; doctor cannot tell.`,
+          fix: `Expected after a kill; resume them with ${me.killedProviders!.map((p) => `\`brake unkill prov:${p}\``).join(', ')} when ready, and with \`brake unkill key:${me.keyId}\`, the parent key or \`brake unkill org\` if those are killed too.`,
         }
       : me.killed
         ? {

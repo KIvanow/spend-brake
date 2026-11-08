@@ -12,6 +12,9 @@
     "test": {
       "dependsOn": ["^build"]
     },
+    "@spend-brake/mcp#test": {
+      "dependsOn": ["^build", "@spend-brake/cli#test"]
+    },
     "dev": {
       "dependsOn": ["^build"],
       "cache": false,
