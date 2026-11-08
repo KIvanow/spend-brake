@@ -99,6 +99,8 @@ export const mintSession = (
     agentId?: string;
     parentKeyId?: string;
     name?: string;
+    /** A $0 probe (doctor --prove): needs a $0 budget and a ttl of at most 300 s. */
+    probe?: true;
   },
 ) => apiCall<Minted>(io, 'POST', '/v1/sessions', body, auth);
 

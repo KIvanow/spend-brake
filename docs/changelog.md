@@ -43,7 +43,14 @@ images for linux/amd64 and linux/arm64
   that was charged names the charge.
 - A key that has an agent mints sessions for that agent only (`403` for another `agentId`), so
   the agent's caps keep applying to them.
-- `$0` probe sessions are limited to 30 an hour per key (`429 rate_limited`).
+- A `$0` probe session must be asked for with `probe: true` on `POST /v1/sessions` (a `$0`
+  budget and a lifetime of up to five minutes, else `400`); other `$0` sessions are ordinary
+  sessions and count toward the plan. Probes are limited to 30 an hour per key
+  (`429 rate_limited`).
+- `brake doctor` does not pass `--prove` when it cannot read back what the probe session spent,
+  nor the saved admin token check when it found no home directory to look in (it falls back to
+  the OS home when `HOME` is unset). It takes a service for ready only when its readiness report
+  says `ok: true`, and a rate-limited `/v1/readyz` falls back to `/readyz`.
 
 ## [0.2.1] - 2026-11-02
 

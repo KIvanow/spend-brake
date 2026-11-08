@@ -96,7 +96,8 @@ export function meRoutes(app: FastifyInstance, router: Router, ctx: Ctx): void {
     if (namedSession) scopes.push({ kind: 'sess', id: namedSession });
     if (key.parentKeyId) scopes.push({ kind: 'key', id: key.parentKeyId });
     if (key.agentId) scopes.push({ kind: 'agent', id: key.agentId });
-    // The org record the proxy reads holds its time zone, so windows match the proxy's.
+    // The org record the proxy reads holds its time zone, so windows match the proxy's. Without
+    // one the proxy still serves the key, in UTC and denying unpriced routes: so does this.
     const [org, killed] = await Promise.all([
       ctx.registry.getOrg(key.orgId),
       ctx.engine.killed(key.orgId),

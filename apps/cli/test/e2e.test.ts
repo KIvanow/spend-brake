@@ -265,6 +265,8 @@ describe('brake doctor end to end', () => {
     });
     const probeKey = sessions.find((k) => k.id !== parent.keyId)!;
     expect(probeKey.status).toBe('revoked');
+    // Asked for as a probe, not guessed from its shape.
+    expect((probeKey.config as { probe?: boolean }).probe).toBe(true);
     const [status] = await engine.status(parent.orgId, [{ kind: 'key', id: parent.keyId }], 'UTC');
     expect(status!.spent).toBe(0n);
   });

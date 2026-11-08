@@ -358,6 +358,31 @@ describe('brake doctor', () => {
     expect(behind.status('key.valid')).toBe('pass');
     expect(behind.status('key.capped')).toBe('pass');
 
+    // A JSON answer is ready only when it says ok: true.
+    for (const body of [{}, { ok: 'yes' }, { status: 'ok' }]) {
+      const vague = await doctor({ BRAKE_KEY: KEY }, (c) =>
+        c.url.endsWith('/readyz') ? { status: 200, body } : healthy(me())(c),
+      );
+      expect(vague.status('proxy.reachable')).toBe('fail');
+      expect(vague.status('api.reachable')).toBe('fail');
+    }
+
+    // The public /v1/readyz is rate limited: a 429 asks /readyz instead of failing.
+    const limited = await doctor({ BRAKE_KEY: KEY }, (c) =>
+      c.url === 'https://api/v1/readyz'
+        ? { status: 429, body: { error: 'rate_limited' } }
+        : healthy(me())(c),
+    );
+    expect(limited.status('api.reachable')).toBe('pass');
+    expect(limited.f.calls.some((c) => c.url === 'https://api/readyz')).toBe(true);
+    // The last path rate limited is not ready.
+    const proxyLimited = await doctor({ BRAKE_KEY: KEY }, (c) =>
+      c.url === 'https://proxy/readyz'
+        ? { status: 429, body: { error: 'rate_limited' } }
+        : healthy(me())(c),
+    );
+    expect(proxyLimited.status('proxy.reachable')).toBe('fail');
+
     // The web server in front answers for an API that is down.
     const down = await doctor({ BRAKE_KEY: KEY }, (c) =>
       c.url.startsWith('https://api/') && c.url.endsWith('/readyz')
@@ -397,7 +422,7 @@ describe('brake doctor', () => {
   it('fails a revoked key and a killed one', async () => {
     const revoked = await doctor({ BRAKE_KEY: KEY }, (c) =>
       c.url.endsWith('/readyz')
-        ? { status: 200, body: {} }
+        ? { status: 200, body: { ok: true } }
         : { status: 401, body: { error: 'invalid_key' } },
     );
     expect(revoked.status('key.valid')).toBe('fail');
@@ -417,7 +442,8 @@ describe('brake doctor', () => {
         { BRAKE_KEY: KEY },
         healthy(minting, (c) => {
           if (c.url.endsWith('/v1/sessions')) return session;
-          if (c.method === 'DELETE') return { status: 200, body: { spentMicros: 0 } };
+          if (c.method === 'DELETE')
+            return { status: 200, body: { spentMicros: 0, heldMicros: 0 } };
           return {
             status: 402,
             body: { error: 'budget_exceeded', scope: 'key:key_probe', cap: 0 },
@@ -433,6 +459,7 @@ describe('brake doctor', () => {
         budgetMicros: '0',
         dayBudgetMicros: '0',
         ttlSec: 60,
+        probe: true,
       });
       const probe = d.f.calls.find((c) => c.url.startsWith('https://proxy/google-maps/'))!;
       expect(probe.headers['x-brake-key']).toBe(session.body.token);
@@ -447,7 +474,8 @@ describe('brake doctor', () => {
         { BRAKE_KEY: KEY },
         healthy(minting, (c) => {
           if (c.url.endsWith('/v1/sessions')) return session;
-          if (c.method === 'DELETE') return { status: 200, body: { spentMicros: 5000 } };
+          if (c.method === 'DELETE')
+            return { status: 200, body: { spentMicros: 5000, heldMicros: 0 } };
           return { status: 200, body: { results: [] }, headers: { 'x-brake-cost-micros': '5000' } };
         }),
         { args: ['--prove'] },
@@ -473,6 +501,35 @@ describe('brake doctor', () => {
       expect(d.status('enforcement.exhausted-budget')).toBe('fail');
     });
 
+    it('does not pass when the probe session spend cannot be read back', async () => {
+      const refusal = {
+        status: 402,
+        body: { error: 'budget_exceeded' },
+        headers: { 'x-brake-cost-micros': '0' },
+      };
+      for (const end of [
+        () => {
+          throw new Error('connection reset');
+        },
+        () => ({ status: 500, body: { error: 'internal' } }),
+        () => ({ status: 200, body: {} }),
+      ]) {
+        const d = await doctor(
+          { BRAKE_KEY: KEY },
+          healthy(minting, (c) => {
+            if (c.url.endsWith('/v1/sessions')) return session;
+            if (c.method === 'DELETE') return end();
+            return refusal;
+          }),
+          { args: ['--prove'] },
+        );
+        const check = d.report!.checks.find((c) => c.id === 'enforcement.exhausted-budget')!;
+        expect(check.status).toBe('unknown');
+        expect(check.detail).toMatch(/spend could not be read back/);
+        expect(d.code).toBe(EXIT.error);
+      }
+    });
+
     it('fails when the $0 session holds money for a call', async () => {
       const d = await doctor(
         { BRAKE_KEY: KEY },
@@ -493,7 +550,8 @@ describe('brake doctor', () => {
         { BRAKE_KEY: KEY },
         healthy(minting, (c) => {
           if (c.url.endsWith('/v1/sessions')) return session;
-          if (c.method === 'DELETE') return { status: 200, body: { spentMicros: 0 } };
+          if (c.method === 'DELETE')
+            return { status: 200, body: { spentMicros: 0, heldMicros: 0 } };
           throw new Error('connection reset');
         }),
         { args: ['--prove'] },
@@ -523,7 +581,8 @@ describe('brake doctor', () => {
       const respond = (body: unknown) =>
         healthy(body, (c) => {
           if (c.url.endsWith('/v1/sessions')) return session;
-          if (c.method === 'DELETE') return { status: 200, body: { spentMicros: 0 } };
+          if (c.method === 'DELETE')
+            return { status: 200, body: { spentMicros: 0, heldMicros: 0 } };
           return refused(c);
         });
 
@@ -545,7 +604,8 @@ describe('brake doctor', () => {
         { BRAKE_KEY: KEY },
         healthy(minting, (c) => {
           if (c.url.endsWith('/v1/sessions')) return session;
-          if (c.method === 'DELETE') return { status: 200, body: { spentMicros: 0 } };
+          if (c.method === 'DELETE')
+            return { status: 200, body: { spentMicros: 0, heldMicros: 0 } };
           return c.url.includes('/google-maps/')
             ? { status: 403, body: { error: 'unpriced_route' } }
             : refused(c);
@@ -566,7 +626,7 @@ describe('brake doctor', () => {
     it('probes when only the session the client names is killed, not when the key is', async () => {
       const probe = healthy(minting, (c) => {
         if (c.url.endsWith('/v1/sessions')) return session;
-        if (c.method === 'DELETE') return { status: 200, body: { spentMicros: 0 } };
+        if (c.method === 'DELETE') return { status: 200, body: { spentMicros: 0, heldMicros: 0 } };
         return {
           status: 402,
           body: { error: 'budget_exceeded' },
@@ -695,9 +755,42 @@ describe('brake doctor', () => {
     expect(d.out).not.toContain(ADMIN);
   });
 
+  it('looks in the OS home when HOME is unset, and never passes a config it did not look for', async () => {
+    const home = tmp('brake-doctor-');
+    mkdirSync(join(home, '.config', 'brake'), { recursive: true });
+    writeFileSync(
+      join(home, '.config', 'brake', 'config.json'),
+      JSON.stringify({ adminToken: ADMIN }),
+    );
+    const run_ = async (homedir?: () => string) => {
+      const f = fake({ BRAKE_URL: 'https://proxy', BRAKE_API_URL: 'https://api' }, healthy(me()));
+      const cwd = tmp('brake-doctor-cwd-');
+      f.io.cwd = () => cwd;
+      if (homedir) f.io.homedir = homedir;
+      await run(['doctor'], f.io);
+      const report = JSON.parse(f.out.join('')) as {
+        ok: boolean;
+        checks: { id: string; status: string; detail?: string }[];
+      };
+      return { report, check: report.checks.find((c) => c.id === 'admin-token.config')! };
+    };
+    expect((await run_(() => home)).check.status).toBe('fail');
+    for (const homedir of [
+      undefined,
+      () => '',
+      () => {
+        throw new Error('no passwd entry');
+      },
+    ]) {
+      const none = await run_(homedir);
+      expect(none.check.status).toBe('unknown');
+      expect(none.report.ok).toBe(false);
+    }
+  });
+
   it('reports a key it could not check, rather than a bad key, when the API errs', async () => {
     const d = await doctor({ BRAKE_KEY: KEY }, (c) =>
-      c.url.endsWith('/readyz') ? { status: 200, body: {} } : { status: 503, body: {} },
+      c.url.endsWith('/readyz') ? { status: 200, body: { ok: true } } : { status: 503, body: {} },
     );
     expect(d.status('key.valid')).toBe('unknown');
   });

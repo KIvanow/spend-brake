@@ -117,16 +117,20 @@ named, never printed.
 
 `--prove` mints a $0, 60-second session from the key and sends one priced request with it. The
 proxy must refuse it with `402 budget_exceeded` before it contacts the provider; the session is
-then ended, having spent nothing. The API marks a $0 session of up to five minutes as a probe:
-its caps, lifetime and fail-open can never change, so it cannot spend, and it does not count
-toward a plan's agent sessions. `--prove` can run on every deploy (it still needs a plan whose
+then ended, having spent nothing, and doctor reads back what it spent and holds: if it cannot,
+the probe does not pass. Doctor asks for a probe (`probe: true` on `POST /v1/sessions`, which
+needs a $0 budget and a lifetime of up to five minutes; anything else is refused with 400). A
+probe's caps, lifetime and fail-open can never change, so it cannot spend, and it does not count
+toward a plan's agent sessions. Any other $0 session is an ordinary session, counted like the
+rest. `--prove` can run on every deploy (it still needs a plan whose
 payment has gone through and whose monthly requests are not used up). Killed providers are
 skipped, and a provider the proxy refuses for another reason first (killed, unpriced) makes
 doctor try the next. The repository runs the same probe against a counting mock provider and
 checks it receives no request (`apps/cli/test/e2e.test.ts`).
 
 Doctor exits 1 when a check fails, and also when it could not read the key's caps, its policy,
-the working directory or a `.env` file (even one it skipped for size), when the
+the working directory or a `.env` file (even one it skipped for size), when it found no
+home directory to look for a saved admin token in, when the
 workload can read another virtual key (whose caps it did not check) or, with `--prove`, when it
 could not complete the probe: it exits 0 only for what it actually saw. A session key, or a key
 that may not mint sessions, cannot run the probe, so run `--prove` with the parent key; a server

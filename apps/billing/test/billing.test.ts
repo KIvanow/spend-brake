@@ -589,18 +589,35 @@ describe('agent sessions', () => {
         headers: bearer(t),
         payload: { parentKeyId, ...payload },
       });
-    const probe = { budgetMicros: '0', dayBudgetMicros: '0', ttlSec: 60 };
-    for (let i = 0; i < 20; i++)
+    const probe = { budgetMicros: '0', dayBudgetMicros: '0', ttlSec: 60, probe: true };
+    for (let i = 0; i < 19; i++)
       expect((await mint({ budgetMicros: '1000' })).statusCode).toBe(201);
+    // A $0 session that does not ask to be a probe is an ordinary session: it counts, and its
+    // caps may be raised later.
+    const plain = await mint({ budgetMicros: '0', dayBudgetMicros: '0', ttlSec: 60 });
+    expect(plain.statusCode).toBe(201);
+    const plainKey = plain.json<{ keyId: string }>().keyId;
+    expect(
+      (
+        await api.inject({
+          method: 'PUT',
+          url: `/v1/caps/key:${plainKey}`,
+          headers: bearer(t),
+          payload: { month: { hard: 1_000_000 } },
+        })
+      ).statusCode,
+    ).toBe(200);
     expect((await mint({ budgetMicros: '1000' })).json()).toMatchObject({ error: 'plan_limit' });
-    // A short $0 session is a probe: it can never spend.
+    // A short $0 session asked for as a probe is one: it can never spend.
     expect((await mint(probe)).statusCode).toBe(201);
     const short = await mint(probe);
     expect(short.statusCode).toBe(201);
-    // A long one counts like any other session.
-    expect((await mint({ ...probe, ttlSec: 7 * 24 * 3600 })).json()).toMatchObject({
-      error: 'plan_limit',
-    });
+    // A probe with a budget or a long life is refused, not taken for a session.
+    for (const over of [{ budgetMicros: '1000' }, { ttlSec: 7 * 24 * 3600 }]) {
+      const bad = await mint({ ...probe, ...over });
+      expect(bad.statusCode, JSON.stringify(over)).toBe(400);
+      expect(bad.json()).toMatchObject({ error: 'invalid_request' });
+    }
 
     // Raising (or removing) a probe's caps would let it spend outside the plan: refused.
     const { keyId, sessionId } = short.json<{ keyId: string; sessionId: string }>();
@@ -654,7 +671,7 @@ describe('agent sessions', () => {
       method: 'POST',
       url: '/v1/sessions',
       headers: bearer(t),
-      payload: { parentKeyId, budgetMicros: '0', dayBudgetMicros: '0', ttlSec: 60 },
+      payload: { parentKeyId, budgetMicros: '0', dayBudgetMicros: '0', ttlSec: 60, probe: true },
     });
     expect(res.json()).toMatchObject({ error: 'payment_required' });
   });

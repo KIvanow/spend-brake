@@ -13,6 +13,8 @@ export interface Io {
   stdin?: NodeJS.ReadableStream;
   /** The working directory `brake doctor` scans. */
   cwd?: () => string;
+  /** The user's home from the OS, for `brake doctor` when HOME is unset. */
+  homedir?: () => string;
   /** Ask the user (init wizard); absent when not interactive. */
   prompt?: (question: string, opts?: { secret?: boolean; default?: string }) => Promise<string>;
 }
@@ -116,7 +118,16 @@ export function savedConfigs(io: Io): {
   const paths = new Set<string>();
   const current = configPath(io);
   if (current) paths.add(current);
-  if (io.env.HOME) paths.add(join(io.env.HOME, '.config', 'brake', 'config.json'));
+  // Without HOME, the OS still knows the home, and so may the agent.
+  let home = io.env.HOME;
+  if (!home) {
+    try {
+      home = io.homedir?.();
+    } catch {
+      // no home directory for this user
+    }
+  }
+  if (home) paths.add(join(home, '.config', 'brake', 'config.json'));
   const found: { path: string; cfg: SavedConfig }[] = [];
   for (const path of paths) {
     try {

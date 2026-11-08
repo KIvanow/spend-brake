@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { homedir } from 'node:os';
 import { Command, CommanderError } from 'commander';
 import { createInterface } from 'node:readline/promises';
 import { adminCommands } from './commands/admin.js';
@@ -42,6 +43,7 @@ export const defaultIo = (): Io => ({
   spawn: (cmd, args, opts) => spawn(cmd, args, opts),
   stdin: process.stdin,
   cwd: () => process.cwd(),
+  homedir: () => homedir(),
   ...(process.stdin.isTTY
     ? {
         prompt: async (question: string, opts?: { secret?: boolean; default?: string }) => {

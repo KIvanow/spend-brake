@@ -131,8 +131,10 @@ Each call prints `ok`, `status`, `costMicros`, `cost`, `remainingMicros`, `reque
 Checks what could let the workload spend past its caps, from where it runs. One JSON report
 (`ok`, `summary`, `checks`, `notVerified`) or, with `--pretty`, a readable one; exit code 1
 when a check fails, when it could not read the key's caps or policy, the working directory or a
-`.env` file, when the
-workload can read another virtual key, or when `--prove` could not complete the probe.
+`.env` file, when it found no home directory to look for a saved admin token in, when the
+workload can read another virtual key, or when `--prove` could not complete the probe or read
+back what the probe session spent. A service is ready only when its readiness report says
+`ok: true`; a rate-limited `/v1/readyz` falls back to `/readyz`.
 
 ```sh
 brake doctor --pretty

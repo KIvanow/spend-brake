@@ -30,6 +30,11 @@ const createBody = z.object({
     .max(7 * 24 * 3600)
     .default(12 * 3600),
   name: z.string().max(200).optional(),
+  /**
+   * A $0 probe (`brake doctor --prove`): needs budgetMicros 0 and ttlSec of at most
+   * PROBE_TTL_SEC. Its caps never change and it does not use up the plan's sessions.
+   */
+  probe: z.literal(true).optional(),
 });
 
 /** The longest $0 session that is a probe (`brake doctor --prove` mints 60 seconds). */
@@ -148,11 +153,19 @@ export function sessionRoutes(
       dayBudgetMicros: parsed.data.dayBudgetMicros ?? 20_000_000n,
     };
     const orgId = c.auth.orgId;
-    // A short $0 session (brake doctor --prove) is marked a probe: its caps, lifetime and fail-open
-    // can never change, so it spends nothing and does not use up the plan's sessions. A failed
-    // payment or a spent request allowance still stops it. Kept short so that probes cannot stand
-    // in for sessions on routes priced at $0.
-    const probe = body.budgetMicros === 0n && body.ttlSec <= PROBE_TTL_SEC;
+    // A probe (brake doctor --prove) is asked for, never guessed from the shape: its caps, lifetime
+    // and fail-open can never change, so it spends nothing and does not use up the plan's
+    // sessions. A failed payment or a spent request allowance still stops it. Kept short so that
+    // probes cannot stand in for sessions on routes priced at $0. Any other $0 session is an
+    // ordinary session.
+    const probe = body.probe === true;
+    if (probe && (body.budgetMicros !== 0n || body.ttlSec > PROBE_TTL_SEC)) {
+      throw new ApiError(
+        400,
+        'invalid_request',
+        `A probe session needs budgetMicros 0 and ttlSec of at most ${PROBE_TTL_SEC}.`,
+      );
+    }
     await requireCapacity(ctx, orgId, probe ? 'probe' : 'session');
 
     let parent: KeyRecord;

@@ -201,14 +201,22 @@ export function localChecks(io: Io, cwd: string): Check[] {
           detail: `${withToken.join(', ')} holds an admin token this user can read, so the workload can lift its own caps.`,
           fix: 'Run the workload as another OS user than the one that ran `brake init`. Pointing XDG_CONFIG_HOME elsewhere only hides the file from brake, not from the agent.',
         }
-      : {
-          id: 'admin-token.config',
-          status: 'pass',
-          title: 'No readable saved admin token',
-          detail: configs.looked.length
-            ? `Looked at ${configs.looked.join(' and ')}; copies elsewhere are not checked.`
-            : 'No config path to look at (HOME is unset).',
-        },
+      : configs.looked.length
+        ? {
+            id: 'admin-token.config',
+            status: 'pass',
+            title: 'No readable saved admin token',
+            detail: `Looked at ${configs.looked.join(' and ')}; copies elsewhere are not checked.`,
+          }
+        : {
+            // Nothing looked at is nothing checked: never a pass.
+            id: 'admin-token.config',
+            status: 'unknown',
+            title: 'Could not look for a saved admin token',
+            detail:
+              'HOME and XDG_CONFIG_HOME are unset and the OS gave no home directory, so no config was read.',
+            fix: 'Set HOME for the workload and run `brake doctor` again.',
+          },
   );
 
   checks.push(
@@ -351,8 +359,9 @@ export function localChecks(io: Io, cwd: string): Check[] {
 const TIMEOUT_MS = 10_000;
 
 /**
- * Readiness at the first of `paths` the server knows (a 404 tries the next). Only a JSON answer
- * counts: a web server in front, such as the dashboard's, answers any path with its own page.
+ * Readiness at the first of `paths` the server knows (a 404, or a 429 from the rate-limited
+ * /v1/readyz, tries the next). Only a JSON answer with `ok: true` counts: a web server in front,
+ * such as the dashboard's, answers any path with its own page.
  * `unchecked` is set when the service answered but has no readiness report doctor can reach.
  */
 async function ready(
@@ -364,7 +373,7 @@ async function ready(
   // The API's own JSON 404 on /v1/readyz: an API before 0.3.0, which only the dashboard's /v1
   // forwarding may reach, so its /readyz may be the dashboard's page.
   let older = '';
-  for (const path of paths) {
+  for (const [i, path] of paths.entries()) {
     let res: Response;
     let body: string;
     try {
@@ -385,6 +394,8 @@ async function ready(
       if (isJson && path === '/v1/readyz') older = `${base}${path}`;
       continue;
     }
+    // Rate limited: says nothing about readiness, so ask the next path if there is one.
+    if (res.status === 429 && isJson && i < paths.length - 1) continue;
     if (!isJson) {
       if (older) break;
       return {
@@ -395,7 +406,7 @@ async function ready(
             : `${base}${path} answered HTTP ${res.status} with a page, not a Spend Brake readiness report: is this URL a website in front of the service?`,
       };
     }
-    return { ok: res.ok && (json as { ok?: unknown }).ok !== false, detail };
+    return { ok: res.ok && (json as { ok?: unknown }).ok === true, detail };
   }
   if (older) {
     return {
@@ -521,6 +532,8 @@ async function prove(io: Io, me: Me | null): Promise<Check> {
         // probe key's $0 cap refuses the call before any agent cap could be created.
         ttlSec: 60,
         name: 'brake doctor probe',
+        // Asked for: the API never takes a $0 session for a probe from its shape alone.
+        probe: true,
       },
     );
   } catch (err) {
@@ -600,11 +613,18 @@ async function prove(io: Io, me: Me | null): Promise<Check> {
     }
   } finally {
     let end: { spentMicros?: number; heldMicros?: number } = {};
+    let endError = '';
     try {
       end = await endSession(io, minted);
-    } catch {
-      // the session expires in 60 s anyway
+    } catch (err) {
+      // the session expires in 60 s anyway, but its spend is then unread
+      endError = (err as Error).message;
     }
+    const unread =
+      endError ||
+      (typeof end.spentMicros !== 'number' || typeof end.heldMicros !== 'number'
+        ? 'the API did not say what it spent or holds'
+        : '');
     // A hold is a charge reserved for a forwarded call: on a $0 session there must be none.
     if (end.spentMicros || end.heldMicros) {
       result = {
@@ -615,6 +635,14 @@ async function prove(io: Io, me: Me | null): Promise<Check> {
           ? `The $0 probe session spent ${microsToUsd(end.spentMicros)}.`
           : `The $0 probe session holds ${microsToUsd(end.heldMicros!)} for a call in flight.`,
         fix: 'Report this: caps are not being enforced on this install.',
+      };
+    } else if (unread && result?.status === 'pass') {
+      // The refusal alone does not prove the probe charged nothing.
+      result = {
+        id,
+        status: 'unknown',
+        title,
+        detail: `${result.detail} But the probe session's spend could not be read back when ending it: ${unread}.`,
       };
     }
   }

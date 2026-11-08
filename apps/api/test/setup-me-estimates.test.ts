@@ -401,7 +401,7 @@ describe('session keys follow their parent', () => {
     const parentKeyId = (await call('/v1/keys', { name: 'p', credentials: { acme: cred } })).json<{
       id: string;
     }>().id;
-    const probe = { parentKeyId, budgetMicros: '0', dayBudgetMicros: '0', ttlSec: 60 };
+    const probe = { parentKeyId, budgetMicros: '0', dayBudgetMicros: '0', ttlSec: 60, probe: true };
     for (let i = 0; i < 30; i++) expect((await call('/v1/sessions', probe)).statusCode).toBe(201);
     const over = await call('/v1/sessions', probe);
     expect(over.statusCode).toBe(429);
@@ -410,6 +410,20 @@ describe('session keys follow their parent', () => {
     expect(
       (await call('/v1/sessions', { parentKeyId, budgetMicros: '1000', ttlSec: 60 })).statusCode,
     ).toBe(201);
+    // Nor is a $0 session that does not ask to be a probe: it is an ordinary session.
+    const plain = await call('/v1/sessions', { ...probe, probe: undefined });
+    expect(plain.statusCode).toBe(201);
+    const plainKey = plain.json<{ keyId: string }>().keyId;
+    const row = await env.db.query.virtualKeys.findFirst({
+      where: (k, { eq: e }) => e(k.id, plainKey),
+    });
+    expect((row!.config as { probe?: boolean }).probe).toBeUndefined();
+    // probe: true with a budget or a long life is refused.
+    for (const over of [{ budgetMicros: '1000' }, { ttlSec: 3600 }]) {
+      const bad = await call('/v1/sessions', { ...probe, ...over });
+      expect(bad.statusCode, JSON.stringify(over)).toBe(400);
+      expect(bad.json()).toMatchObject({ error: 'invalid_request' });
+    }
   });
 
   it("stay their parent key's agent, so its agent caps keep applying", async () => {
