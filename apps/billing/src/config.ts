@@ -1,5 +1,6 @@
 import { createPrivateKey, createPublicKey } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { LICENSE_PUBLIC_KEY } from '@spend-brake/shared';
 import { z } from 'zod';
 import { assertStripeKeyMode } from './stripe.js';
 
@@ -29,15 +30,6 @@ const envSchema = z.object({
   BRAKE_HOSTED_SIGNUP: z.stringbool().default(false),
 });
 
-/**
- * The public half released ee builds verify licenses with (ee/src/license/keys.ts; a test keeps
- * the two equal). A license signed with any other key is refused by every install.
- */
-export const RELEASED_LICENSE_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEASqhKChiRmMqLgza2CWI05G51ehMzE9pc8Ej5Y4b8S6c=
------END PUBLIC KEY-----
-`;
-
 /** Whether a signing key (PEM) is the one released ee builds trust. */
 export function isReleasedLicenseKey(privateKeyPem: string): boolean {
   let key;
@@ -53,7 +45,7 @@ export function isReleasedLicenseKey(privateKeyPem: string): boolean {
     type: 'spki',
     format: 'pem',
   });
-  return pub.toString().trim() === RELEASED_LICENSE_PUBLIC_KEY.trim();
+  return pub.toString().trim() === LICENSE_PUBLIC_KEY.trim();
 }
 
 export type BillingEnv = z.output<typeof envSchema> & {

@@ -413,6 +413,35 @@ describe('dashboard', () => {
     );
   });
 
+  it('lets a license subscriber with no install id stored set one', async () => {
+    routes['GET /v1/billing'] = () => [
+      200,
+      {
+        plan: 'business',
+        planName: 'Business (self-hosted license)',
+        status: 'active',
+        currentPeriodEnd: null,
+        hasSubscription: true,
+        licenseOrg: null,
+        limits: null,
+        usage: { keys: 0, providers: 0, agentSessionsThisMonth: 0, requestsThisMonth: 0 },
+        plans: [],
+        licenses: [],
+      },
+    ];
+    routes['PUT /v1/billing/license-org'] = () => [200, { licenseOrg: 'acme' }];
+    const user = await signIn();
+    await user.click(screen.getByRole('button', { name: 'Billing' }));
+    const field = await screen.findByLabelText(/^Org id on your install/);
+    await user.type(field, 'acme');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.url === '/v1/billing/license-org')).toMatchObject({
+        body: { licenseOrg: 'acme' },
+      }),
+    );
+  });
+
   it('says which org the current license and the next one name, and saves the file as named', async () => {
     routes['GET /v1/billing'] = () => [
       200,

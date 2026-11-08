@@ -397,8 +397,8 @@ export function Welcome({ signedIn = false }: { signedIn?: boolean }) {
       <p>Your account is ready and we emailed you a sign-in link. Open it to finish setting up.</p>
       {signedIn && (
         <p className="notice">
-          Your purchase is for the new account you just created, not the one you are signed in to:
-          its plan and license show under Billing once you sign in to it with that link.
+          The account you just created is a new one, not the one you are signed in to: its plan, and
+          its license if you paid, show under Billing once you sign in to it with that link.
         </p>
       )}
       <p className="muted">

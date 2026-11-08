@@ -5,6 +5,7 @@ import {
   desc,
   eq,
   issuedLicenses,
+  lte,
   orgEntitlements,
   orgs,
   stripeEvents,
@@ -145,7 +146,9 @@ export async function applyEvent(deps: WebhookDeps, event: Stripe.Event): Promis
   } catch (err) {
     // The payment still went through: a failed payment's hold is lifted now, while the license
     // waits for the retry.
-    if (err instanceof LicenseNotIssued) await paidUp(deps.db, deps, err.orgId);
+    if (err instanceof LicenseNotIssued && event.type === 'invoice.paid') {
+      await liftHold(deps.db, err.orgId, event.data.object, deps.now());
+    }
     throw err;
   }
   // Every license is emailed, each on its own: the event is recorded, so a retry would send
@@ -163,18 +166,22 @@ export async function applyEvent(deps: WebhookDeps, event: Stripe.Event): Promis
 }
 
 /**
- * Lift a failed payment's hold: the status alone, in one statement, so neither a payment
- * failure committing meanwhile nor the org's limits are overwritten.
+ * Lift a failed payment's hold once an invoice is paid: the status alone, in one statement, so
+ * the org's limits are kept. Only a hold set before the payment: a retry of an old paid invoice
+ * does not lift a hold a newer failure set since.
  */
-async function liftHold(db: Db | Tx, orgId: string, now: Date) {
+async function liftHold(db: Db | Tx, orgId: string, invoice: Stripe.Invoice, now: Date) {
+  const paidAt = invoice.status_transitions?.paid_at;
   await db
     .update(orgEntitlements)
     .set({ status: 'active', updatedAt: now })
-    .where(and(eq(orgEntitlements.orgId, orgId), eq(orgEntitlements.status, 'past_due')));
-}
-
-async function paidUp(db: Db, deps: WebhookDeps, orgId: string) {
-  await liftHold(db, orgId, deps.now());
+    .where(
+      and(
+        eq(orgEntitlements.orgId, orgId),
+        eq(orgEntitlements.status, 'past_due'),
+        ...(paidAt ? [lte(orgEntitlements.updatedAt, new Date(paidAt * 1000))] : []),
+      ),
+    );
 }
 
 function applyInTransaction(
@@ -282,13 +289,17 @@ interface InvoiceReads {
 
 async function invoiceReads(deps: WebhookDeps, invoice: Stripe.Invoice): Promise<InvoiceReads> {
   const lines: InvoiceReads['lines'] = [];
-  for (const line of invoice.lines.data) {
-    const productId = line.pricing?.price_details?.product;
-    if (!productId) continue;
-    const product = await deps.stripe.products.retrieve(productId);
-    const plan = product.metadata[PLAN_METADATA];
-    if (plan && isLicensePlan(plan)) lines.push({ line, plan, product });
-  }
+  const products = await Promise.all(
+    invoice.lines.data.map((line) => {
+      const productId = line.pricing?.price_details?.product;
+      return productId ? deps.stripe.products.retrieve(productId) : Promise.resolve(null);
+    }),
+  );
+  invoice.lines.data.forEach((line, i) => {
+    const product = products[i];
+    const plan = product?.metadata[PLAN_METADATA];
+    if (product && plan && isLicensePlan(plan)) lines.push({ line, plan, product });
+  });
   // The customer, for an invoice with license lines: its metadata may name the org (no row of
   // ours names the customer) or the install (license_org).
   const customer = id(invoice.customer);
@@ -311,7 +322,7 @@ async function invoicePaid(
     return 'ignored';
   }
   const current = await planOf(tx, orgId);
-  if (current?.status === 'past_due') await liftHold(tx, orgId, deps.now());
+  if (current?.status === 'past_due') await liftHold(tx, orgId, invoice, deps.now());
   if (reads.lines.length === 0) return 'applied';
   if (!deps.licenseKey) {
     // Paid for, so not recorded without its license: Stripe retries until a key is configured.

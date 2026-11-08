@@ -1,4 +1,5 @@
 import { generateKeyPairSync, randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { type LoginMail, buildApi, redeemLoginLink } from '@spend-brake/api';
 import { BudgetEngine, connectValkey, type ValkeyClient } from '@spend-brake/budget';
 import {
@@ -11,6 +12,7 @@ import {
   migrate,
   orgEntitlements,
   orgs,
+  sql,
   stripeEvents,
   virtualKeys,
 } from '@spend-brake/db';
@@ -23,7 +25,8 @@ import {
 import type { FastifyInstance } from 'fastify';
 import Stripe from 'stripe';
 import { GenericContainer, type StartedTestContainer, Wait } from 'testcontainers';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, onTestFinished } from 'vitest';
+import { setLicenseOrg } from '../src/entitlements.js';
 import { licenseMailer } from '../src/mail.js';
 import { PLAN_METADATA, type Plan, lookupKey } from '../src/plans.js';
 import { CHECKOUT_WAIVER_MESSAGE, TERMS_VERSION, buildServer } from '../src/server.js';
@@ -1166,6 +1169,7 @@ describe('licenses', () => {
       signup: true,
       now: () => NOW,
     });
+    onTestFinished(() => keyless.close());
     const plans = (await keyless.inject('/v1/billing/plans')).json<{
       plans: { id: string; purchasable: boolean }[];
     }>().plans;
@@ -1204,7 +1208,6 @@ describe('licenses', () => {
     expect(await applyEvent({ ...deps, licenseKey: signer.privateKey }, paid)).toBe('applied');
     const [row] = await db.select().from(issuedLicenses).where(eq(issuedLicenses.orgId, orgId));
     expect(verify(row!.raw).org).toBe('bigcorp');
-    await keyless.close();
   });
 
   it('issues no first license without the install id, and renews an old one for the id it named', async () => {
@@ -1293,6 +1296,65 @@ describe('licenses', () => {
     expect(outcome).toBe('applied');
     expect(queued).toHaveLength(1);
     expect(errors).toEqual(['license email not queued: send the license to the customer by hand']);
+  });
+
+  it('backfills the stored install id from the latest license (migration 0010)', async () => {
+    const { orgId } = await signup('free', '203.0.113.95');
+    const lic = (id: string, licenseOrg: string, at: number) => ({
+      id,
+      orgId,
+      edition: 'business' as const,
+      invoiceId: `${id}:il`,
+      raw: '{}',
+      licenseOrg,
+      expiresAt: NOW,
+      issuedAt: new Date(at),
+    });
+    const tag = randomBytes(3).toString('hex');
+    await db
+      .insert(issuedLicenses)
+      .values([lic(`lic_a_${tag}`, 'old-install', 1_000), lic(`lic_b_${tag}`, 'acme', 2_000)]);
+    const backfill = readFileSync(
+      new URL('../../../packages/db/drizzle/0010_license_org_backfill.sql', import.meta.url),
+      'utf8',
+    );
+    await db.execute(sql.raw(backfill));
+    expect((await plan(orgId)).licenseOrg).toBe('acme');
+    // An id already stored is kept.
+    await setLicenseOrg(db, orgId, 'kept', 'system', NOW);
+    await db.execute(sql.raw(backfill));
+    expect((await plan(orgId)).licenseOrg).toBe('kept');
+  });
+
+  it("does not lift a hold a newer failure set when an older invoice's event is retried", async () => {
+    const { orgId } = await signup('free', '203.0.113.96');
+    customers.set('cus_hold', {
+      id: 'cus_hold',
+      metadata: { orgId },
+    } as unknown as Stripe.Customer);
+    // The invoice was paid before the newer failure set the hold.
+    await db
+      .update(orgEntitlements)
+      .set({ status: 'past_due', updatedAt: NOW })
+      .where(eq(orgEntitlements.orgId, orgId));
+    const old = invoice('in_hold', 'cus_hold', 'prod_enterprise', new Date('2027-10-30T00:00:00Z'));
+    const paid = {
+      ...old,
+      status_transitions: { paid_at: Math.floor(NOW.getTime() / 1000) - 3600 },
+    };
+    await expect(
+      applyEvent(
+        {
+          db,
+          stripe: fakeStripe,
+          licenseKey: signer.privateKey,
+          now: () => NOW,
+          sendLicense: () => Promise.resolve(),
+        },
+        event('invoice.paid', paid) as unknown as Stripe.Event,
+      ),
+    ).rejects.toThrow(/no license_org/);
+    expect((await plan(orgId)).status).toBe('past_due');
   });
 
   it('emails each license on an invoice with several license lines', async () => {

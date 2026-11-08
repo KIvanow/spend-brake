@@ -40,8 +40,8 @@ Billing, once Checkout opens; it is passed to Stripe as subscription metadata an
 Stripe customer's metadata. The hosted org keeps a generated id. The stored id is what licenses
 name: changing it (`PUT /v1/billing/license-org`, every change audited as
 `billing.license_org_set`) copies the new id to the Stripe customer too; the subscription's
-metadata keeps the id it was bought with. Licenses issued
-before it, and orgs without one, name the hosted org's id.
+metadata keeps the id it was bought with. Licenses issued before license_org named the hosted
+org's id, and their renewals keep it; a first license is issued only once an id is set.
 
 A paid plan (sign-up or checkout) needs `"acceptTerms": true`: the buyer agrees to the Terms of
 Service and Privacy Policy and asks for the plan to start now, waiving the 14-day right of

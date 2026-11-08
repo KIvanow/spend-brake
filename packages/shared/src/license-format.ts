@@ -8,6 +8,15 @@ import { signDocument } from './signed-document.js';
 
 export const LICENSE_FORMAT = 'spend-brake-license/1';
 
+/**
+ * Public half of the key that signs licenses, which released ee builds verify them with (and the
+ * billing service checks its signing key against). The private key never enters this repository.
+ */
+export const LICENSE_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEASqhKChiRmMqLgza2CWI05G51ehMzE9pc8Ej5Y4b8S6c=
+-----END PUBLIC KEY-----
+`;
+
 export const LICENSE_FEATURES = [
   'sso',
   'rbac',

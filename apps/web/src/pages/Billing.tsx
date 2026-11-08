@@ -124,7 +124,13 @@ export function Billing() {
   // The install's org id: as typed, else as stored. A license plan is bought for it.
   const installValue = (installOrg ?? b.licenseOrg ?? '').trim();
   const installValid = LICENSE_ORG.test(installValue);
-  const licenseSection = b.licenses.length > 0 || Boolean(b.licenseOrg);
+  // Also for a license plan with no id stored yet (bought before the id was asked for): its
+  // owner sets the id here, and the license waiting for it is issued.
+  const licenseSection =
+    b.licenses.length > 0 ||
+    Boolean(b.licenseOrg) ||
+    b.plan === 'business' ||
+    b.plan === 'enterprise';
   const buying = can('owner') && !b.hasSubscription;
   const installField = (hint: string) => (
     <label>

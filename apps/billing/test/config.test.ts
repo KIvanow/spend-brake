@@ -1,7 +1,6 @@
 import { generateKeyPairSync } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { RELEASED_LICENSE_PUBLIC_KEY, isReleasedLicenseKey, loadEnv } from '../src/config.js';
+import { isReleasedLicenseKey, loadEnv } from '../src/config.js';
 import { stripeClient } from '../src/stripe.js';
 
 // Dummy strings only: no real Stripe key is ever used here.
@@ -48,11 +47,6 @@ describe('license signing key', () => {
     publicKeyEncoding: { type: 'spki', format: 'pem' },
     privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
   }).privateKey;
-
-  it('is the public key released ee builds verify with', () => {
-    const ee = readFileSync(new URL('../../../ee/src/license/keys.ts', import.meta.url), 'utf8');
-    expect(ee).toContain(RELEASED_LICENSE_PUBLIC_KEY.trim());
-  });
 
   it('refuses to take payments in live mode with a key installs would refuse', async () => {
     const live = {

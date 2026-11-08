@@ -489,7 +489,7 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
     const body = parse(
       z.object({
         plan: z.enum(CHECKOUT_PLANS),
-        licenseOrg: z.string().regex(LICENSE_ORG).optional(),
+        licenseOrg: z.string().trim().regex(LICENSE_ORG).optional(),
         acceptTerms: z.boolean().optional(),
       }),
       req.body,
@@ -520,7 +520,7 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
   // name; the Stripe customer gets a copy, so whoever reads Stripe sees it (the subscription keeps the id it was bought with).
   app.put('/v1/billing/license-org', async (req) => {
     const a = await auth(req, 'owner');
-    const body = parse(z.object({ licenseOrg: z.string().regex(LICENSE_ORG) }), req.body);
+    const body = parse(z.object({ licenseOrg: z.string().trim().regex(LICENSE_ORG) }), req.body);
     await setLicenseOrg(deps.db, a.orgId, body.licenseOrg, a.actor, now());
     await copyLicenseOrg(a.orgId, body.licenseOrg);
     return { licenseOrg: body.licenseOrg };
@@ -549,7 +549,7 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
   const signupBody = z.object({
     orgId: z.string().regex(ORG_ID).optional(),
     /** License plans: the org id of the buyer's install, which the license names. */
-    licenseOrg: z.string().regex(LICENSE_ORG).optional(),
+    licenseOrg: z.string().trim().regex(LICENSE_ORG).optional(),
     name: z.string().trim().min(1).max(200),
     email: z.string().trim().pipe(z.email().max(320)),
     plan: z.enum(['free', ...CHECKOUT_PLANS]).default('free'),
