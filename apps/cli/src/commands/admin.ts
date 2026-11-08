@@ -392,7 +392,7 @@ export function adminCommands(program: Command, io: Io, done: (code: number) => 
         // The saved config holds an admin token; installing takes the owner token init printed.
         if (err instanceof CliError && /owner role/.test(err.message)) {
           throw new CliError(
-            `${err.message} Run it with the owner token \`brake init\` printed, read without echo so it stays out of your shell history: read -rs BRAKE_ADMIN_TOKEN && export BRAKE_ADMIN_TOKEN && brake license install ${shellWord(file)}`,
+            `${err.message} Run it with the owner token \`brake init\` printed, read without echo so it stays out of your shell history (bash or zsh): read -rs BRAKE_ADMIN_TOKEN && export BRAKE_ADMIN_TOKEN && brake license install ${shellWord(file)}`,
             err.code,
           );
         }

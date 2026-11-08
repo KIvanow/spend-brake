@@ -63,14 +63,20 @@ license, and the org keeps that `license_org` from then on (change it later with
 Billing) wins over the customer's metadata: check it under Billing before sending the invoice.
 A `license_org` that is not a valid org id issues no license: the webhook answers 500 and logs a
 warning, so Stripe retries the event (a failed payment's hold is still lifted). Fix the id in
-the customer's metadata, or store one with `PUT /v1/billing/license-org` as the org's owner (it
-wins over any metadata; a subscription's own metadata is copied into each event, so fixing it in
-Stripe does not change a retry), and the next retry, or **Resend** on the event in the Stripe
-Dashboard, issues the license for the period paid.
+the customer's metadata (hand-made invoices), or store one with `PUT /v1/billing/license-org` as
+the org's owner. When the bad id is in a subscription's metadata, only the stored id fixes it:
+that metadata is copied into each event, so fixing it in Stripe does not change a retry. The
+next retry, or **Resend** on the event in the Stripe Dashboard, then issues the license for the
+period paid.
+
+Stripe retries a failed live event for up to three days. After that, **Resend** in the
+Dashboard works for events up to 30 days old (`stripe events resend <evt_…>` with the CLI). An
+invoice older than that needs its license issued by hand: sign one with the release key for the
+org's `license_org` and the paid period, and send it to the customer.
 
 Without a signing key (`BRAKE_LICENSE_SIGNING_KEY` / `_FILE`) licenses are not sold: Business
 is not offered and its checkout and sign-up answer `409 license_unavailable`. A license invoice
-paid anyway (Enterprise by hand) is retried by Stripe until a key is configured.
+paid anyway (Enterprise by hand) is retried by Stripe while the retries last (see above).
 
 ## Tax
 

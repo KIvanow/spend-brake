@@ -54,7 +54,7 @@ describe('license signing key', () => {
     expect(ee).toContain(RELEASED_LICENSE_PUBLIC_KEY.trim());
   });
 
-  it('refuses to take payments in live mode with a key installs would refuse', () => {
+  it('refuses to take payments in live mode with a key installs would refuse', async () => {
     const live = {
       ...base,
       STRIPE_SECRET_KEY: 'sk_live_dummy',
@@ -70,6 +70,15 @@ describe('license signing key', () => {
     };
     expect(loadEnv(test)).toMatchObject({ licenseKey: throwaway, releasedLicenseKey: false });
     expect(isReleasedLicenseKey(throwaway)).toBe(false);
+    // An empty key file is no key: billing starts, and sells no license.
+    const { mkdtempSync, writeFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const empty = join(mkdtempSync(join(tmpdir(), 'billing-key-')), 'license.pem');
+    writeFileSync(empty, '\n');
+    expect(
+      loadEnv({ ...live, BRAKE_LICENSE_SIGNING_KEY: '', BRAKE_LICENSE_SIGNING_KEY_FILE: empty }),
+    ).toMatchObject({ licenseKey: null, releasedLicenseKey: false });
     // An unreadable key names the setting.
     expect(() => loadEnv({ ...test, BRAKE_LICENSE_SIGNING_KEY: 'not a key' })).toThrow(
       /BRAKE_LICENSE_SIGNING_KEY is not a readable private key/,
