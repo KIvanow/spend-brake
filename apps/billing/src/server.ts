@@ -242,7 +242,7 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
 
   // A license plan is sold only where licenses can be signed: without the key, a payment would
   // buy nothing.
-  const sellable = (p: string) => !isLicensePlan(p) || deps.licenseKey !== null;
+  const sellable = (p: string) => !isLicensePlan(p) || Boolean(deps.licenseKey);
   const notSold = () =>
     new ApiError(
       409,
@@ -476,6 +476,8 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
       plans: offered.map((p) => ({ id: p, name: PLAN_NAMES[p], selfHosted: isLicensePlan(p) })),
       licenses: licenses.map((l) => ({
         ...l,
+        // As the download names the file: a license without the column named the hosted org.
+        org: l.org ?? a.orgId,
         expiresAt: l.expiresAt.toISOString(),
         issuedAt: l.issuedAt.toISOString(),
       })),

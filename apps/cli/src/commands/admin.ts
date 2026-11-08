@@ -58,10 +58,10 @@ interface Status {
   remaining: number | null;
 }
 
-/** Caps as a table with --pretty (list and set answer with the same items). */
 /** A path as one shell word, safe to paste. */
 const shellWord = (s: string) => (/^[\w./-]+$/.test(s) ? s : `'${s.replaceAll("'", "'\\''")}'`);
 
+/** Caps as a table with --pretty (list and set answer with the same items). */
 function printCaps(io: Io, r: { items: Cap[]; pending?: unknown[] }, asTable: boolean) {
   print(
     io,
@@ -390,7 +390,7 @@ export function adminCommands(program: Command, io: Io, done: (code: number) => 
         installed = await apiCall(io, 'POST', '/v1/license', { license: text });
       } catch (err) {
         // The saved config holds an admin token; installing takes the owner token init printed.
-        if (err instanceof CliError && /owner role/.test(err.message)) {
+        if (err instanceof ApiRefusal && err.status === 403 && err.error === 'forbidden') {
           throw new CliError(
             `${err.message} Run it with the owner token \`brake init\` printed, read without echo so it stays out of your shell history (bash or zsh): read -rs BRAKE_ADMIN_TOKEN && export BRAKE_ADMIN_TOKEN && brake license install ${shellWord(file)}`,
             err.code,

@@ -6,6 +6,8 @@ export class ApiRefusal extends CliError {
     message: string,
     code: number,
     readonly status: number,
+    /** The API's error code, such as `forbidden`. */
+    readonly error?: string,
   ) {
     super(message, code);
   }
@@ -46,8 +48,13 @@ export async function apiCall<T = unknown>(
     // keep text
   }
   if (!res.ok) {
-    const msg = (data as { message?: string } | null)?.message ?? `HTTP ${res.status}`;
-    throw new ApiRefusal(msg, res.status === 401 ? EXIT.auth : EXIT.error, res.status);
+    const e = data as { message?: string; error?: string } | null;
+    throw new ApiRefusal(
+      e?.message ?? `HTTP ${res.status}`,
+      res.status === 401 ? EXIT.auth : EXIT.error,
+      res.status,
+      typeof e?.error === 'string' ? e.error : undefined,
+    );
   }
   return data as T;
 }

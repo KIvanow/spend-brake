@@ -771,7 +771,8 @@ describe('sign-up', () => {
     expect(await screen.findByRole('radio', { name: /Business/ })).toHaveProperty('checked', true);
     await user.type(screen.getByLabelText('Work email'), 'ana@acme.test');
     await user.type(screen.getByLabelText('Team or project name'), 'Acme');
-    await user.type(screen.getByLabelText(/^Org id on your install/), 'io');
+    // Surrounding spaces are dropped, as under Billing and on the server.
+    await user.type(screen.getByLabelText(/^Org id on your install/), ' io ');
     await user.click(screen.getByRole('checkbox', { name: /I agree to the Terms of Service/ }));
     await user.click(screen.getByRole('button', { name: 'Continue to payment' }));
     await waitFor(() =>

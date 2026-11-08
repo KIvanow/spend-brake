@@ -64,7 +64,9 @@ const fakeStripe = {
       customers.set(c.id, c);
       return Promise.resolve(c);
     },
-    retrieve: (id: string) => Promise.resolve(customers.get(id)!),
+    // Like Stripe, every customer an event names exists (with no metadata unless set here).
+    retrieve: (id: string) =>
+      Promise.resolve(customers.get(id) ?? ({ id, metadata: {} } as unknown as Stripe.Customer)),
     update: (id: string, p: Stripe.CustomerUpdateParams) => {
       const c = customers.get(id)!;
       c.metadata = { ...c.metadata, ...(p.metadata as Record<string, string>) };
@@ -1100,10 +1102,11 @@ describe('licenses', () => {
 
   it('refuses license_org metadata that is not an org id, so Stripe retries once it is fixed', async () => {
     const { orgId, ownerToken } = await signup('free', '203.0.113.83');
-    // A failed payment earlier: paying lifts its hold even while the license waits.
+    // A failed payment earlier: paying lifts its hold even while the license waits, and leaves
+    // the org's own limits as they are.
     await db
       .update(orgEntitlements)
-      .set({ status: 'past_due' })
+      .set({ status: 'past_due', maxKeys: 7 })
       .where(eq(orgEntitlements.orgId, orgId));
     customers.set('cus_typo', {
       id: 'cus_typo',
@@ -1137,7 +1140,7 @@ describe('licenses', () => {
     );
     expect(mails).toHaveLength(before);
     expect(await db.select().from(stripeEvents).where(eq(stripeEvents.id, paid.id))).toEqual([]);
-    expect((await plan(orgId)).status).toBe('active');
+    expect(await plan(orgId)).toMatchObject({ status: 'active', maxKeys: 7 });
     // The owner fixes the id under Billing; Stripe's retry issues the license for the paid period.
     await billing.inject({
       method: 'PUT',
@@ -1202,6 +1205,94 @@ describe('licenses', () => {
     const [row] = await db.select().from(issuedLicenses).where(eq(issuedLicenses.orgId, orgId));
     expect(verify(row!.raw).org).toBe('bigcorp');
     await keyless.close();
+  });
+
+  it('issues no first license without the install id, and renews an old one for the id it named', async () => {
+    const deps = {
+      db,
+      stripe: fakeStripe,
+      licenseKey: signer.privateKey,
+      now: () => NOW,
+      sendLicense: () => Promise.resolve(),
+    };
+    const paid = (inv: string, customer: string) =>
+      event(
+        'invoice.paid',
+        invoice(inv, customer, 'prod_enterprise', new Date('2027-10-30T00:00:00Z')),
+      ) as unknown as Stripe.Event;
+    // An Enterprise customer made by hand without license_org: a license for the hosted id would
+    // be refused by the buyer's install, so the event waits for the id.
+    const { orgId } = await signup('free', '203.0.113.92');
+    customers.set('cus_noid', {
+      id: 'cus_noid',
+      metadata: { orgId },
+    } as unknown as Stripe.Customer);
+    await expect(applyEvent(deps, paid('in_noid', 'cus_noid'))).rejects.toThrow(/no license_org/);
+    expect(await db.select().from(issuedLicenses).where(eq(issuedLicenses.orgId, orgId))).toEqual(
+      [],
+    );
+    // Set in Stripe by hand, with a stray space: the retry issues it for the trimmed id.
+    customers.get('cus_noid')!.metadata.license_org = ' bigcorp ';
+    expect(await applyEvent(deps, paid('in_noid', 'cus_noid'))).toBe('applied');
+    const [row] = await db.select().from(issuedLicenses).where(eq(issuedLicenses.orgId, orgId));
+    expect(verify(row!.raw).org).toBe('bigcorp');
+
+    // An org licensed before license_org existed (its license named the hosted id) renews as is.
+    const old = await signup('free', '203.0.113.93');
+    await db.insert(issuedLicenses).values({
+      id: `lic_old_${randomBytes(3).toString('hex')}`,
+      orgId: old.orgId,
+      edition: 'enterprise',
+      invoiceId: `in_old_${old.orgId}`,
+      raw: '{}',
+      licenseOrg: old.orgId,
+      expiresAt: NOW,
+      issuedAt: new Date(NOW.getTime() - 86_400_000),
+    });
+    customers.set('cus_old', {
+      id: 'cus_old',
+      metadata: { orgId: old.orgId },
+    } as unknown as Stripe.Customer);
+    expect(await applyEvent(deps, paid('in_old_renew', 'cus_old'))).toBe('applied');
+    const renewed = await db
+      .select()
+      .from(issuedLicenses)
+      .where(eq(issuedLicenses.invoiceId, 'in_old_renew:il_in_old_renew'));
+    expect(verify(renewed[0]!.raw).org).toBe(old.orgId);
+  });
+
+  it('emails every license even when one email cannot be queued, and logs that one', async () => {
+    const { orgId } = await signup('business', '203.0.113.94');
+    customers.set('cus_mail', {
+      id: 'cus_mail',
+      metadata: { orgId },
+    } as unknown as Stripe.Customer);
+    const two = invoice('in_mail', 'cus_mail', 'prod_business', new Date('2026-11-30T12:00:00Z'));
+    two.lines.data.push({ ...two.lines.data[0]!, id: 'il_in_mail_2' });
+    const queued: string[] = [];
+    const errors: string[] = [];
+    let first = true;
+    const outcome = await applyEvent(
+      {
+        db,
+        stripe: fakeStripe,
+        licenseKey: signer.privateKey,
+        now: () => NOW,
+        sendLicense: (m) => {
+          if (first) {
+            first = false;
+            return Promise.reject(new Error('valkey down'));
+          }
+          queued.push(m.licenseId);
+          return Promise.resolve();
+        },
+        log: { warn: () => undefined, error: (_o, msg) => void errors.push(msg) },
+      },
+      event('invoice.paid', two) as unknown as Stripe.Event,
+    );
+    expect(outcome).toBe('applied');
+    expect(queued).toHaveLength(1);
+    expect(errors).toEqual(['license email not queued: send the license to the customer by hand']);
   });
 
   it('emails each license on an invoice with several license lines', async () => {

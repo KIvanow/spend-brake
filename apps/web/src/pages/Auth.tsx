@@ -1,3 +1,4 @@
+import { LICENSE_ORG } from '@spend-brake/shared/license-org';
 import { type FormEvent, type ReactNode, useEffect, useState } from 'react';
 import { track } from '../analytics.js';
 import { ApiError, type AuthOptions, api, setToken } from '../api.js';
@@ -237,9 +238,15 @@ export function Signup() {
   // The plans list says which plans are licenses; before (or without) it, the one sign-up sells.
   const selfHosted =
     plans?.find((p) => p.id === plan)?.selfHosted ?? SIGNUP_LICENSE_PLANS.includes(plan);
+  // Checked as trimmed, which is what is sent (as under Billing).
+  const installValid = LICENSE_ORG.test(installOrg.trim());
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (paid && !acceptTerms) return;
+    if (selfHosted && !installValid) {
+      setError('The org id on your install is up to 64 letters, digits, - or _.');
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -338,7 +345,7 @@ export function Signup() {
               value={installOrg}
               onChange={(e) => setInstallOrg(e.target.value)}
               placeholder="acme"
-              pattern="[A-Za-z0-9_\-]{1,64}"
+              aria-invalid={installOrg.trim() !== '' && !installValid}
               title="Up to 64 letters, digits, - or _"
               autoComplete="off"
               required

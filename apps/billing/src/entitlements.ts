@@ -10,7 +10,6 @@ export interface PlanChange {
   stripeSubscriptionId?: string | null;
   currentPeriodEnd?: Date | null;
   billingEmail?: string | null;
-  licenseOrg?: string | null;
 }
 
 /** Write an org's plan and the limits that come with it. */
@@ -25,7 +24,6 @@ export async function setPlan(db: Db | Tx, orgId: string, change: PlanChange, no
       : {}),
     ...(change.currentPeriodEnd !== undefined ? { currentPeriodEnd: change.currentPeriodEnd } : {}),
     ...(change.billingEmail !== undefined ? { billingEmail: change.billingEmail } : {}),
-    ...(change.licenseOrg !== undefined ? { licenseOrg: change.licenseOrg } : {}),
     updatedAt: now,
   };
   await db

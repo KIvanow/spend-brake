@@ -31,8 +31,11 @@ const app = await buildServer({
     : {}),
   logger: redactingLoggerOptions(env.LOG_LEVEL),
 });
-if (!env.licenseKey) app.log.warn('no license signing key: Business invoices issue no license');
-else if (!env.releasedLicenseKey) {
+if (!env.licenseKey) {
+  app.log.warn(
+    'no license signing key: Business is not sold, and paid license invoices fail (Stripe retries them for three days) until a key is set',
+  );
+} else if (!env.releasedLicenseKey) {
   app.log.warn(
     'the license signing key is not the released one: released ee builds refuse its licenses (fine for testing)',
   );

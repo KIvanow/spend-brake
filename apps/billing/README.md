@@ -61,7 +61,8 @@ sign-up) and `license_org` (the org id of their install), then a Stripe invoice 
 license, and the org keeps that `license_org` from then on (change it later with
 `PUT /v1/billing/license-org`, not in Stripe). An id already stored on the org (from sign-up or
 Billing) wins over the customer's metadata: check it under Billing before sending the invoice.
-A `license_org` that is not a valid org id issues no license: the webhook answers 500 and logs a
+A first license needs a `license_org` (renewals of a license issued before it keep the id that
+license named). Without one, or with one that is not a valid org id, no license is issued: the webhook answers 500 and logs a
 warning, so Stripe retries the event (a failed payment's hold is still lifted). Fix the id in
 the customer's metadata (hand-made invoices), or store one with `PUT /v1/billing/license-org` as
 the org's owner. When the bad id is in a subscription's metadata, only the stored id fixes it:
