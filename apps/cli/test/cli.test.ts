@@ -311,10 +311,11 @@ describe('brake session', () => {
       BRAKE_URL: 'http://proxy',
     });
     expect(f.spawned[0]!.env.BRAKE_ADMIN_TOKEN).toBeUndefined();
+    // Ended with the parent key: the session's own token stops working once its TTL is up.
     expect(f.calls[1]).toMatchObject({
       url: 'http://api/v1/sessions/key_child',
       method: 'DELETE',
-      headers: { 'x-brake-key': 'sb_live_child' },
+      headers: { 'x-brake-key': 'sb_live_parent' },
     });
     expect(JSON.parse(f.err.at(-1)!)).toEqual({
       brakeSession: {
@@ -337,6 +338,13 @@ describe('brake session', () => {
       budgetMicros: '5000000',
       dayBudgetMicros: '20000000',
     });
+    // Ended with the admin token that minted it.
+    expect(f.calls.at(-1)).toMatchObject({
+      url: 'http://api/v1/sessions/key_child',
+      method: 'DELETE',
+    });
+    expect(f.calls.at(-1)!.headers.authorization).toBe('Bearer sbt_x');
+    expect(f.calls.at(-1)!.headers['x-brake-key']).toBeUndefined();
     const missing = fake({ BRAKE_API_URL: 'http://api', BRAKE_ADMIN_TOKEN: 'sbt_x' }, api);
     expect(await run(['session', '--', 'true'], missing.io)).toBe(EXIT.usage);
   });

@@ -17,7 +17,8 @@ brake session --budget 5 --day-budget 20 --agent claude -- claude
 ```
 
 `brake session` mints a session key and runs the command with `BRAKE_KEY`, `BRAKE_SESSION` and
-`BRAKE_URL` in its environment, then revokes the key when the command exits and prints a JSON
+`BRAKE_URL` in its environment, then revokes the key when the command exits (with the parent
+auth, so this works after `--ttl` too) and prints a JSON
 summary (`{"brakeSession":{"spent":"$0.0120",...}}`) on stderr. The exit code is the command's.
 
 - `--budget` (default $5) caps this session: it is the session key's own cap, so it holds even for

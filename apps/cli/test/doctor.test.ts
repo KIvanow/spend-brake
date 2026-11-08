@@ -263,6 +263,36 @@ describe('brake doctor', () => {
     const maps = await doctor({ BRAKE_KEY: KEY, GOOGLE_MAPS_API_KEY: gemini }, healthy(me()));
     expect(maps.status('provider-keys.env')).toBe('fail');
     expect(maps.status('google-keys.env')).toBe('pass');
+
+    // Any variable named for Maps, in the environment or a .env file, holds a Maps key.
+    for (const name of [
+      'NEXT_PUBLIC_GOOGLE_MAPS_API_KEY',
+      'VITE_GOOGLE_MAPS_API_KEY',
+      'REACT_APP_GOOGLE_MAPS_KEY',
+      'MAPS_API_KEY',
+      'google_maps_key',
+    ]) {
+      const env = await doctor({ BRAKE_KEY: KEY, [name]: gemini }, healthy(me()));
+      expect(env.status('provider-keys.env'), name).toBe('fail');
+      expect(env.status('google-keys.env'), name).toBe('pass');
+      expect(env.out).not.toContain(gemini);
+
+      const cwd = tmp('brake-doctor-maps-');
+      writeFileSync(join(cwd, '.env.local'), `${name}=${gemini}\n`);
+      const file = await doctor({ BRAKE_KEY: KEY }, healthy(me()), { cwd });
+      expect(file.status('files.cwd'), name).toBe('fail');
+      expect(file.out).toContain(`${name} (Google Maps key)`);
+      expect(file.out).not.toContain(gemini);
+    }
+
+    // Generic Google key names stay a warning, in a .env file too.
+    for (const name of ['GOOGLE_API_KEY', 'GEMINI_API_KEY']) {
+      const cwd = tmp('brake-doctor-gemini-');
+      writeFileSync(join(cwd, '.env'), `${name}=${gemini}\n`);
+      const file = await doctor({ BRAKE_KEY: KEY }, healthy(me()), { cwd });
+      expect(file.status('files.cwd'), name).toBe('warn');
+      expect(file.out).toContain(`${name} (Google API key)`);
+    }
   });
 
   it('names the providers when every one of them is killed', async () => {
@@ -313,6 +343,17 @@ describe('brake doctor', () => {
     expect(d.status('enforcement.exhausted-budget')).toBe('unknown');
     expect(d.report!.ok).toBe(false);
     expect(d.code).toBe(EXIT.error);
+  });
+
+  it('still reports --prove as not checked when BRAKE_KEY is not set', async () => {
+    const d = await doctor({}, healthy(me()), { args: ['--prove'] });
+    const check = d.report!.checks.find((c) => c.id === 'enforcement.exhausted-budget');
+    expect(check).toMatchObject({ status: 'unknown', detail: 'BRAKE_KEY is not set.' });
+    expect(d.f.calls.some((c) => c.url.endsWith('/v1/sessions'))).toBe(false);
+    expect(d.code).toBe(EXIT.error);
+    // Without --prove it is not reported at all.
+    const plain = await doctor({}, healthy(me()));
+    expect(plain.status('enforcement.exhausted-budget')).toBeUndefined();
   });
 
   it('does not take a web page in front of the API for readiness', async () => {
@@ -515,6 +556,51 @@ describe('brake doctor', () => {
         const d = await probe(answer);
         expect(d.status('enforcement.exhausted-budget'), JSON.stringify(answer)).toBe('unknown');
         expect(d.code).toBe(EXIT.error);
+      }
+    });
+
+    it('does not fail an answer from something in front of the proxy, unless the session spent', async () => {
+      const probe = (
+        answer: { status: number; body: unknown; headers?: Record<string, string> },
+        end = { spentMicros: 0, heldMicros: 0 },
+      ) =>
+        doctor(
+          { BRAKE_KEY: KEY },
+          healthy(minting, (c) => {
+            if (c.url.endsWith('/v1/sessions')) return session;
+            if (c.method === 'DELETE') return { status: 200, body: end };
+            return answer;
+          }),
+          { args: ['--prove'] },
+        );
+      // A CDN, WAF or load balancer page, or another server: no proxy cost header.
+      for (const answer of [
+        { status: 403, body: '<html><body>Access denied | Cloudflare</body></html>' },
+        { status: 429, body: '<html><body>Too many requests</body></html>' },
+        { status: 502, body: '<html><body>502 Bad Gateway</body></html>' },
+        { status: 200, body: '<!doctype html><html></html>' },
+        { status: 402, body: { error: 'budget_exceeded' } },
+      ]) {
+        const d = await probe(answer);
+        const check = d.report!.checks.find((c) => c.id === 'enforcement.exhausted-budget')!;
+        expect(check.status, JSON.stringify(answer)).toBe('unknown');
+        expect(check.detail).toMatch(/in front of the proxy, not the proxy/);
+        expect(d.code).toBe(EXIT.error);
+      }
+      // The provider's own error, passed on by the proxy with its cost header, still fails.
+      const forwarded = await probe({
+        status: 401,
+        body: { detail: { error: 'Unauthorized' } },
+        headers: { 'x-brake-cost-micros': '0' },
+      });
+      expect(forwarded.status('enforcement.exhausted-budget')).toBe('fail');
+      // Money spent or held on the $0 session proves forwarding, whoever answered.
+      for (const end of [
+        { spentMicros: 5000, heldMicros: 0 },
+        { spentMicros: 0, heldMicros: 5000 },
+      ]) {
+        const d = await probe({ status: 502, body: '<html>502</html>' }, end);
+        expect(d.status('enforcement.exhausted-budget'), JSON.stringify(end)).toBe('fail');
       }
     });
 

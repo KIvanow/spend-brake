@@ -120,14 +120,15 @@ export function sessionCommand(
         });
         for (const [s, f] of forward) signals.off(s, f);
 
-        // Revoke with the session key itself; report what the session spent.
+        // Revoke with the parent auth that minted it: the session's own token stops working once
+        // its TTL has passed. Report what the session spent.
         let summary: Record<string, unknown> = {
           session: minted.sessionId,
           keyId: minted.keyId,
           exitCode: code,
         };
         try {
-          const e = await endSession(io, minted);
+          const e = await endSession(io, minted, auth);
           summary = {
             ...summary,
             spentMicros: e.spentMicros,

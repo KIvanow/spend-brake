@@ -59,8 +59,9 @@ const PROVIDER_KEY_SHAPES: [string, RegExp][] = [
   ['Mapbox public', /^pk\.eyJ[0-9A-Za-z._-]+$/],
 ];
 /**
- * A Google API key may be for Gemini, not Maps: only a warning, unless the variable names Maps.
- * One that may call Maps reaches it around the proxy.
+ * A Google API key may be for Gemini, not Maps: only a warning, unless the variable's name has
+ * MAPS in it (`NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`, `MAPS_API_KEY`). One that may call Maps reaches
+ * it around the proxy.
  */
 const GOOGLE_KEY = /^AIza[0-9A-Za-z_-]{35}$/;
 const GOOGLE_KEY_VARS = ['GOOGLE_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY'];
@@ -83,6 +84,9 @@ function classify(name: string, value: string, key: string | undefined, strict: 
   }
   for (const [label, re] of PROVIDER_KEY_SHAPES) {
     if (re.test(v)) return { name, kind: 'provider', what: `${label} key` } as Found;
+  }
+  if (GOOGLE_KEY.test(v) && /maps/i.test(name)) {
+    return { name, kind: 'provider', what: 'Google Maps key' } as Found;
   }
   if (GOOGLE_KEY.test(v) && !PROVIDER_KEY_VARS.includes(name)) {
     return { name, kind: 'google', what: 'Google API key' } as Found;
@@ -440,8 +444,9 @@ async function ready(
 /**
  * Proxy refusals sent before the caps are checked: the probe proves nothing either way. An
  * internal error may come before or after forwarding; the session's spend, read back when it is
- * ended, tells. Any other answer (the provider's own, upstream_timeout, upstream_unavailable)
- * means the $0 cap let the request through.
+ * ended, tells. Any other answer from the proxy (the provider's own, upstream_timeout,
+ * upstream_unavailable) means the $0 cap let the request through. An answer without the proxy's
+ * cost header did not come from the proxy and proves nothing.
  */
 const REFUSED_BEFORE_CAPS = [
   'invalid_key',
@@ -622,6 +627,16 @@ async function prove(io: Io, me: Me | null): Promise<Check> {
           detail: `The proxy charged ${r.cost} for a priced ${p} request on a $0 session (HTTP ${r.status}).`,
           fix: 'Report this: caps are not being enforced on this install.',
         };
+      } else if (r.costMicros === null) {
+        // The proxy puts its cost header on every answer, refusals and forwarded calls alike: an
+        // answer without it is a CDN, WAF or load balancer page, or another server at BRAKE_URL.
+        result = {
+          id,
+          status: 'unknown',
+          title,
+          detail: `The ${p} probe was answered by something in front of the proxy, not the proxy (HTTP ${r.status}, no x-brake-cost-micros header).`,
+          fix: 'Check that BRAKE_URL points at the Spend Brake proxy, and that what sits in front of it lets the request through.',
+        };
       } else if (r.status === 402 && code === 'budget_exceeded') {
         result = {
           id,
@@ -731,7 +746,17 @@ export async function remoteChecks(
       detail: api.detail,
     },
   );
-  if (!cfg.key) return { checks, me: null };
+  if (!cfg.key) {
+    if (opts.prove) {
+      checks.push({
+        id: 'enforcement.exhausted-budget',
+        status: 'unknown',
+        title: 'An exhausted budget stops forwarding',
+        detail: 'BRAKE_KEY is not set.',
+      });
+    }
+    return { checks, me: null };
+  }
   // Whatever stopped doctor from reading the key, the checks it then skipped are reported as
   // not checked, never left out: a report without them would read as passing.
   const unchecked = async (): Promise<{ checks: Check[]; me: null }> => {

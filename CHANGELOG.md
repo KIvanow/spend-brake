@@ -52,6 +52,16 @@ images for linux/amd64 and linux/arm64
   JSON, and a config that is JSON but not an object (`null`) no longer crashes them.
 - `DELETE /v1/sessions/{keyId}` reads the session's spend in the time zone the proxy charges in
   (as `GET /v1/me` does).
+- `brake doctor --prove` reports a probe answered without the proxy's `x-brake-cost-micros`
+  header (a CDN, WAF or load balancer page, or another server at `BRAKE_URL`) as not checked,
+  not as forwarded; money the probe session spent or holds still fails it. Without `BRAKE_KEY`
+  it reports `--prove` as not checked instead of leaving it out. A Google API key in any
+  variable whose name has `MAPS` in it (`NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`, `MAPS_API_KEY`) fails
+  as a Maps key, in the environment and in `.env` files.
+- `brake session` ends the session with the parent key or admin token that minted it, not the
+  session's own token, which the API refuses once the session's TTL has passed.
+- A `$0` probe session records no agent day cap, so it makes no `$0` day-cap template for the
+  parent's agent.
 
 ## [0.2.1] - 2026-11-02
 

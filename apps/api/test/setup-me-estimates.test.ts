@@ -426,6 +426,40 @@ describe('session keys follow their parent', () => {
     }
   });
 
+  it("make no agent day-cap template for a probe, so the parent's agent gets no $0 cap", async () => {
+    const org = await newOrg(env);
+    const call = (url: string, payload: object) =>
+      env.app.inject({ method: 'POST', url, headers: bearer(org.admin), payload });
+    const cred = (
+      await call('/v1/providers/credentials', { provider: 'acme', name: 'c', secret: 's' })
+    ).json<{ id: string }>().id;
+    const parentKeyId = (
+      await call('/v1/keys', { name: 'p', credentials: { acme: cred }, agentId: 'bot' })
+    ).json<{ id: string }>().id;
+    const probe = (
+      await call('/v1/sessions', {
+        parentKeyId,
+        budgetMicros: '0',
+        dayBudgetMicros: '0',
+        ttlSec: 60,
+        probe: true,
+      })
+    ).json<{ keyId: string; token: string; agentId: string }>();
+    expect(probe.agentId).toBe('bot');
+    const row = await env.db.query.virtualKeys.findFirst({
+      where: (k, { eq: e }) => e(k.id, probe.keyId),
+    });
+    expect((row!.config as { agentDayCapMicros?: string | null }).agentDayCapMicros).toBeNull();
+    const me = (
+      await env.app.inject({ url: '/v1/me', headers: { 'x-brake-key': probe.token } })
+    ).json<{ scopes: { scope: string; window: string; hard: number | null }[] }>();
+    for (const s of me.scopes.filter((x) => x.scope === 'agent:bot')) expect(s.hard).toBeNull();
+    // The key's own $0 cap still refuses everything.
+    expect(
+      me.scopes.find((s) => s.scope === `key:${probe.keyId}` && s.window.startsWith('m:')),
+    ).toMatchObject({ hard: 0 });
+  });
+
   it("stay their parent key's agent, so its agent caps keep applying", async () => {
     const org = await newOrg(env);
     const call = (url: string, payload: object) =>

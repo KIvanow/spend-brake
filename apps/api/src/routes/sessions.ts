@@ -239,7 +239,9 @@ export function sessionRoutes(
       agentId,
       sessionId,
       sessionCapMicros: body.budgetMicros.toString(),
-      agentDayCapMicros: body.dayBudgetMicros.toString(),
+      // A probe makes no agent day-cap template: its $0 key cap refuses everything anyway, and a
+      // template would set a $0 day cap on the parent's agent.
+      agentDayCapMicros: probe ? null : body.dayBudgetMicros.toString(),
       parentKeyId: parent.id,
       canMintSessions: false,
       failOpenMicros: null,

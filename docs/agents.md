@@ -28,8 +28,9 @@ Claude Code (or anything else after `--`) runs with a session key in `BRAKE_KEY`
 - counts against the agent's $20 per day (`--day-budget`, default $20) across all its sessions.
   That cap is created the first time the agent spends, and an admin can change it later;
 - also counts against the parent key's caps, and stops when the parent key is killed;
-- is revoked when the command exits, and expires after `--ttl` (default `12h`) even if `brake`
-  itself is killed.
+- is revoked when the command exits (with the parent key or admin token that minted it, so this
+  works after `--ttl` too), and expires after `--ttl` (default `12h`) even if `brake` itself is
+  killed.
 
 `--agent` names the agent (default: the parent key's agent, or `cli`; a key that has an agent
 mints sessions for that agent only, so its agent caps always apply). When the command exits,
@@ -108,9 +109,10 @@ needs a cap on the key itself, since each session it mints brings its own budget
 would refuse, unpriced routes charged $0, an admin token the agent can read (in the environment
 or the saved config, even one brake cannot parse), and raw provider keys (`TAVILY_API_KEY`, `GOOGLE_MAPS_KEY`, …) in the
 environment or in `./.env*` files, which let the agent call the provider directly; placeholders
-such as `your_key_here` are skipped. It warns on a generic Google API key (`GOOGLE_API_KEY`,
-`AIza…`): it may be for Gemini, but one that can also call Maps goes around the proxy, so
-restrict it in Google Cloud. It also warns on a second virtual key, plain HTTP to a remote host,
+such as `your_key_here` are skipped. A Google API key (`AIza…`) in a variable whose name has
+`MAPS` in it (`NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`, `MAPS_API_KEY`, …) is a Maps key and fails. It
+warns on a generic Google API key (`GOOGLE_API_KEY`, `GEMINI_API_KEY`): it may be for Gemini,
+but one that can also call Maps goes around the proxy, so restrict it in Google Cloud. It also warns on a second virtual key, plain HTTP to a remote host,
 some of the key's providers killed, fail-open keys, keys that never expire, keys with many
 providers, and providers whose unpriced routes are forwarded at a default price. Secrets are
 named, never printed.
@@ -121,7 +123,11 @@ then ended with the parent key, having spent nothing, and doctor reads back what
 holds: if it cannot, the probe does not pass. Any other answer from past the caps fails it: the
 provider's own error (a 401 or 400), or the proxy's `upstream_timeout` or
 `upstream_unavailable`, means the $0 cap let the request through. A refusal before the caps
-(`invalid_key`, `loop_detected`, `budget_unavailable`, …) proves nothing either way. Doctor asks for a probe (`probe: true` on `POST /v1/sessions`, which
+(`invalid_key`, `loop_detected`, `budget_unavailable`, …) proves nothing either way, nor does
+an answer without the proxy's `x-brake-cost-micros` header, which came from something in front
+of the proxy (a CDN, WAF or load balancer page) or another server at `BRAKE_URL`; money the
+probe session spent or holds fails it all the same. Without `BRAKE_KEY`, `--prove` is reported
+as not checked. Doctor asks for a probe (`probe: true` on `POST /v1/sessions`, which
 needs a $0 budget and a lifetime of up to five minutes; anything else is refused with 400). A
 probe's caps, lifetime and fail-open can never change, so it cannot spend, and it does not count
 toward a plan's agent sessions. Any other $0 session is an ordinary session, counted like the
