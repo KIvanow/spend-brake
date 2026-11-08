@@ -68,11 +68,24 @@ export function configPath(io: Io): string | null {
   return base ? join(base, 'brake', 'config.json') : null;
 }
 
+/** A saved config's text as a config: only a JSON object is one (`null` or `[]` is not). */
+function parseConfig(text: string): SavedConfig | null {
+  try {
+    const v: unknown = JSON.parse(text);
+    return typeof v === 'object' && v !== null && !Array.isArray(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+/** An admin token anywhere in a text, the way `brake init` writes one (sbt_ and 32 base62). */
+const ADMIN_TOKEN_IN_TEXT = /(?<![0-9A-Za-z_])sbt_[0-9A-Za-z]{32}(?![0-9A-Za-z])/;
+
 export function readSavedConfig(io: Io): SavedConfig {
   const path = configPath(io);
   if (!path || !existsSync(path)) return {};
   try {
-    return JSON.parse(readFileSync(path, 'utf8')) as SavedConfig;
+    return parseConfig(readFileSync(path, 'utf8')) ?? {};
   } catch {
     return {};
   }
@@ -130,13 +143,19 @@ export function savedConfigs(io: Io): {
   if (home) paths.add(join(home, '.config', 'brake', 'config.json'));
   const found: { path: string; cfg: SavedConfig }[] = [];
   for (const path of paths) {
+    let text: string;
     try {
-      if (existsSync(path)) {
-        found.push({ path, cfg: JSON.parse(readFileSync(path, 'utf8')) as SavedConfig });
-      }
+      if (!existsSync(path)) continue;
+      text = readFileSync(path, 'utf8');
     } catch {
-      // unreadable or not JSON: brake could not use it either
+      // unreadable: by the agent too
+      continue;
     }
+    // A file brake cannot parse is still text the agent can read: a token in it is found too.
+    const cfg = parseConfig(text);
+    const token = cfg?.adminToken ? undefined : ADMIN_TOKEN_IN_TEXT.exec(text)?.[0];
+    if (cfg || token)
+      found.push({ path, cfg: { ...cfg, ...(token ? { adminToken: token } : {}) } });
   }
   return { looked: [...paths], found };
 }

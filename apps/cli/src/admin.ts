@@ -104,14 +104,21 @@ export const mintSession = (
   },
 ) => apiCall<Minted>(io, 'POST', '/v1/sessions', body, auth);
 
-/** Revoke a session key with the key itself; returns what the session spent. */
-export const endSession = (io: Io, s: { keyId: string; token: string }) =>
+/**
+ * Revoke a session key, with the key itself unless `auth` names another (its parent key, or an
+ * admin token); returns what the session spent.
+ */
+export const endSession = (
+  io: Io,
+  s: { keyId: string; token: string },
+  auth: Record<string, string> = { 'x-brake-key': s.token },
+) =>
   apiCall<{ spentMicros: number; heldMicros: number }>(
     io,
     'DELETE',
     `/v1/sessions/${s.keyId}`,
     undefined,
-    { 'x-brake-key': s.token },
+    auth,
   );
 
 const cell = (v: unknown): string => {

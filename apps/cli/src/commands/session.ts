@@ -79,9 +79,16 @@ export function sessionCommand(
         }
 
         // The default path too: another XDG_CONFIG_HOME hides it from brake, not from the agent.
-        for (const { path } of savedConfigs(io).found.filter((c) => c.cfg.adminToken)) {
+        // The session key is minted by now: nothing here may throw before it is ended.
+        try {
+          for (const { path } of savedConfigs(io).found.filter((c) => c.cfg.adminToken)) {
+            io.stderr(
+              `brake: warning: ${path} holds an admin token the command can read. Run agents as another OS user so they cannot lift their own caps.\n`,
+            );
+          }
+        } catch (err) {
           io.stderr(
-            `brake: warning: ${path} holds an admin token the command can read. Run agents as another OS user so they cannot lift their own caps.\n`,
+            `brake: warning: could not look for a saved admin token the command can read: ${(err as Error).message}\n`,
           );
         }
 

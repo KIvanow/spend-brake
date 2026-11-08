@@ -106,7 +106,7 @@ no cap: the client names the session, so it can start a fresh one; a key that ma
 needs a cap on the key itself, since each session it mints brings its own budget), a
 `BRAKE_SESSION` the proxy
 would refuse, unpriced routes charged $0, an admin token the agent can read (in the environment
-or the saved config), and raw provider keys (`TAVILY_API_KEY`, `GOOGLE_MAPS_KEY`, …) in the
+or the saved config, even one brake cannot parse), and raw provider keys (`TAVILY_API_KEY`, `GOOGLE_MAPS_KEY`, …) in the
 environment or in `./.env*` files, which let the agent call the provider directly; placeholders
 such as `your_key_here` are skipped. It warns on a generic Google API key (`GOOGLE_API_KEY`,
 `AIza…`): it may be for Gemini, but one that can also call Maps goes around the proxy, so
@@ -117,8 +117,11 @@ named, never printed.
 
 `--prove` mints a $0, 60-second session from the key and sends one priced request with it. The
 proxy must refuse it with `402 budget_exceeded` before it contacts the provider; the session is
-then ended, having spent nothing, and doctor reads back what it spent and holds: if it cannot,
-the probe does not pass. Doctor asks for a probe (`probe: true` on `POST /v1/sessions`, which
+then ended with the parent key, having spent nothing, and doctor reads back what it spent and
+holds: if it cannot, the probe does not pass. Any other answer from past the caps fails it: the
+provider's own error (a 401 or 400), or the proxy's `upstream_timeout` or
+`upstream_unavailable`, means the $0 cap let the request through. A refusal before the caps
+(`invalid_key`, `loop_detected`, `budget_unavailable`, …) proves nothing either way. Doctor asks for a probe (`probe: true` on `POST /v1/sessions`, which
 needs a $0 budget and a lifetime of up to five minutes; anything else is refused with 400). A
 probe's caps, lifetime and fail-open can never change, so it cannot spend, and it does not count
 toward a plan's agent sessions. Any other $0 session is an ordinary session, counted like the
@@ -129,7 +132,8 @@ doctor try the next. The repository runs the same probe against a counting mock 
 checks it receives no request (`apps/cli/test/e2e.test.ts`).
 
 Doctor exits 1 when a check fails, and also when it could not read the key's caps, its policy,
-the working directory or a `.env` file (even one it skipped for size), when it found no
+the working directory or a `.env` file (even one it skipped for size, which may also hold
+another virtual key), when it found no
 home directory to look for a saved admin token in, when the
 workload can read another virtual key (whose caps it did not check) or, with `--prove`, when it
 could not complete the probe: it exits 0 only for what it actually saw. A session key, or a key

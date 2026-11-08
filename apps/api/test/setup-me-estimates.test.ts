@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
-import { Registry } from '@spend-brake/budget';
-import { usageEvents } from '@spend-brake/db';
+import { BudgetEngine, Registry } from '@spend-brake/budget';
+import { eq, orgs, usageEvents } from '@spend-brake/db';
 import { LocalKeyWrapper } from '@spend-brake/shared';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -453,6 +453,60 @@ describe('session keys follow their parent', () => {
     expect(other.json()).toMatchObject({ message: expect.stringContaining('agent x') as string });
     expect((await mint('x')).json()).toMatchObject({ agentId: 'x' });
     expect((await mint()).json()).toMatchObject({ agentId: 'x' });
+  });
+
+  it("are ended by their parent key, reading spend in the proxy's month window", async () => {
+    const org = await newOrg(env);
+    // The proxy charges in the time zone of the org record it reads (UTC here); Postgres says
+    // Tokyo, where it is already February.
+    await env.db.update(orgs).set({ timeZone: 'Asia/Tokyo' }).where(eq(orgs.id, org.id));
+    const now = new Date('2026-01-31T23:30:00Z');
+    const app = await buildApi({
+      db: env.db,
+      valkey: env.valkey,
+      wrapper: env.wrapper,
+      rateLimitPerMinute: 100_000,
+      now: () => now,
+    });
+    const cred = (
+      await app.inject({
+        method: 'POST',
+        url: '/v1/providers/credentials',
+        headers: bearer(org.admin),
+        payload: { provider: 'acme', name: 'c', secret: 's' },
+      })
+    ).json<{ id: string }>().id;
+    const parent = (
+      await app.inject({
+        method: 'POST',
+        url: '/v1/keys',
+        headers: bearer(org.admin),
+        payload: { name: 'p', credentials: { acme: cred }, canMintSessions: true },
+      })
+    ).json<{ token: string }>();
+    const child = (
+      await app.inject({
+        method: 'POST',
+        url: '/v1/sessions',
+        headers: { 'x-brake-key': parent.token },
+        payload: { budgetMicros: '5000', ttlSec: 60 },
+      })
+    ).json<{ keyId: string }>();
+    await new BudgetEngine(env.valkey).recordSpend({
+      orgId: org.id,
+      amount: 1234n,
+      scopes: [{ kind: 'key', id: child.keyId }],
+      timeZone: 'UTC',
+      at: now,
+    });
+    const end = await app.inject({
+      method: 'DELETE',
+      url: `/v1/sessions/${child.keyId}`,
+      headers: { 'x-brake-key': parent.token },
+    });
+    expect(end.statusCode).toBe(200);
+    expect(end.json()).toMatchObject({ keyId: child.keyId, spentMicros: 1234, heldMicros: 0 });
+    await app.close();
   });
 
   it('are updated with the parent and revoked with it', async () => {

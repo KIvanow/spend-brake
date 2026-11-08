@@ -12,7 +12,6 @@ import { atLeast } from '../auth.js';
 import { type Ctx, audit, id, micros, n } from '../common.js';
 import { newId, random62 } from '../ids.js';
 import { ApiError, type Router, errorSchema, notFound } from '../route.js';
-import { orgTimeZone } from './budget.js';
 import { requireCapacity } from '../entitlements.js';
 
 const createBody = z.object({
@@ -313,7 +312,9 @@ export function sessionRoutes(
         .set({ status: 'revoked', revokedAt: ctx.now(), config: revoked })
         .where(eq(virtualKeys.id, row.id));
     }
-    const tz = await orgTimeZone(ctx, c.auth.orgId);
+    // The org record the proxy reads holds its time zone, so the window is the one the proxy
+    // charged in (UTC without one), as on /v1/me.
+    const tz = (await ctx.registry.getOrg(c.auth.orgId))?.timeZone ?? 'UTC';
     const month = windowsFor(ctx.now(), tz)[1].id;
     const [status] = (
       await ctx.engine.status(c.auth.orgId, [{ kind: 'key', id: row.id }], tz, ctx.now())

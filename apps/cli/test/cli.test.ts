@@ -253,6 +253,25 @@ describe('brake session', () => {
     const elsewhere = fake({ ...ENV, HOME: home, XDG_CONFIG_HOME: join(home, 'other') }, api);
     expect(await run(['session', '--', 'true'], elsewhere.io)).toBe(0);
     expect(elsewhere.err[0]).toContain(join(home, '.config', 'brake', 'config.json'));
+
+    // Not JSON brake can parse is still text the command can read.
+    writeFileSync(
+      join(home, '.config', 'brake', 'config.json'),
+      `{"adminToken": "sbt_${'a1B2'.repeat(8)}",}\n`,
+    );
+    const broken = fake({ ...ENV, HOME: home }, api);
+    expect(await run(['session', '--', 'true'], broken.io)).toBe(0);
+    expect(broken.err[0]).toContain('holds an admin token the command can read');
+    expect(broken.err.join('')).not.toContain('a1B2');
+
+    // A config that is JSON but not an object warns of nothing, and the session still ends.
+    for (const text of ['null', '[]', '42']) {
+      writeFileSync(join(home, '.config', 'brake', 'config.json'), text);
+      const odd = fake({ ...ENV, HOME: home, XDG_CONFIG_HOME: join(home, 'other') }, api);
+      expect(await run(['session', '--', 'true'], odd.io), text).toBe(0);
+      expect(odd.err.join(''), text).not.toContain('admin token');
+      expect(odd.calls.at(-1)?.method, text).toBe('DELETE');
+    }
   });
 
   it('mints a key, runs the command with it, revokes it and passes the exit code through', async () => {

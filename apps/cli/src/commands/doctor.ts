@@ -285,11 +285,22 @@ export function localChecks(io: Io, cwd: string): Check[] {
           detail: `${virtual.join(', ')}. Doctor checks the caps of BRAKE_KEY only; the workload may use this one instead.`,
           fix: 'Give the workload one virtual key.',
         }
-      : {
-          id: 'virtual-keys.files',
-          status: 'pass',
-          title: 'No other virtual keys in .env files in the working directory',
-        },
+      : !scan.listed || scan.skipped.length
+        ? {
+            // A file doctor did not read may hold one: no vouching for it.
+            id: 'virtual-keys.files',
+            status: 'unknown',
+            title:
+              'Could not check every .env file in the working directory for another virtual key',
+            detail: !scan.listed
+              ? `${cwd} could not be read.`
+              : `Not read (over ${MAX_DOTENV_BYTES / 1_000_000} MB): ${scan.skipped.join(', ')}.`,
+          }
+        : {
+            id: 'virtual-keys.files',
+            status: 'pass',
+            title: 'No other virtual keys in .env files in the working directory',
+          },
   );
   const hits = files.filter((f) => f.found.length > 0);
   const severe = hits.some((f) => f.found.some((x) => x.kind === 'admin' || x.kind === 'provider'));
@@ -359,10 +370,11 @@ export function localChecks(io: Io, cwd: string): Check[] {
 const TIMEOUT_MS = 10_000;
 
 /**
- * Readiness at the first of `paths` the server knows (a 404, or a 429 from the rate-limited
- * /v1/readyz, tries the next). Only a JSON answer with `ok: true` counts: a web server in front,
- * such as the dashboard's, answers any path with its own page.
- * `unchecked` is set when the service answered but has no readiness report doctor can reach.
+ * Readiness at the first of `paths` the server knows (a 404 tries the next). Only a JSON answer
+ * with `ok: true` counts: a web server in front, such as the dashboard's, answers any path with
+ * its own page.
+ * `unchecked` is set when the service answered but has no readiness report doctor can reach, or
+ * the API's rate limit kept it from answering one.
  */
 async function ready(
   io: Io,
@@ -373,7 +385,7 @@ async function ready(
   // The API's own JSON 404 on /v1/readyz: an API before 0.3.0, which only the dashboard's /v1
   // forwarding may reach, so its /readyz may be the dashboard's page.
   let older = '';
-  for (const [i, path] of paths.entries()) {
+  for (const path of paths) {
     let res: Response;
     let body: string;
     try {
@@ -394,8 +406,15 @@ async function ready(
       if (isJson && path === '/v1/readyz') older = `${base}${path}`;
       continue;
     }
-    // Rate limited: says nothing about readiness, so ask the next path if there is one.
-    if (res.status === 429 && isJson && i < paths.length - 1) continue;
+    // The API's own rate limit on /v1/readyz: the API answered, but not with its readiness. Its
+    // /readyz may be the dashboard's page, so it is not asked instead.
+    if (res.status === 429 && isJson && path === '/v1/readyz') {
+      return {
+        ok: true,
+        unchecked: true,
+        detail: `${base}${path} answered HTTP 429: the API is reachable but rate limited, so its readiness was not checked.`,
+      };
+    }
     if (!isJson) {
       if (older) break;
       return {
@@ -417,6 +436,20 @@ async function ready(
   }
   return { ok: false, detail };
 }
+
+/**
+ * Proxy refusals sent before the caps are checked: the probe proves nothing either way. An
+ * internal error may come before or after forwarding; the session's spend, read back when it is
+ * ended, tells. Any other answer (the provider's own, upstream_timeout, upstream_unavailable)
+ * means the $0 cap let the request through.
+ */
+const REFUSED_BEFORE_CAPS = [
+  'invalid_key',
+  'invalid_request',
+  'loop_detected',
+  'budget_unavailable',
+  'internal_error',
+];
 
 /** A cheap priced request per provider, refused by a $0 cap before the provider is called. */
 const PROBES: Record<string, ProxyRequest> = {
@@ -564,16 +597,20 @@ async function prove(io: Io, me: Me | null): Promise<Check> {
         };
         break;
       }
-      const e = (r.data ?? {}) as { error?: string };
+      const e = (typeof r.data === 'object' && r.data !== null ? r.data : {}) as {
+        error?: unknown;
+      };
+      // A provider's own error body may hold anything under `error`.
+      const code = typeof e.error === 'string' ? e.error : '';
       const charged = r.costMicros !== null && r.costMicros > 0;
       // Not this key's provider, not one this proxy serves or prices, or switched off since
       // /v1/me: refused before the caps, so try the next.
       if (
         !charged &&
-        ((r.status === 403 && e.error === 'sku_not_allowed') ||
-          (r.status === 404 && e.error === 'unknown_route') ||
-          e.error === 'killed' ||
-          e.error === 'unpriced_route')
+        ((r.status === 403 && code === 'sku_not_allowed') ||
+          (r.status === 404 && code === 'unknown_route') ||
+          code === 'killed' ||
+          code === 'unpriced_route')
       ) {
         continue;
       }
@@ -585,7 +622,7 @@ async function prove(io: Io, me: Me | null): Promise<Check> {
           detail: `The proxy charged ${r.cost} for a priced ${p} request on a $0 session (HTTP ${r.status}).`,
           fix: 'Report this: caps are not being enforced on this install.',
         };
-      } else if (r.status === 402 && e.error === 'budget_exceeded') {
+      } else if (r.status === 402 && code === 'budget_exceeded') {
         result = {
           id,
           status: 'pass',
@@ -600,13 +637,22 @@ async function prove(io: Io, me: Me | null): Promise<Check> {
           detail: `The proxy FORWARDED a priced ${p} request on a $0 session (HTTP ${r.status}, cost ${r.cost ?? 'unknown'}).`,
           fix: 'Report this: caps are not being enforced on this install.',
         };
-      } else {
+      } else if (REFUSED_BEFORE_CAPS.includes(code)) {
         result = {
           id,
           status: 'unknown',
           title,
-          detail:
-            `The ${p} probe got HTTP ${r.status} ${e.error ?? ''}, not a budget refusal.`.trim(),
+          detail: `The ${p} probe was refused with HTTP ${r.status} ${code} before its caps were checked.`,
+        };
+      } else {
+        // The provider answered (an error of its own), or the proxy forwarded and the provider
+        // did not answer: either way the $0 cap did not stop it.
+        result = {
+          id,
+          status: 'fail',
+          title,
+          detail: `The proxy FORWARDED a priced ${p} request on a $0 session: it answered HTTP ${r.status}${code ? ` ${code}` : ''}, not a budget refusal (cost ${r.cost ?? 'unknown'}).`,
+          fix: 'Report this: caps are not being enforced on this install.',
         };
       }
       break;
@@ -615,7 +661,8 @@ async function prove(io: Io, me: Me | null): Promise<Check> {
     let end: { spentMicros?: number; heldMicros?: number } = {};
     let endError = '';
     try {
-      end = await endSession(io, minted);
+      // With the parent key: the probe's own token stops working when its 60 s are up.
+      end = await endSession(io, minted, { 'x-brake-key': cfg.key! });
     } catch (err) {
       // the session expires in 60 s anyway, but its spend is then unread
       endError = (err as Error).message;
@@ -958,11 +1005,14 @@ export function doctorCommand(program: Command, io: Io, done: (code: number) => 
       // Doctor vouches only for what it saw: the caps on the key, and the probe when asked for.
       const passed = (id: string) => checks.some((c) => c.id === id && c.status === 'pass');
       // Another readable virtual key has caps doctor did not check.
-      const otherKey = checks.some((c) => c.id.startsWith('virtual-keys.') && c.status !== 'pass');
-      // A .env file too big to read, or a server that does not report the key's policy: what
-      // doctor did not see may be what lets the workload spend.
+      const otherKey = checks.some((c) => c.id.startsWith('virtual-keys.') && c.status === 'warn');
+      // A .env file too big to read, a saved config doctor could not look for, or a server that
+      // does not report the key's policy: what doctor did not see may be what lets the workload
+      // spend.
       const unread = checks.some(
-        (c) => (c.id === 'files.cwd' || c.id === 'key.policy') && c.status === 'unknown',
+        (c) =>
+          ['files.cwd', 'virtual-keys.files', 'admin-token.config', 'key.policy'].includes(c.id) &&
+          c.status === 'unknown',
       );
       const ok =
         summary.fail === 0 &&
@@ -992,7 +1042,7 @@ export function doctorCommand(program: Command, io: Io, done: (code: number) => 
               ? 'Fix the failed checks above; until then doctor cannot vouch for this workload.'
               : otherKey
                 ? 'Doctor checked the caps of BRAKE_KEY only, and the workload can read another virtual key, so it cannot vouch for this workload.'
-                : 'Doctor could not check all of the above (caps, policy, .env files or the --prove probe), so it cannot vouch for this workload.',
+                : 'Doctor could not check all of the above (caps, policy, .env files, the saved config or the --prove probe), so it cannot vouch for this workload.',
         );
         io.stdout(`${lines.join('\n')}\n`);
       }

@@ -134,7 +134,9 @@ when a check fails, when it could not read the key's caps or policy, the working
 `.env` file, when it found no home directory to look for a saved admin token in, when the
 workload can read another virtual key, or when `--prove` could not complete the probe or read
 back what the probe session spent. A service is ready only when its readiness report says
-`ok: true`; a rate-limited `/v1/readyz` falls back to `/readyz`.
+`ok: true`; when the API's own rate limit answers `/v1/readyz`, the API counts as reachable with a
+warning (its readiness not checked) and the key is still checked. A saved config brake cannot
+parse is still searched for an admin token.
 
 ```sh
 brake doctor --pretty

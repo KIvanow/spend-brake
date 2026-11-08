@@ -50,7 +50,15 @@ images for linux/amd64 and linux/arm64
 - `brake doctor` does not pass `--prove` when it cannot read back what the probe session spent,
   nor the saved admin token check when it found no home directory to look in (it falls back to
   the OS home when `HOME` is unset). It takes a service for ready only when its readiness report
-  says `ok: true`, and a rate-limited `/v1/readyz` falls back to `/readyz`.
+  says `ok: true`; when the API's rate limit answers `/v1/readyz`, the API counts as reachable
+  (with a warning) and the key is still checked. `--prove` fails a probe the proxy forwarded,
+  whatever the provider or the proxy then answered (`401`, `400`, `upstream_timeout`,
+  `upstream_unavailable`), and ends the probe session with the parent key. It does not pass the
+  other-virtual-key check for `.env` files it could not list or read.
+- `brake doctor` and `brake session` find an admin token in a saved config that is not valid
+  JSON, and a config that is JSON but not an object (`null`) no longer crashes them.
+- `DELETE /v1/sessions/{keyId}` reads the session's spend in the time zone the proxy charges in
+  (as `GET /v1/me` does).
 
 ## [0.2.1] - 2026-11-02
 

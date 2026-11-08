@@ -367,14 +367,22 @@ describe('brake doctor', () => {
       expect(vague.status('api.reachable')).toBe('fail');
     }
 
-    // The public /v1/readyz is rate limited: a 429 asks /readyz instead of failing.
+    // The public /v1/readyz is rate limited: the API answered, so the key is still checked, and
+    // /readyz (the dashboard's page, behind it) is not asked instead.
     const limited = await doctor({ BRAKE_KEY: KEY }, (c) =>
       c.url === 'https://api/v1/readyz'
         ? { status: 429, body: { error: 'rate_limited' } }
-        : healthy(me())(c),
+        : c.url === 'https://api/readyz'
+          ? { status: 200, body: html }
+          : healthy(me())(c),
     );
-    expect(limited.status('api.reachable')).toBe('pass');
-    expect(limited.f.calls.some((c) => c.url === 'https://api/readyz')).toBe(true);
+    expect(limited.status('api.reachable')).toBe('warn');
+    expect(limited.report!.checks.find((c) => c.id === 'api.reachable')!.detail).toMatch(
+      /rate limited/,
+    );
+    expect(limited.f.calls.some((c) => c.url === 'https://api/readyz')).toBe(false);
+    expect(limited.status('key.valid')).toBe('pass');
+    expect(limited.status('key.capped')).toBe('pass');
     // The last path rate limited is not ready.
     const proxyLimited = await doctor({ BRAKE_KEY: KEY }, (c) =>
       c.url === 'https://proxy/readyz'
@@ -467,6 +475,47 @@ describe('brake doctor', () => {
         method: 'DELETE',
         url: 'https://api/v1/sessions/key_probe',
       });
+      // Ended with the parent key: the probe's own token stops working after its 60 s.
+      expect(d.f.calls.at(-1)!.headers['x-brake-key']).toBe(KEY);
+    });
+
+    it('fails a probe the proxy forwarded, whatever the provider or the proxy then answered', async () => {
+      const probe = (answer: { status: number; body: unknown }) =>
+        doctor(
+          { BRAKE_KEY: KEY },
+          healthy(minting, (c) => {
+            if (c.url.endsWith('/v1/sessions')) return session;
+            if (c.method === 'DELETE')
+              return { status: 200, body: { spentMicros: 0, heldMicros: 0 } };
+            return { ...answer, headers: { 'x-brake-cost-micros': '0' } };
+          }),
+          { args: ['--prove'] },
+        );
+      for (const answer of [
+        { status: 401, body: { detail: { error: 'Unauthorized: missing or invalid API key.' } } },
+        { status: 400, body: { error: 'Bad request' } },
+        { status: 400, body: 'Bad Request' },
+        { status: 504, body: { error: 'upstream_timeout' } },
+        { status: 502, body: { error: 'upstream_unavailable' } },
+      ]) {
+        const d = await probe(answer);
+        const check = d.report!.checks.find((c) => c.id === 'enforcement.exhausted-budget')!;
+        expect(check.status, JSON.stringify(answer)).toBe('fail');
+        expect(check.detail).toMatch(/FORWARDED/);
+        expect(d.code).toBe(EXIT.error);
+      }
+      // Refused before the caps were checked: proves nothing either way.
+      for (const answer of [
+        { status: 401, body: { error: 'invalid_key' } },
+        { status: 400, body: { error: 'invalid_request' } },
+        { status: 429, body: { error: 'loop_detected' } },
+        { status: 503, body: { error: 'budget_unavailable' } },
+        { status: 500, body: { error: 'internal_error' } },
+      ]) {
+        const d = await probe(answer);
+        expect(d.status('enforcement.exhausted-budget'), JSON.stringify(answer)).toBe('unknown');
+        expect(d.code).toBe(EXIT.error);
+      }
     });
 
     it('fails loudly if the proxy forwards past a $0 budget', async () => {
@@ -708,6 +757,8 @@ describe('brake doctor', () => {
     truncateSync(join(big, '.env.dump'), 10_000_001);
     const skipped = await doctor({ BRAKE_KEY: KEY }, healthy(me()), { cwd: big });
     expect(skipped.status('files.cwd')).toBe('unknown');
+    // It may hold another virtual key too.
+    expect(skipped.status('virtual-keys.files')).toBe('unknown');
     // What doctor could not read may hold a key: it does not vouch.
     expect(skipped.report!.ok).toBe(false);
 
@@ -731,6 +782,7 @@ describe('brake doctor', () => {
       cwd: join(tmp('brake-doctor-cwd-'), 'missing'),
     });
     expect(gone.status('files.cwd')).toBe('unknown');
+    expect(gone.status('virtual-keys.files')).toBe('unknown');
     expect(gone.report!.checks.find((c) => c.id === 'files.cwd')!.detail).toContain(
       'could not be read',
     );
@@ -755,6 +807,25 @@ describe('brake doctor', () => {
     expect(d.out).not.toContain(ADMIN);
   });
 
+  it('finds an admin token in a config brake cannot parse, and reads odd JSON without failing', async () => {
+    const home = tmp('brake-doctor-');
+    const path = join(home, '.config', 'brake', 'config.json');
+    mkdirSync(join(home, '.config', 'brake'), { recursive: true });
+    // A trailing comma: not JSON, but the agent reads text.
+    writeFileSync(path, `{\n  "apiUrl": "https://api",\n  "adminToken": "${ADMIN}",\n}\n`);
+    const broken = await doctor({ BRAKE_KEY: KEY }, healthy(me()), { home });
+    expect(broken.status('admin-token.config')).toBe('fail');
+    expect(broken.out).not.toContain(ADMIN);
+    expect(broken.code).toBe(EXIT.error);
+
+    for (const text of ['null', '[]', '42', '{"apiUrl": ']) {
+      writeFileSync(path, text);
+      const odd = await doctor({ BRAKE_KEY: KEY }, healthy(me()), { home });
+      expect(odd.status('admin-token.config'), text).toBe('pass');
+      expect(odd.code, text).toBe(EXIT.ok);
+    }
+  });
+
   it('looks in the OS home when HOME is unset, and never passes a config it did not look for', async () => {
     const home = tmp('brake-doctor-');
     mkdirSync(join(home, '.config', 'brake'), { recursive: true });
@@ -762,17 +833,21 @@ describe('brake doctor', () => {
       join(home, '.config', 'brake', 'config.json'),
       JSON.stringify({ adminToken: ADMIN }),
     );
+    // A capped key: nothing else stops doctor from vouching.
     const run_ = async (homedir?: () => string) => {
-      const f = fake({ BRAKE_URL: 'https://proxy', BRAKE_API_URL: 'https://api' }, healthy(me()));
+      const f = fake(
+        { BRAKE_URL: 'https://proxy', BRAKE_API_URL: 'https://api', BRAKE_KEY: KEY },
+        healthy(me()),
+      );
       const cwd = tmp('brake-doctor-cwd-');
       f.io.cwd = () => cwd;
       if (homedir) f.io.homedir = homedir;
-      await run(['doctor'], f.io);
+      const code = await run(['doctor'], f.io);
       const report = JSON.parse(f.out.join('')) as {
         ok: boolean;
         checks: { id: string; status: string; detail?: string }[];
       };
-      return { report, check: report.checks.find((c) => c.id === 'admin-token.config')! };
+      return { code, report, check: report.checks.find((c) => c.id === 'admin-token.config')! };
     };
     expect((await run_(() => home)).check.status).toBe('fail');
     for (const homedir of [
@@ -784,7 +859,9 @@ describe('brake doctor', () => {
     ]) {
       const none = await run_(homedir);
       expect(none.check.status).toBe('unknown');
+      expect(none.report.checks.filter((c) => c.status !== 'pass')).toEqual([none.check]);
       expect(none.report.ok).toBe(false);
+      expect(none.code).toBe(EXIT.error);
     }
   });
 
