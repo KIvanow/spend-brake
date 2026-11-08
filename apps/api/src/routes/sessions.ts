@@ -4,7 +4,7 @@ import {
   hashVirtualKey,
   windowsFor,
 } from '@spend-brake/budget';
-import { and, caps, eq, virtualKeys } from '@spend-brake/db';
+import { and, caps, eq, gte, sql, virtualKeys } from '@spend-brake/db';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Auth, Authenticator } from '../auth.js';
@@ -12,7 +12,6 @@ import { atLeast } from '../auth.js';
 import { type Ctx, audit, id, micros, n } from '../common.js';
 import { newId, random62 } from '../ids.js';
 import { ApiError, type Router, errorSchema, notFound } from '../route.js';
-import { orgTimeZone } from './budget.js';
 import { requireCapacity } from '../entitlements.js';
 
 const createBody = z.object({
@@ -30,7 +29,17 @@ const createBody = z.object({
     .max(7 * 24 * 3600)
     .default(12 * 3600),
   name: z.string().max(200).optional(),
+  /**
+   * A $0 probe (`brake doctor --prove`): needs budgetMicros 0 and ttlSec of at most
+   * PROBE_TTL_SEC. Its caps never change and it does not use up the plan's sessions.
+   */
+  probe: z.literal(true).optional(),
 });
+
+/** The longest $0 session that is a probe (`brake doctor --prove` mints 60 seconds). */
+export const PROBE_TTL_SEC = 300;
+/** Probes a key may mint an hour: plenty for doctor on every deploy, too few to use as sessions. */
+export const PROBES_PER_HOUR = 30;
 
 const sessionView = z
   .object({
@@ -75,7 +84,19 @@ export function sessionRoutes(
     request: { body: { content: { 'application/json': { schema: createBody } } } },
     responses: {
       201: { description: 'Created', content: { 'application/json': { schema: sessionView } } },
+      400: {
+        description: 'Invalid request',
+        content: { 'application/json': { schema: errorSchema } },
+      },
+      402: {
+        description: "A failed payment, or the plan's sessions or requests are used up",
+        content: { 'application/json': { schema: errorSchema } },
+      },
       403: { description: 'Not allowed', content: { 'application/json': { schema: errorSchema } } },
+      429: {
+        description: 'Too many $0 probe sessions from this key in the last hour',
+        content: { 'application/json': { schema: errorSchema } },
+      },
     },
   });
   router.registry.registerPath({
@@ -131,7 +152,20 @@ export function sessionRoutes(
       dayBudgetMicros: parsed.data.dayBudgetMicros ?? 20_000_000n,
     };
     const orgId = c.auth.orgId;
-    await requireCapacity(ctx, orgId, 'session');
+    // A probe (brake doctor --prove) is asked for, never guessed from the shape: its caps, lifetime
+    // and fail-open can never change, so it spends nothing and does not use up the plan's
+    // sessions. A failed payment or a spent request allowance still stops it. Kept short so that
+    // probes cannot stand in for sessions on routes priced at $0. Any other $0 session is an
+    // ordinary session.
+    const probe = body.probe === true;
+    if (probe && (body.budgetMicros !== 0n || body.ttlSec > PROBE_TTL_SEC)) {
+      throw new ApiError(
+        400,
+        'invalid_request',
+        `A probe session needs budgetMicros 0 and ttlSec of at most ${PROBE_TTL_SEC}.`,
+      );
+    }
+    await requireCapacity(ctx, orgId, probe ? 'probe' : 'session');
 
     let parent: KeyRecord;
     if (c.kind === 'key') {
@@ -151,6 +185,26 @@ export function sessionRoutes(
     }
     if (parent.sessionId)
       throw new ApiError(403, 'forbidden', 'A session key cannot mint sessions.');
+    if (probe) {
+      const [row] = await ctx.db
+        .select({ n: sql<string>`count(*)::text` })
+        .from(virtualKeys)
+        .where(
+          and(
+            eq(virtualKeys.orgId, orgId),
+            sql`${virtualKeys.config}->>'parentKeyId' = ${parent.id}`,
+            gte(virtualKeys.createdAt, new Date(ctx.now().getTime() - 3600_000)),
+            sql`${virtualKeys.config}->>'probe' = 'true'`,
+          ),
+        );
+      if (Number(row?.n ?? 0) >= PROBES_PER_HOUR) {
+        throw new ApiError(
+          429,
+          'rate_limited',
+          `At most ${PROBES_PER_HOUR} $0 probe sessions an hour per key (brake doctor --prove uses one per run). Try again later.`,
+        );
+      }
+    }
 
     const keyId = newId('key');
     const sessionId = `sess_${random62(16)}`;
@@ -161,6 +215,19 @@ export function sessionRoutes(
         parent.expiresAt ? Date.parse(parent.expiresAt) : Number.MAX_SAFE_INTEGER,
       ),
     );
+    // A key's sessions stay its agent's: another agent id would leave that agent's caps behind.
+    if (
+      c.kind === 'key' &&
+      parent.agentId &&
+      body.agentId !== undefined &&
+      body.agentId !== parent.agentId
+    ) {
+      throw new ApiError(
+        403,
+        'forbidden',
+        `This key belongs to agent ${parent.agentId}: the sessions it mints are that agent's too.`,
+      );
+    }
     const agentId = body.agentId ?? parent.agentId ?? 'cli';
     const name = body.name ?? `session ${sessionId}`;
     const record: KeyRecord = {
@@ -172,10 +239,13 @@ export function sessionRoutes(
       agentId,
       sessionId,
       sessionCapMicros: body.budgetMicros.toString(),
-      agentDayCapMicros: body.dayBudgetMicros.toString(),
+      // A probe makes no agent day-cap template: its $0 key cap refuses everything anyway, and a
+      // template would set a $0 day cap on the parent's agent.
+      agentDayCapMicros: probe ? null : body.dayBudgetMicros.toString(),
       parentKeyId: parent.id,
       canMintSessions: false,
       failOpenMicros: null,
+      ...(probe ? { probe: true } : {}),
     };
     // The session budget is the key's own cap: enforced even when a client never sends the
     // session header. Month window: a session's whole life.
@@ -244,7 +314,9 @@ export function sessionRoutes(
         .set({ status: 'revoked', revokedAt: ctx.now(), config: revoked })
         .where(eq(virtualKeys.id, row.id));
     }
-    const tz = await orgTimeZone(ctx, c.auth.orgId);
+    // The org record the proxy reads holds its time zone, so the window is the one the proxy
+    // charged in (UTC without one), as on /v1/me.
+    const tz = (await ctx.registry.getOrg(c.auth.orgId))?.timeZone ?? 'UTC';
     const month = windowsFor(ctx.now(), tz)[1].id;
     const [status] = (
       await ctx.engine.status(c.auth.orgId, [{ kind: 'key', id: row.id }], tz, ctx.now())

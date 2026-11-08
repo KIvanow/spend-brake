@@ -319,6 +319,8 @@ export async function buildServer(deps: BillingDeps): Promise<FastifyInstance> {
               eq(virtualKeys.orgId, a.orgId),
               gte(virtualKeys.createdAt, month),
               sql`${virtualKeys.config}->>'sessionId' is not null`,
+              // As the API counts them: $0 probe sessions (brake doctor --prove) are not.
+              sql`coalesce(${virtualKeys.config}->>'probe', 'false') <> 'true'`,
             ),
           ),
       ),

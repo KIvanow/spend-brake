@@ -577,6 +577,106 @@ describe('sign-up and checkout', () => {
   });
 });
 
+describe('agent sessions', () => {
+  it('count toward the plan, except $0 probes (brake doctor --prove), whose caps are locked', async () => {
+    const { ownerToken: t } = await signup('free', '203.0.113.78');
+    const cred = (await credential(t, 'mapbox')).json<{ id: string }>().id;
+    const parentKeyId = (await newKey(t, cred)).json<{ id: string }>().id;
+    const mint = (payload: object) =>
+      api.inject({
+        method: 'POST',
+        url: '/v1/sessions',
+        headers: bearer(t),
+        payload: { parentKeyId, ...payload },
+      });
+    const probe = { budgetMicros: '0', dayBudgetMicros: '0', ttlSec: 60, probe: true };
+    for (let i = 0; i < 19; i++)
+      expect((await mint({ budgetMicros: '1000' })).statusCode).toBe(201);
+    // A $0 session that does not ask to be a probe is an ordinary session: it counts, and its
+    // caps may be raised later.
+    const plain = await mint({ budgetMicros: '0', dayBudgetMicros: '0', ttlSec: 60 });
+    expect(plain.statusCode).toBe(201);
+    const plainKey = plain.json<{ keyId: string }>().keyId;
+    expect(
+      (
+        await api.inject({
+          method: 'PUT',
+          url: `/v1/caps/key:${plainKey}`,
+          headers: bearer(t),
+          payload: { month: { hard: 1_000_000 } },
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect((await mint({ budgetMicros: '1000' })).json()).toMatchObject({ error: 'plan_limit' });
+    // A short $0 session asked for as a probe is one: it can never spend.
+    expect((await mint(probe)).statusCode).toBe(201);
+    const short = await mint(probe);
+    expect(short.statusCode).toBe(201);
+    // A probe with a budget or a long life is refused, not taken for a session.
+    for (const over of [{ budgetMicros: '1000' }, { ttlSec: 7 * 24 * 3600 }]) {
+      const bad = await mint({ ...probe, ...over });
+      expect(bad.statusCode, JSON.stringify(over)).toBe(400);
+      expect(bad.json()).toMatchObject({ error: 'invalid_request' });
+    }
+
+    // Raising (or removing) a probe's caps would let it spend outside the plan: refused.
+    const { keyId, sessionId } = short.json<{ keyId: string; sessionId: string }>();
+    for (const scope of [`key:${keyId}`, `sess:${sessionId}`]) {
+      const raise = await api.inject({
+        method: 'PUT',
+        url: `/v1/caps/${scope}`,
+        headers: bearer(t),
+        payload: { month: { hard: 1_000_000 } },
+      });
+      expect(raise.statusCode, scope).toBe(409);
+      expect(raise.json()).toMatchObject({ error: 'probe_session' });
+      const drop = await api.inject({
+        method: 'DELETE',
+        url: `/v1/caps/${scope}`,
+        headers: bearer(t),
+      });
+      expect(drop.json()).toMatchObject({ error: 'probe_session' });
+    }
+    // So would fail-open or a longer life on the key itself; its name may change.
+    for (const payload of [{ failOpenMicros: '50000000' }, { expiresAt: null }]) {
+      const patch = await api.inject({
+        method: 'PATCH',
+        url: `/v1/keys/${keyId}`,
+        headers: bearer(t),
+        payload,
+      });
+      expect(patch.json(), JSON.stringify(payload)).toMatchObject({ error: 'probe_session' });
+    }
+    const renamed = await api.inject({
+      method: 'PATCH',
+      url: `/v1/keys/${keyId}`,
+      headers: bearer(t),
+      payload: { name: 'doctor probe' },
+    });
+    expect(renamed.statusCode).toBe(200);
+    // The billing page counts them as the API does.
+    const usage = await billing.inject({ url: '/v1/billing', headers: bearer(t) });
+    expect(usage.json()).toMatchObject({ usage: { agentSessionsThisMonth: 20 } });
+  });
+
+  it('refuses even a $0 probe while a payment has failed', async () => {
+    const { orgId, ownerToken: t } = await signup('free', '203.0.113.79');
+    const cred = (await credential(t, 'mapbox')).json<{ id: string }>().id;
+    const parentKeyId = (await newKey(t, cred)).json<{ id: string }>().id;
+    await db
+      .update(orgEntitlements)
+      .set({ status: 'past_due' })
+      .where(eq(orgEntitlements.orgId, orgId));
+    const res = await api.inject({
+      method: 'POST',
+      url: '/v1/sessions',
+      headers: bearer(t),
+      payload: { parentKeyId, budgetMicros: '0', dayBudgetMicros: '0', ttlSec: 60, probe: true },
+    });
+    expect(res.json()).toMatchObject({ error: 'payment_required' });
+  });
+});
+
 describe('plan transitions', () => {
   it('moves through every plan, blocking only new resources on downgrade or failed payment', async () => {
     const { orgId, ownerToken } = await signup();

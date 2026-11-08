@@ -2114,6 +2114,16 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "The key is revoked, or is a $0 probe session (only its name can change)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         }
       },
@@ -2356,6 +2366,16 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "A $0 probe session (brake doctor --prove): its caps cannot change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         }
       },
@@ -2450,6 +2470,16 @@
           },
           "403": {
             "description": "Role too low",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A $0 probe session (brake doctor --prove): its caps cannot change",
             "content": {
               "application/json": {
                 "schema": {
@@ -4284,6 +4314,12 @@
                   "name": {
                     "type": "string",
                     "maxLength": 200
+                  },
+                  "probe": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ]
                   }
                 }
               }
@@ -4301,8 +4337,38 @@
               }
             }
           },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "A failed payment, or the plan's sessions or requests are used up",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "403": {
             "description": "Not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many $0 probe sessions from this key in the last hour",
             "content": {
               "application/json": {
                 "schema": {
@@ -4423,9 +4489,19 @@
     },
     "/v1/me": {
       "get": {
-        "summary": "Remaining budget of the calling virtual key (X-Brake-Key)",
+        "summary": "Remaining budget of the calling virtual key (X-Brake-Key), and of the session it names (X-Brake-Session)",
         "tags": [
           "Sessions"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "x-brake-session",
+            "in": "header"
+          }
         ],
         "responses": {
           "200": {
@@ -4446,6 +4522,12 @@
                     },
                     "killed": {
                       "type": "boolean"
+                    },
+                    "killedProviders": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
                     },
                     "scopes": {
                       "type": "array",
@@ -4486,14 +4568,94 @@
                           "remaining"
                         ]
                       }
+                    },
+                    "policy": {
+                      "type": "object",
+                      "properties": {
+                        "providers": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "skus": {
+                          "type": [
+                            "array",
+                            "null"
+                          ],
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "canMintSessions": {
+                          "type": "boolean"
+                        },
+                        "expiresAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "failOpenMicros": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "unpriced": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "object",
+                            "properties": {
+                              "policy": {
+                                "type": "string",
+                                "enum": [
+                                  "deny",
+                                  "allow-with-default-price"
+                                ]
+                              },
+                              "defaultPriceMicros": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "policy",
+                              "defaultPriceMicros"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "providers",
+                        "skus",
+                        "canMintSessions",
+                        "expiresAt",
+                        "failOpenMicros",
+                        "unpriced"
+                      ]
                     }
                   },
                   "required": [
                     "keyId",
                     "sessionId",
                     "killed",
-                    "scopes"
+                    "killedProviders",
+                    "scopes",
+                    "policy"
                   ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "An X-Brake-Session the proxy would refuse",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }

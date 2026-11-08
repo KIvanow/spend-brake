@@ -1,25 +1,15 @@
 import type { Command } from 'commander';
+import { type Minted, endSession, mintSession } from '../admin.js';
 import {
   CliError,
   EXIT,
   type Io,
   config,
-  configPath,
   durationSec,
   microsToUsd,
-  readSavedConfig,
+  savedConfigs,
   usdToMicros,
 } from '../io.js';
-
-interface Minted {
-  sessionId: string;
-  keyId: string;
-  token: string;
-  agentId: string;
-  budgetMicros: number;
-  dayBudgetMicros: number;
-  expiresAt: string;
-}
 
 const SIGNALS = { SIGINT: 2, SIGTERM: 15, SIGHUP: 1 } as const;
 
@@ -72,28 +62,33 @@ export function sessionCommand(
         if (auth.authorization && !o.parentKey) {
           throw new CliError('With BRAKE_ADMIN_TOKEN, give --parent-key <id>.', EXIT.usage);
         }
-        const res = await io.fetch(`${cfg.apiUrl}/v1/sessions`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', ...auth },
-          body: JSON.stringify({
+        let minted: Minted;
+        try {
+          minted = await mintSession(io, auth, {
             budgetMicros: usdToMicros(o.budget).toString(),
             dayBudgetMicros: usdToMicros(o.dayBudget).toString(),
             ttlSec: durationSec(o.ttl),
             ...(o.agent ? { agentId: o.agent } : {}),
             ...(o.parentKey ? { parentKeyId: o.parentKey } : {}),
-          }),
-        });
-        const minted = (await res.json()) as Minted & { message?: string };
-        if (res.status !== 201) {
+          });
+        } catch (err) {
           throw new CliError(
-            `could not start a session: ${minted.message ?? `HTTP ${res.status}`}`,
-            res.status === 401 ? EXIT.auth : EXIT.error,
+            `could not start a session: ${(err as Error).message}`,
+            err instanceof CliError ? err.code : EXIT.error,
           );
         }
 
-        if (readSavedConfig(io).adminToken) {
+        // The default path too: another XDG_CONFIG_HOME hides it from brake, not from the agent.
+        // The session key is minted by now: nothing here may throw before it is ended.
+        try {
+          for (const { path } of savedConfigs(io).found.filter((c) => c.cfg.adminToken)) {
+            io.stderr(
+              `brake: warning: ${path} holds an admin token the command can read. Run agents as another OS user so they cannot lift their own caps.\n`,
+            );
+          }
+        } catch (err) {
           io.stderr(
-            `brake: warning: ${configPath(io)} holds an admin token the command can read. Run agents as another user (or with XDG_CONFIG_HOME elsewhere) so they cannot lift their own caps.\n`,
+            `brake: warning: could not look for a saved admin token the command can read: ${(err as Error).message}\n`,
           );
         }
 
@@ -125,28 +120,21 @@ export function sessionCommand(
         });
         for (const [s, f] of forward) signals.off(s, f);
 
-        // Revoke with the session key itself; report what the session spent.
+        // Revoke with the parent auth that minted it: the session's own token stops working once
+        // its TTL has passed. Report what the session spent.
         let summary: Record<string, unknown> = {
           session: minted.sessionId,
           keyId: minted.keyId,
           exitCode: code,
         };
         try {
-          const end = await io.fetch(`${cfg.apiUrl}/v1/sessions/${minted.keyId}`, {
-            method: 'DELETE',
-            headers: { 'x-brake-key': minted.token },
-          });
-          const e = (await end.json()) as { spentMicros?: number; heldMicros?: number };
-          if (end.ok) {
-            summary = {
-              ...summary,
-              spentMicros: e.spentMicros,
-              spent: microsToUsd(e.spentMicros ?? 0),
-              budget: microsToUsd(minted.budgetMicros, 2),
-            };
-          } else {
-            summary.revokeError = `HTTP ${end.status}`;
-          }
+          const e = await endSession(io, minted, auth);
+          summary = {
+            ...summary,
+            spentMicros: e.spentMicros,
+            spent: microsToUsd(e.spentMicros ?? 0),
+            budget: microsToUsd(minted.budgetMicros, 2),
+          };
         } catch (err) {
           summary.revokeError = (err as Error).message;
         }

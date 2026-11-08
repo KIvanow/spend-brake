@@ -28,10 +28,12 @@ Claude Code (or anything else after `--`) runs with a session key in `BRAKE_KEY`
 - counts against the agent's $20 per day (`--day-budget`, default $20) across all its sessions.
   That cap is created the first time the agent spends, and an admin can change it later;
 - also counts against the parent key's caps, and stops when the parent key is killed;
-- is revoked when the command exits, and expires after `--ttl` (default `12h`) even if `brake`
-  itself is killed.
+- is revoked when the command exits (with the parent key or admin token that minted it, so this
+  works after `--ttl` too), and expires after `--ttl` (default `12h`) even if `brake` itself is
+  killed.
 
-`--agent` names the agent (default: the parent key's agent, or `cli`). When the command exits,
+`--agent` names the agent (default: the parent key's agent, or `cli`; a key that has an agent
+mints sessions for that agent only, so its agent caps always apply). When the command exits,
 `brake` prints a JSON summary on stderr (`{"brakeSession":{"spent":"$0.0120",...}}`) and exits
 with the command's exit code.
 
@@ -62,14 +64,14 @@ prints one line on stderr telling it to stop and ask you:
 brake: STOP. Spend cap reached for sess:sess_ab12 (cap $5.00). Do not retry; ask the user to raise the cap.
 ```
 
-| Code | Meaning                                                                |
-| ---- | ---------------------------------------------------------------------- |
-| 0    | Success                                                                |
-| 1    | Other failure (provider error, proxy unreachable, session not started) |
-| 2    | Bad arguments                                                          |
-| 3    | **Stop:** budget exceeded, spending killed, or the route has no price  |
-| 4    | **Stop:** loop detected, the key is paused                             |
-| 5    | Missing, unknown, revoked or expired virtual key                       |
+| Code | Meaning                                                                                                                                        |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | Success                                                                                                                                        |
+| 1    | Other failure (provider error, proxy unreachable, session not started)                                                                         |
+| 2    | Bad arguments                                                                                                                                  |
+| 3    | **Stop:** budget exceeded, spending killed, the route has no price, or the provider timed out (it may have been charged: do not retry blindly) |
+| 4    | **Stop:** loop detected, the key is paused                                                                                                     |
+| 5    | Missing, unknown, revoked or expired virtual key                                                                                               |
 
 Agents that call the proxy over HTTP get the same message in the `message` field of the `402`,
 `403` or `429` body.
@@ -84,7 +86,102 @@ the org settings (`loop` in `PUT /v1/org`: `identical`, `windowSec`, `perMinute`
 
 ## Keep the admin token away from the agent
 
-Run the agent as a different OS user than the one that ran `brake init` (or with
-`XDG_CONFIG_HOME` pointing elsewhere). The agent must not be able to read the saved admin token
-in `~/.config/brake/config.json`, or it could lift its own caps. `brake session` warns when it
-can.
+Run the agent as a different OS user than the one that ran `brake init`. The agent must not be
+able to read the saved admin token in `~/.config/brake/config.json`, or it could lift its own
+caps. Pointing `XDG_CONFIG_HOME` elsewhere is not enough: it hides the file from `brake`, not from
+an agent running as the same user. `brake session` warns when the agent can read the token.
+
+## Check the workload with brake doctor
+
+A cap only holds for the calls that go through the proxy with a capped key. `brake doctor`
+looks for the usual ways around that, from the agent's own point of view, so run it as the
+agent's user, in its working directory and environment:
+
+```sh
+brake session -- brake doctor --pretty     # what a session hands the agent
+brake doctor --prove --pretty              # with a key that may mint sessions
+```
+
+It fails on a missing, revoked, killed or uncapped key (a budget per `X-Brake-Session` alone is
+no cap: the client names the session, so it can start a fresh one; a key that may mint sessions
+needs a cap on the key itself, since each session it mints brings its own budget), a
+`BRAKE_SESSION` the proxy
+would refuse, unpriced routes charged $0, an admin token the agent can read (in the environment
+or the saved config, even one brake cannot parse), and raw provider keys (`TAVILY_API_KEY`, `GOOGLE_MAPS_KEY`, …) in the
+environment or in `./.env*` files, which let the agent call the provider directly; placeholders
+such as `your_key_here` are skipped. A Google API key (`AIza…`) in a variable whose name has
+`MAPS` in it (`NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`, `MAPS_API_KEY`, …) is a Maps key and fails. It
+warns on a generic Google API key (`GOOGLE_API_KEY`, `GEMINI_API_KEY`): it may be for Gemini,
+but one that can also call Maps goes around the proxy, so restrict it in Google Cloud. It also warns on a second virtual key, plain HTTP to a remote host,
+some of the key's providers killed, fail-open keys, keys that never expire, keys with many
+providers, and providers whose unpriced routes are forwarded at a default price. Secrets are
+named, never printed.
+
+`--prove` mints a $0, 60-second session from the key and sends one priced request with it. The
+proxy must refuse it with `402 budget_exceeded` before it contacts the provider; the session is
+then ended with the parent key, having spent nothing, and doctor reads back what it spent and
+holds: if it cannot, the probe does not pass. Any other answer from past the caps fails it: the
+provider's own error (a 401 or 400), or the proxy's `upstream_timeout` or
+`upstream_unavailable`, means the $0 cap let the request through. A refusal before the caps
+(`invalid_key`, `loop_detected`, `budget_unavailable`, …) proves nothing either way, nor does
+an answer without the proxy's `x-brake-cost-micros` header, which came from something in front
+of the proxy (a CDN, WAF or load balancer page) or another server at `BRAKE_URL`; money the
+probe session spent or holds fails it all the same. Without `BRAKE_KEY`, `--prove` is reported
+as not checked. Doctor asks for a probe (`probe: true` on `POST /v1/sessions`, which
+needs a $0 budget and a lifetime of up to five minutes; anything else is refused with 400). A
+probe's caps, lifetime and fail-open can never change, so it cannot spend, and it does not count
+toward a plan's agent sessions. Any other $0 session is an ordinary session, counted like the
+rest. `--prove` can run on every deploy (it still needs a plan whose
+payment has gone through and whose monthly requests are not used up). Killed providers are
+skipped, and a provider the proxy refuses for another reason first (killed, unpriced) makes
+doctor try the next. The repository runs the same probe against a counting mock provider and
+checks it receives no request (`apps/cli/test/e2e.test.ts`).
+
+Doctor exits 1 when a check fails, and also when it could not read the key's caps, its policy,
+the working directory or a `.env` file (even one it skipped for size, which may also hold
+another virtual key), when it found no
+home directory to look for a saved admin token in, when the
+workload can read another virtual key (whose caps it did not check) or, with `--prove`, when it
+could not complete the probe: it exits 0 only for what it actually saw. A session key, or a key
+that may not mint sessions, cannot run the probe, so run `--prove` with the parent key; a server
+before 0.3.0 has no probe sessions, so doctor mints nothing there. A clean
+report is not a guarantee: it always lists what a client cannot see, such as HTTP clients that
+skip the proxy, credentials kept elsewhere, the org-wide cap, and network egress. Blocking the
+providers' own hosts at the firewall is what makes the proxy the only way out.
+
+## MCP clients (preview)
+
+Agents that search through an MCP server can use Spend Brake's,
+[`@spend-brake/mcp`](https://www.npmjs.com/package/@spend-brake/mcp), instead of the Tavily or Exa
+server. It offers `tavily_search`, `exa_search` and a read-only `brake_budget`, and sends every
+search through the proxy with the virtual key, so the provider key never reaches the agent.
+Replace the existing entry:
+
+```json
+{
+  "mcpServers": {
+    "search": {
+      "command": "npx",
+      "args": ["-y", "@spend-brake/mcp"],
+      "env": {
+        "BRAKE_KEY": "sb_live_…",
+        "BRAKE_URL": "https://proxy.spendbrake.dev",
+        "BRAKE_API_URL": "https://app.spendbrake.dev"
+      }
+    }
+  }
+}
+```
+
+and remove `TAVILY_API_KEY` / `EXA_API_KEY` from the agent's configuration. For a budget per
+MCP connection, start it in a session: `"args": ["-y", "@spend-brake/cli", "session",
+"--budget", "2", "--", "npx", "-y", "@spend-brake/mcp"]`. `--tools tavily` (or `exa`)
+offers one provider only. With the CLI installed, `brake mcp` is the same server.
+
+Each result carries its `cost` and the `remaining` budget. When a cap stops a search the tool
+answers with an error that starts with `STOP.` and tells the model not to retry. So does a
+search with no answer within 60 s, or one the provider did not answer in time behind the proxy
+(`504 upstream_timeout`): it may have been forwarded and charged, so the model is told the
+charge and to check `brake_budget` before searching again. Other failures carry a short excerpt
+of the provider's error, and the charge when there was one. The search tools are annotated as neither read-only nor idempotent.
+`BRAKE_API_URL` is required: without it `brake_budget` asks `http://localhost:8081`.

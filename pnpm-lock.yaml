@@ -162,6 +162,12 @@ importers:
         specifier: ^12.2.1
         version: 12.2.1
 
+  apps/mcp:
+    dependencies:
+      '@spend-brake/cli':
+        specifier: workspace:^
+        version: link:../cli
+
   apps/notifier:
     dependencies:
       '@spend-brake/budget':

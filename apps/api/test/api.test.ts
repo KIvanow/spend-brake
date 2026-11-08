@@ -56,12 +56,17 @@ describe('health', () => {
       valkey: true,
       postgres: true,
     });
+    // Under /v1 too, the only path the dashboard's nginx forwards: public, so only `ok`.
+    const pub = await env.app.inject('/v1/readyz');
+    expect(pub.json()).toEqual({ ok: true });
+    expect(pub.headers['x-ratelimit-limit']).toBeDefined();
     // Nothing listens on port 1: Valkey is down, Postgres is not.
     const down = new Redis({ port: 1, lazyConnect: true, enableOfflineQueue: false });
     const app = await buildApi({ db: env.db, valkey: down, wrapper: null });
     const res = await app.inject('/readyz');
     expect(res.statusCode).toBe(503);
     expect(res.json()).toEqual({ ok: false, valkey: false, postgres: true });
+    expect((await app.inject('/v1/readyz')).json()).toEqual({ ok: false });
     expect((await app.inject('/healthz')).statusCode).toBe(200);
     await app.close();
     down.disconnect();

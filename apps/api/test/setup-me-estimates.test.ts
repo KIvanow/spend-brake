@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
-import { Registry } from '@spend-brake/budget';
-import { usageEvents } from '@spend-brake/db';
+import { BudgetEngine, Registry } from '@spend-brake/budget';
+import { eq, orgs, usageEvents } from '@spend-brake/db';
 import { LocalKeyWrapper } from '@spend-brake/shared';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -106,6 +106,132 @@ describe('GET /v1/me', () => {
       ).statusCode,
     ).toBe(401);
     expect((await env.app.inject({ url: '/v1/me' })).statusCode).toBe(401);
+  });
+
+  it("shows a key its own policy and its providers' unpriced-route policy", async () => {
+    const org = await newOrg(env);
+    const call = (method: 'GET' | 'POST' | 'PUT', url: string, payload?: object) =>
+      env.app.inject({ method, url, headers: bearer(org.admin), ...(payload ? { payload } : {}) });
+    const cred = async (provider: string) =>
+      (await call('POST', '/v1/providers/credentials', { provider, name: 'c', secret: 's' })).json<{
+        id: string;
+      }>().id;
+    const [acme, zeta] = [await cred('acme'), await cred('zeta')];
+    const put = await env.app.inject({
+      method: 'PUT',
+      url: '/v1/org',
+      headers: bearer(org.owner),
+      payload: {
+        providers: {
+          acme: { unpricedPolicy: 'allow-with-default-price', defaultPriceMicros: 1000 },
+        },
+      },
+    });
+    expect(put.statusCode).toBe(200);
+    const key = (
+      await call('POST', '/v1/keys', {
+        name: 'k',
+        credentials: { acme, zeta },
+        canMintSessions: true,
+      })
+    ).json<{ token: string }>();
+    const me = await env.app.inject({ url: '/v1/me', headers: { 'x-brake-key': key.token } });
+    expect(me.json<{ policy: unknown }>().policy).toEqual({
+      providers: ['acme', 'zeta'],
+      skus: null,
+      canMintSessions: true,
+      expiresAt: null,
+      failOpenMicros: null,
+      unpriced: {
+        acme: { policy: 'allow-with-default-price', defaultPriceMicros: 1000 },
+        zeta: { policy: 'deny', defaultPriceMicros: null },
+      },
+    });
+    // Credential ids stay private.
+    expect(me.body).not.toContain(acme);
+  });
+
+  it('shows the budget of a session the client names, for keys with a session budget', async () => {
+    const org = await newOrg(env);
+    const call = (method: 'GET' | 'POST', url: string, payload?: object) =>
+      env.app.inject({ method, url, headers: bearer(org.admin), ...(payload ? { payload } : {}) });
+    const cred = (
+      await call('POST', '/v1/providers/credentials', { provider: 'acme', name: 'c', secret: 's' })
+    ).json<{ id: string }>().id;
+    const key = async (sessionCapMicros: number | null) =>
+      (
+        await call('POST', '/v1/keys', { name: 'k', credentials: { acme: cred }, sessionCapMicros })
+      ).json<{ token: string }>().token;
+    const me = (token: string, session = 'run-7') =>
+      env.app.inject({
+        url: '/v1/me',
+        headers: { 'x-brake-key': token, 'x-brake-session': session },
+      });
+
+    // Before the first call the session cap is the key's session budget.
+    const budgeted = await key(2_000_000);
+    const sess = (await me(budgeted))
+      .json<{ scopes: { scope: string; window: string; hard: number | null }[] }>()
+      .scopes.filter((s) => s.scope === 'sess:run-7');
+    expect(sess.find((s) => s.window.startsWith('m:'))).toMatchObject({ hard: 2_000_000 });
+    // A header the proxy refuses is refused here too: no session budget, or a bad id.
+    const plain = await me(await key(null));
+    expect(plain.statusCode).toBe(400);
+    expect(plain.json()).toMatchObject({
+      message: expect.stringContaining('no session budget') as string,
+    });
+    expect((await me(budgeted, 'x'.repeat(129))).statusCode).toBe(400);
+  });
+
+  it('reports provider kills: all of them kill the key, some of them are listed', async () => {
+    const org = await newOrg(env);
+    const call = (url: string, payload: object) =>
+      env.app.inject({ method: 'POST', url, headers: bearer(org.admin), payload });
+    const cred = async (provider: string) =>
+      (await call('/v1/providers/credentials', { provider, name: 'c', secret: 's' })).json<{
+        id: string;
+      }>().id;
+    const [acme, zeta] = [await cred('acme'), await cred('zeta')];
+    const both = (await call('/v1/keys', { name: 'b', credentials: { acme, zeta } })).json<{
+      token: string;
+    }>().token;
+    const one = (await call('/v1/keys', { name: 'o', credentials: { acme } })).json<{
+      token: string;
+    }>().token;
+    expect((await call('/v1/kill', { target: 'prov:acme' })).statusCode).toBeLessThan(300);
+    const me = async (token: string) =>
+      (await env.app.inject({ url: '/v1/me', headers: { 'x-brake-key': token } })).json<{
+        killed: boolean;
+        killedProviders: string[];
+      }>();
+    expect(await me(both)).toMatchObject({ killed: false, killedProviders: ['acme'] });
+    expect(await me(one)).toMatchObject({ killed: true, killedProviders: ['acme'] });
+  });
+
+  it("shows a session's agent day cap before the first call creates it, as the proxy would", async () => {
+    const org = await newOrg(env);
+    const call = (url: string, payload: object) =>
+      env.app.inject({ method: 'POST', url, headers: bearer(org.admin), payload });
+    const cred = (
+      await call('/v1/providers/credentials', { provider: 'acme', name: 'c', secret: 's' })
+    ).json<{ id: string }>().id;
+    const parent = (await call('/v1/keys', { name: 'p', credentials: { acme: cred } })).json<{
+      id: string;
+    }>();
+    const session = (
+      await call('/v1/sessions', {
+        parentKeyId: parent.id,
+        budgetMicros: '3000000',
+        dayBudgetMicros: '1000000',
+        agentId: 'bot',
+      })
+    ).json<{ token: string }>();
+    const me = (
+      await env.app.inject({ url: '/v1/me', headers: { 'x-brake-key': session.token } })
+    ).json<{ scopes: { scope: string; window: string; hard: number | null }[] }>();
+    const agent = me.scopes.filter((s) => s.scope === 'agent:bot');
+    expect(agent.find((s) => s.window.startsWith('d:'))).toMatchObject({ hard: 1_000_000 });
+    expect(agent.find((s) => s.window.startsWith('m:'))).toMatchObject({ hard: null });
   });
 });
 
@@ -265,6 +391,158 @@ describe('POST /v1/estimates/migration', () => {
 });
 
 describe('session keys follow their parent', () => {
+  it('limits $0 probe sessions an hour, so they cannot stand in for sessions', async () => {
+    const org = await newOrg(env);
+    const call = (url: string, payload: object) =>
+      env.app.inject({ method: 'POST', url, headers: bearer(org.admin), payload });
+    const cred = (
+      await call('/v1/providers/credentials', { provider: 'acme', name: 'c', secret: 's' })
+    ).json<{ id: string }>().id;
+    const parentKeyId = (await call('/v1/keys', { name: 'p', credentials: { acme: cred } })).json<{
+      id: string;
+    }>().id;
+    const probe = { parentKeyId, budgetMicros: '0', dayBudgetMicros: '0', ttlSec: 60, probe: true };
+    for (let i = 0; i < 30; i++) expect((await call('/v1/sessions', probe)).statusCode).toBe(201);
+    const over = await call('/v1/sessions', probe);
+    expect(over.statusCode).toBe(429);
+    expect(over.json()).toMatchObject({ error: 'rate_limited' });
+    // A session with a budget is not a probe and is not held back by this.
+    expect(
+      (await call('/v1/sessions', { parentKeyId, budgetMicros: '1000', ttlSec: 60 })).statusCode,
+    ).toBe(201);
+    // Nor is a $0 session that does not ask to be a probe: it is an ordinary session.
+    const plain = await call('/v1/sessions', { ...probe, probe: undefined });
+    expect(plain.statusCode).toBe(201);
+    const plainKey = plain.json<{ keyId: string }>().keyId;
+    const row = await env.db.query.virtualKeys.findFirst({
+      where: (k, { eq: e }) => e(k.id, plainKey),
+    });
+    expect((row!.config as { probe?: boolean }).probe).toBeUndefined();
+    // probe: true with a budget or a long life is refused.
+    for (const over of [{ budgetMicros: '1000' }, { ttlSec: 3600 }]) {
+      const bad = await call('/v1/sessions', { ...probe, ...over });
+      expect(bad.statusCode, JSON.stringify(over)).toBe(400);
+      expect(bad.json()).toMatchObject({ error: 'invalid_request' });
+    }
+  });
+
+  it("make no agent day-cap template for a probe, so the parent's agent gets no $0 cap", async () => {
+    const org = await newOrg(env);
+    const call = (url: string, payload: object) =>
+      env.app.inject({ method: 'POST', url, headers: bearer(org.admin), payload });
+    const cred = (
+      await call('/v1/providers/credentials', { provider: 'acme', name: 'c', secret: 's' })
+    ).json<{ id: string }>().id;
+    const parentKeyId = (
+      await call('/v1/keys', { name: 'p', credentials: { acme: cred }, agentId: 'bot' })
+    ).json<{ id: string }>().id;
+    const probe = (
+      await call('/v1/sessions', {
+        parentKeyId,
+        budgetMicros: '0',
+        dayBudgetMicros: '0',
+        ttlSec: 60,
+        probe: true,
+      })
+    ).json<{ keyId: string; token: string; agentId: string }>();
+    expect(probe.agentId).toBe('bot');
+    const row = await env.db.query.virtualKeys.findFirst({
+      where: (k, { eq: e }) => e(k.id, probe.keyId),
+    });
+    expect((row!.config as { agentDayCapMicros?: string | null }).agentDayCapMicros).toBeNull();
+    const me = (
+      await env.app.inject({ url: '/v1/me', headers: { 'x-brake-key': probe.token } })
+    ).json<{ scopes: { scope: string; window: string; hard: number | null }[] }>();
+    for (const s of me.scopes.filter((x) => x.scope === 'agent:bot')) expect(s.hard).toBeNull();
+    // The key's own $0 cap still refuses everything.
+    expect(
+      me.scopes.find((s) => s.scope === `key:${probe.keyId}` && s.window.startsWith('m:')),
+    ).toMatchObject({ hard: 0 });
+  });
+
+  it("stay their parent key's agent, so its agent caps keep applying", async () => {
+    const org = await newOrg(env);
+    const call = (url: string, payload: object) =>
+      env.app.inject({ method: 'POST', url, headers: bearer(org.admin), payload });
+    const cred = (
+      await call('/v1/providers/credentials', { provider: 'acme', name: 'c', secret: 's' })
+    ).json<{ id: string }>().id;
+    const parent = (
+      await call('/v1/keys', {
+        name: 'p',
+        credentials: { acme: cred },
+        agentId: 'x',
+        canMintSessions: true,
+      })
+    ).json<{ token: string }>();
+    const mint = (agentId?: string) =>
+      env.app.inject({
+        method: 'POST',
+        url: '/v1/sessions',
+        headers: { 'x-brake-key': parent.token },
+        payload: agentId ? { agentId } : {},
+      });
+    const other = await mint('y');
+    expect(other.statusCode).toBe(403);
+    expect(other.json()).toMatchObject({ message: expect.stringContaining('agent x') as string });
+    expect((await mint('x')).json()).toMatchObject({ agentId: 'x' });
+    expect((await mint()).json()).toMatchObject({ agentId: 'x' });
+  });
+
+  it("are ended by their parent key, reading spend in the proxy's month window", async () => {
+    const org = await newOrg(env);
+    // The proxy charges in the time zone of the org record it reads (UTC here); Postgres says
+    // Tokyo, where it is already February.
+    await env.db.update(orgs).set({ timeZone: 'Asia/Tokyo' }).where(eq(orgs.id, org.id));
+    const now = new Date('2026-01-31T23:30:00Z');
+    const app = await buildApi({
+      db: env.db,
+      valkey: env.valkey,
+      wrapper: env.wrapper,
+      rateLimitPerMinute: 100_000,
+      now: () => now,
+    });
+    const cred = (
+      await app.inject({
+        method: 'POST',
+        url: '/v1/providers/credentials',
+        headers: bearer(org.admin),
+        payload: { provider: 'acme', name: 'c', secret: 's' },
+      })
+    ).json<{ id: string }>().id;
+    const parent = (
+      await app.inject({
+        method: 'POST',
+        url: '/v1/keys',
+        headers: bearer(org.admin),
+        payload: { name: 'p', credentials: { acme: cred }, canMintSessions: true },
+      })
+    ).json<{ token: string }>();
+    const child = (
+      await app.inject({
+        method: 'POST',
+        url: '/v1/sessions',
+        headers: { 'x-brake-key': parent.token },
+        payload: { budgetMicros: '5000', ttlSec: 60 },
+      })
+    ).json<{ keyId: string }>();
+    await new BudgetEngine(env.valkey).recordSpend({
+      orgId: org.id,
+      amount: 1234n,
+      scopes: [{ kind: 'key', id: child.keyId }],
+      timeZone: 'UTC',
+      at: now,
+    });
+    const end = await app.inject({
+      method: 'DELETE',
+      url: `/v1/sessions/${child.keyId}`,
+      headers: { 'x-brake-key': parent.token },
+    });
+    expect(end.statusCode).toBe(200);
+    expect(end.json()).toMatchObject({ keyId: child.keyId, spentMicros: 1234, heldMicros: 0 });
+    await app.close();
+  });
+
   it('are updated with the parent and revoked with it', async () => {
     const org = await newOrg(env);
     const call = (

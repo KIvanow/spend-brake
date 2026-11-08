@@ -6,6 +6,7 @@ export interface Call {
   method: string;
   headers: Record<string, string>;
   body: string | undefined;
+  signal?: AbortSignal | null | undefined;
 }
 
 export interface Fake {
@@ -32,6 +33,7 @@ export function fake(env: Record<string, string>, respond: Responder, childExit 
           Object.entries((init?.headers ?? {}) as Record<string, string>),
         ),
         body: init?.body as string | undefined,
+        signal: init?.signal,
       };
       f.calls.push(call);
       const r = respond(call);

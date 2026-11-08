@@ -1,5 +1,16 @@
 import { CliError, EXIT, type Io, config, microsToUsd } from './io.js';
 
+/** A refusal from the admin API, with its HTTP status. */
+export class ApiRefusal extends CliError {
+  constructor(
+    message: string,
+    code: number,
+    readonly status: number,
+  ) {
+    super(message, code);
+  }
+}
+
 /** Call the admin API with the admin token (env or `brake init` config). */
 export async function apiCall<T = unknown>(
   io: Io,
@@ -9,7 +20,7 @@ export async function apiCall<T = unknown>(
   auth: Record<string, string> | null = null,
 ): Promise<T> {
   const cfg = config(io);
-  const headers: Record<string, string> = auth ?? {};
+  const headers: Record<string, string> = { ...auth };
   if (!auth) {
     if (!cfg.adminToken) {
       throw new CliError('No admin token: run `brake init` or set BRAKE_ADMIN_TOKEN.', EXIT.auth);
@@ -36,10 +47,79 @@ export async function apiCall<T = unknown>(
   }
   if (!res.ok) {
     const msg = (data as { message?: string } | null)?.message ?? `HTTP ${res.status}`;
-    throw new CliError(msg, res.status === 401 ? EXIT.auth : EXIT.error);
+    throw new ApiRefusal(msg, res.status === 401 ? EXIT.auth : EXIT.error, res.status);
   }
   return data as T;
 }
+
+/** GET /v1/me: a virtual key's own view of its caps and policy. */
+export interface Me {
+  keyId: string;
+  sessionId: string | null;
+  killed: boolean;
+  /** Servers before 0.3.0 do not send it. */
+  killedProviders?: string[];
+  scopes: {
+    scope: string;
+    window: string;
+    spent: number;
+    held: number;
+    hard: number | null;
+    remaining: number | null;
+  }[];
+  /** Servers before 0.3.0 do not send it. */
+  policy?: {
+    providers: string[];
+    skus: string[] | null;
+    canMintSessions: boolean;
+    expiresAt: string | null;
+    failOpenMicros: number | null;
+    unpriced: Record<string, { policy: string; defaultPriceMicros: number | null }>;
+  };
+}
+
+export interface Minted {
+  sessionId: string;
+  keyId: string;
+  token: string;
+  agentId: string;
+  budgetMicros: number;
+  dayBudgetMicros: number;
+  expiresAt: string;
+}
+
+/** Mint a session key, authenticated by the parent key or the admin token in `auth`. */
+export const mintSession = (
+  io: Io,
+  auth: Record<string, string>,
+  body: {
+    budgetMicros: string;
+    dayBudgetMicros: string;
+    ttlSec: number;
+    agentId?: string;
+    parentKeyId?: string;
+    name?: string;
+    /** A $0 probe (doctor --prove): needs a $0 budget and a ttl of at most 300 s. */
+    probe?: true;
+  },
+) => apiCall<Minted>(io, 'POST', '/v1/sessions', body, auth);
+
+/**
+ * Revoke a session key, with the key itself unless `auth` names another (its parent key, or an
+ * admin token); returns what the session spent.
+ */
+export const endSession = (
+  io: Io,
+  s: { keyId: string; token: string },
+  auth: Record<string, string> = { 'x-brake-key': s.token },
+) =>
+  apiCall<{ spentMicros: number; heldMicros: number }>(
+    io,
+    'DELETE',
+    `/v1/sessions/${s.keyId}`,
+    undefined,
+    auth,
+  );
 
 const cell = (v: unknown): string => {
   if (v === null || v === undefined) return '';

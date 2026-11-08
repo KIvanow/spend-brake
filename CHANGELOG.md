@@ -5,6 +5,64 @@ images for linux/amd64 and linux/arm64
 (`ghcr.io/kivanow/spend-brake-<service>:<version>`, with build provenance) and the CLI
 (`@spend-brake/cli`).
 
+## [Unreleased]
+
+### Added
+
+- `brake doctor` checks, from where an agent runs, what could let it spend past its caps: a
+  missing or uncapped key, a readable admin token, raw provider keys in the environment or in
+  `./.env*` files, a second virtual key, plain HTTP, fail-open, keys that never expire, and
+  providers whose unpriced routes are forwarded. `--prove` mints a $0 session and shows that
+  the proxy refuses a priced call before forwarding it, spending nothing. Every report lists
+  what doctor cannot verify; it never reports a workload as protected. It exits 1 on a failed
+  check, and also when it could not read the key's caps, its policy, the working directory or a
+  `.env` file, when the workload can read another virtual key, or when it could not complete
+  `--prove` (which needs a key that may mint sessions, not a session key, and a 0.3.0 server).
+  Mapbox public tokens (`pk.eyJ…`) count as provider keys.
+- `brake mcp`, a stdio MCP server with capped `tavily_search` and `exa_search` tools and a
+  read-only `brake_budget` tool, to replace a Tavily or Exa MCP server entry without changing
+  the agent (preview). Also published on its own as `@spend-brake/mcp`
+  (`npx -y @spend-brake/mcp`).
+- `GET /v1/me` reports the key's own policy: its providers, SKUs, whether it may mint
+  sessions, its expiry, fail-open allowance, and the org's unpriced-route policy for each of
+  its providers, and which of them a provider kill has switched off. It refuses an
+  `X-Brake-Session` the proxy would refuse (400) instead of ignoring it.
+
+### Changed
+
+- `brake search`, `brake call` and `brake mcp` answer `STOP`, with the charge, when the provider
+  did not answer in time behind the proxy (`504 upstream_timeout`): it may have done the request,
+  so it must not be retried blindly, and the CLI exits 3 as for a cap. Any other failed call
+  that was charged names the charge.
+- A key that has an agent mints sessions for that agent only (`403` for another `agentId`), so
+  the agent's caps keep applying to them.
+- A `$0` probe session must be asked for with `probe: true` on `POST /v1/sessions` (a `$0`
+  budget and a lifetime of up to five minutes, else `400`); other `$0` sessions are ordinary
+  sessions and count toward the plan. Probes are limited to 30 an hour per key
+  (`429 rate_limited`).
+- `brake doctor` does not pass `--prove` when it cannot read back what the probe session spent,
+  nor the saved admin token check when it found no home directory to look in (it falls back to
+  the OS home when `HOME` is unset). It takes a service for ready only when its readiness report
+  says `ok: true`; when the API's rate limit answers `/v1/readyz`, the API counts as reachable
+  (with a warning) and the key is still checked. `--prove` fails a probe the proxy forwarded,
+  whatever the provider or the proxy then answered (`401`, `400`, `upstream_timeout`,
+  `upstream_unavailable`), and ends the probe session with the parent key. It does not pass the
+  other-virtual-key check for `.env` files it could not list or read.
+- `brake doctor` and `brake session` find an admin token in a saved config that is not valid
+  JSON, and a config that is JSON but not an object (`null`) no longer crashes them.
+- `DELETE /v1/sessions/{keyId}` reads the session's spend in the time zone the proxy charges in
+  (as `GET /v1/me` does).
+- `brake doctor --prove` reports a probe answered without the proxy's `x-brake-cost-micros`
+  header (a CDN, WAF or load balancer page, or another server at `BRAKE_URL`) as not checked,
+  not as forwarded; money the probe session spent or holds still fails it. Without `BRAKE_KEY`
+  it reports `--prove` as not checked instead of leaving it out. A Google API key in any
+  variable whose name has `MAPS` in it (`NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`, `MAPS_API_KEY`) fails
+  as a Maps key, in the environment and in `.env` files.
+- `brake session` ends the session with the parent key or admin token that minted it, not the
+  session's own token, which the API refuses once the session's TTL has passed.
+- A `$0` probe session records no agent day cap, so it makes no `$0` day-cap template for the
+  parent's agent.
+
 ## [0.2.1] - 2026-11-02
 
 ### Fixed

@@ -126,42 +126,68 @@ brake call custom/acme GET /v1/items          # a custom API
 Each call prints `ok`, `status`, `costMicros`, `cost`, `remainingMicros`, `requestId` and
 `data`.
 
+## brake doctor
+
+Checks what could let the workload spend past its caps, from where it runs. One JSON report
+(`ok`, `summary`, `checks`, `notVerified`) or, with `--pretty`, a readable one; exit code 1
+when a check fails, when it could not read the key's caps or policy, the working directory or a
+`.env` file, when it found no home directory to look for a saved admin token in, when the
+workload can read another virtual key, or when `--prove` could not complete the probe or read
+back what the probe session spent. A service is ready only when its readiness report says
+`ok: true`; when the API's own rate limit answers `/v1/readyz`, the API counts as reachable with a
+warning (its readiness not checked) and the key is still checked. A saved config brake cannot
+parse is still searched for an admin token.
+
+```sh
+brake doctor --pretty
+brake doctor --prove     # mint a $0 session and show a priced call is refused; spends nothing
+```
+
+See [checking a workload](../agents/#check-the-workload-with-brake-doctor) for the checks.
+
+## brake mcp
+
+An MCP server on stdio with capped `tavily_search` and `exa_search` tools and a read-only
+`brake_budget` tool (preview). It reads `BRAKE_KEY`, `BRAKE_URL` and `BRAKE_API_URL` (set all
+three: the budget tool otherwise asks `http://localhost:8081`);
+`--tools tavily,exa` picks the providers. The same server is published as `@spend-brake/mcp`. Setup: [MCP clients](../agents/#mcp-clients-preview).
+
 ## Admin commands
 
 These use the admin token (`BRAKE_ADMIN_TOKEN` or the saved one).
 
-| Command                                                                        | What                                                                                                                |
-| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
-| `brake keys list`                                                              | Virtual keys                                                                                                        |
-| `brake keys create --name <n> --credential <provider=credId...>`               | Create a key; also `--env`, `--agent`, `--skus`, `--session-cap`, `--can-mint-sessions`, `--expires`, `--countries` |
-| `brake keys show <id>` / `brake keys revoke <id>`                              | Show or revoke a key                                                                                                |
-| `brake custom-apis list` / `brake custom-apis show <id>`                       | Your [custom APIs](../custom-apis/)                                                                                 |
-| `brake custom-apis add <file.json>`                                            | Add a custom API from a JSON definition                                                                             |
-| `brake custom-apis update <id> <file.json>` / `brake custom-apis delete <id>`  | Replace or delete one (delete is refused while keys use it)                                                         |
-| `brake caps list`                                                              | Caps                                                                                                                |
-| `brake caps set <scope> --day 5 --month 50`                                    | Set caps; also `--soft-day`, `--soft-month`                                                                         |
-| `brake caps rm <scope> [--kind d\|m]`                                          | Remove caps                                                                                                         |
-| `brake kill <target> [--reason <text>]`                                        | Stop all spend for `org`, `key:<id>`, `prov:<name>` or `sess:<id>`                                                  |
-| `brake unkill <target>`                                                        | Lift a kill                                                                                                         |
-| `brake status [--scope <scope...>]`                                            | Remaining budget: your session and key with `BRAKE_KEY`, or every scope (admin)                                     |
-| `brake spend --group-by key,sku --days 30`                                     | Spend from the ledger; also `--from`, `--to`                                                                        |
-| `brake estimate [--days 30]`                                                   | What your Google usage would cost on Geoapify, Stadia Maps, Open Places API, Mapbox and HERE                        |
-| `brake license install <file>` / `brake license status`                        | Business / Enterprise license (owner token of the licensed org)                                                     |
-| `brake reconcile set --table <project.dataset.table> --service-account <file>` | Compare the ledger with Google's billing export daily (Business / Enterprise); also `--project`                     |
-| `brake reconcile status` / `brake reconcile report`                            | Reconciliation settings and the daily report                                                                        |
+| Command                                                                        | What                                                                                                                     |
+| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `brake keys list`                                                              | Virtual keys                                                                                                             |
+| `brake keys create --name <n> --credential <provider=credId...>`               | Create a key; also `--env`, `--agent`, `--skus`, `--session-cap`, `--can-mint-sessions`, `--expires`, `--countries`      |
+| `brake keys show <id>` / `brake keys revoke <id>`                              | Show or revoke a key                                                                                                     |
+| `brake custom-apis list` / `brake custom-apis show <id>`                       | Your [custom APIs](../custom-apis/)                                                                                      |
+| `brake custom-apis add <file.json>`                                            | Add a custom API from a JSON definition                                                                                  |
+| `brake custom-apis update <id> <file.json>` / `brake custom-apis delete <id>`  | Replace or delete one (delete is refused while keys use it)                                                              |
+| `brake caps list`                                                              | Caps                                                                                                                     |
+| `brake caps set <scope> --day 5 --month 50`                                    | Set caps; also `--soft-day`, `--soft-month`                                                                              |
+| `brake caps rm <scope> [--kind d\|m]`                                          | Remove caps                                                                                                              |
+| `brake kill <target> [--reason <text>]`                                        | Stop all spend for `org`, `key:<id>`, `prov:<name>` or `sess:<id>`                                                       |
+| `brake unkill <target>`                                                        | Lift a kill                                                                                                              |
+| `brake status [--scope <scope...>]`                                            | Remaining budget: your session and key with `BRAKE_KEY` (a refused `BRAKE_SESSION` is a warning), or every scope (admin) |
+| `brake spend --group-by key,sku --days 30`                                     | Spend from the ledger; also `--from`, `--to`                                                                             |
+| `brake estimate [--days 30]`                                                   | What your Google usage would cost on Geoapify, Stadia Maps, Open Places API, Mapbox and HERE                             |
+| `brake license install <file>` / `brake license status`                        | Business / Enterprise license (owner token of the licensed org)                                                          |
+| `brake reconcile set --table <project.dataset.table> --service-account <file>` | Compare the ledger with Google's billing export daily (Business / Enterprise); also `--project`                          |
+| `brake reconcile status` / `brake reconcile report`                            | Reconciliation settings and the daily report                                                                             |
 
 Cap scopes are `org`, `key:<id>`, `sku:<provider>:<sku>`, `env:<name>`, `agent:<id>` and
 `sess:<id>`.
 
 ## Exit codes
 
-| Code | Meaning                                                                |
-| ---- | ---------------------------------------------------------------------- |
-| 0    | Success                                                                |
-| 1    | Other failure (provider error, proxy unreachable, session not started) |
-| 2    | Bad arguments                                                          |
-| 3    | **Stop:** budget exceeded, spending killed, or the route has no price  |
-| 4    | **Stop:** loop detected, the key is paused                             |
-| 5    | Missing, unknown, revoked or expired virtual key                       |
+| Code | Meaning                                                                                                                                        |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | Success                                                                                                                                        |
+| 1    | Other failure (provider error, proxy unreachable, session not started)                                                                         |
+| 2    | Bad arguments                                                                                                                                  |
+| 3    | **Stop:** budget exceeded, spending killed, the route has no price, or the provider timed out (it may have been charged: do not retry blindly) |
+| 4    | **Stop:** loop detected, the key is paused                                                                                                     |
+| 5    | Missing, unknown, revoked or expired virtual key                                                                                               |
 
 On 3 and 4, stderr carries one line that tells the agent to stop and ask the user.

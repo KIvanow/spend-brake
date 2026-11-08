@@ -61,7 +61,8 @@ async function requestsThisMonth(ctx: Ctx, orgId: string): Promise<number> {
 export async function requireCapacity(
   ctx: Ctx,
   orgId: string,
-  what: 'key' | 'session' | 'customApi' | { provider: string },
+  /** `probe`: a $0 doctor session, which counts against nothing but needs a paid-up plan. */
+  what: 'key' | 'session' | 'probe' | 'customApi' | { provider: string },
 ): Promise<void> {
   const e = await entitlementsOf(ctx, orgId);
   if (!e) return;
@@ -97,6 +98,8 @@ export async function requireCapacity(
           eq(virtualKeys.orgId, orgId),
           gte(virtualKeys.createdAt, monthStart(ctx.now())),
           sql`${virtualKeys.config}->>'sessionId' is not null`,
+          // Probes ($0, caps locked) can spend nothing. No flag is no probe.
+          sql`coalesce(${virtualKeys.config}->>'probe', 'false') <> 'true'`,
         ),
       );
     if (Number(row?.n ?? 0) >= e.agentSessionsPerMonth) {

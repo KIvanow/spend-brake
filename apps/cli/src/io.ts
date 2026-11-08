@@ -9,6 +9,12 @@ export interface Io {
   stderr: (s: string) => void;
   fetch: typeof fetch;
   spawn: (cmd: string, args: string[], opts: SpawnOptions) => Child;
+  /** Protocol input for `brake mcp`. */
+  stdin?: NodeJS.ReadableStream;
+  /** The working directory `brake doctor` scans. */
+  cwd?: () => string;
+  /** The user's home from the OS, for `brake doctor` when HOME is unset. */
+  homedir?: () => string;
   /** Ask the user (init wizard); absent when not interactive. */
   prompt?: (question: string, opts?: { secret?: boolean; default?: string }) => Promise<string>;
 }
@@ -24,7 +30,10 @@ export const EXIT = {
   ok: 0,
   error: 1,
   usage: 2,
-  /** Budget exhausted, spending killed or route unpriced: stop and ask the user. */
+  /**
+   * Budget exhausted, spending killed, route unpriced, or a charged call the provider did not
+   * answer in time: stop and ask the user.
+   */
   budget: 3,
   /** Loop detected: the key is paused. Stop and ask the user. */
   loop: 4,
@@ -36,10 +45,15 @@ export class CliError extends Error {
   constructor(
     message: string,
     readonly code: number = EXIT.error,
+    options?: ErrorOptions,
   ) {
-    super(message);
+    super(message, options);
   }
 }
+
+/** Whether an error (or what caused it) is a request given up by `withTimeout`. */
+export const timedOut = (err: unknown): boolean =>
+  err instanceof Error && (err.name === 'TimeoutError' || timedOut(err.cause));
 
 export interface SavedConfig {
   apiUrl?: string;
@@ -54,11 +68,24 @@ export function configPath(io: Io): string | null {
   return base ? join(base, 'brake', 'config.json') : null;
 }
 
+/** A saved config's text as a config: only a JSON object is one (`null` or `[]` is not). */
+function parseConfig(text: string): SavedConfig | null {
+  try {
+    const v: unknown = JSON.parse(text);
+    return typeof v === 'object' && v !== null && !Array.isArray(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+/** An admin token anywhere in a text, the way `brake init` writes one (sbt_ and 32 base62). */
+const ADMIN_TOKEN_IN_TEXT = /(?<![0-9A-Za-z_])sbt_[0-9A-Za-z]{32}(?![0-9A-Za-z])/;
+
 export function readSavedConfig(io: Io): SavedConfig {
   const path = configPath(io);
   if (!path || !existsSync(path)) return {};
   try {
-    return JSON.parse(readFileSync(path, 'utf8')) as SavedConfig;
+    return parseConfig(readFileSync(path, 'utf8')) ?? {};
   } catch {
     return {};
   }
@@ -90,6 +117,71 @@ export function config(io: Io) {
     key: io.env.BRAKE_KEY,
     session: io.env.BRAKE_SESSION,
     adminToken: io.env.BRAKE_ADMIN_TOKEN ?? saved.adminToken,
+  };
+}
+
+/**
+ * Saved brake configs this user can read: the one brake would use now, and the default one,
+ * which a different XDG_CONFIG_HOME hides from brake but not from the agent.
+ */
+export function savedConfigs(io: Io): {
+  looked: string[];
+  found: { path: string; cfg: SavedConfig }[];
+} {
+  const paths = new Set<string>();
+  const current = configPath(io);
+  if (current) paths.add(current);
+  // Without HOME, the OS still knows the home, and so may the agent.
+  let home = io.env.HOME;
+  if (!home) {
+    try {
+      home = io.homedir?.();
+    } catch {
+      // no home directory for this user
+    }
+  }
+  if (home) paths.add(join(home, '.config', 'brake', 'config.json'));
+  const found: { path: string; cfg: SavedConfig }[] = [];
+  for (const path of paths) {
+    let text: string;
+    try {
+      if (!existsSync(path)) continue;
+      text = readFileSync(path, 'utf8');
+    } catch {
+      // unreadable: by the agent too
+      continue;
+    }
+    // A file brake cannot parse is still text the agent can read: a token in it is found too.
+    const cfg = parseConfig(text);
+    const token = cfg?.adminToken ? undefined : ADMIN_TOKEN_IN_TEXT.exec(text)?.[0];
+    if (cfg || token)
+      found.push({ path, cfg: { ...cfg, ...(token ? { adminToken: token } : {}) } });
+  }
+  return { looked: [...paths], found };
+}
+
+/** The key, and the session it spends in when the client names one (proxy and /v1/me alike). */
+export function keyHeaders(cfg: {
+  key: string | undefined;
+  session: string | undefined;
+}): Record<string, string> {
+  return {
+    'x-brake-key': cfg.key ?? '',
+    ...(cfg.session ? { 'x-brake-session': cfg.session } : {}),
+  };
+}
+
+/** The same Io, with every request (and its body) given up after `ms`, or on the caller's signal. */
+export function withTimeout(io: Io, ms: number): Io {
+  return {
+    ...io,
+    fetch: (input: string | URL | Request, init?: RequestInit) => {
+      const timeout = AbortSignal.timeout(ms);
+      return io.fetch(input, {
+        ...init,
+        signal: init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout,
+      });
+    },
   };
 }
 

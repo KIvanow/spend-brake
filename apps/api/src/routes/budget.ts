@@ -10,6 +10,7 @@ import {
   micros,
   n,
   raisesCap,
+  refuseProbeCapChange,
   scopeLabel,
   toKillTarget,
   toScope,
@@ -52,6 +53,7 @@ export function budgetRoutes(r: Router, ctx: Ctx): void {
     role: 'admin',
     tag: 'Caps',
     summary: 'Set hard / soft caps for a scope, per day and/or month (null removes a limit)',
+    errors: { 409: 'A $0 probe session (brake doctor --prove): its caps cannot change' },
     params: z.object({ scope: scopeLabel }),
     body: z
       .object({ day: capValues.optional(), month: capValues.optional() })
@@ -68,6 +70,7 @@ export function budgetRoutes(r: Router, ctx: Ctx): void {
           .limit(1);
         if (!key) throw notFound('Key');
       }
+      await refuseProbeCapChange(ctx, auth.orgId, params.scope);
       const items = [];
       const pending = [];
       for (const [kind, values] of [
@@ -136,6 +139,7 @@ export function budgetRoutes(r: Router, ctx: Ctx): void {
     role: 'admin',
     tag: 'Caps',
     summary: 'Remove the caps of a scope',
+    errors: { 409: 'A $0 probe session (brake doctor --prove): its caps cannot change' },
     params: z.object({ scope: scopeLabel }),
     query: z.object({ kind: z.enum(['d', 'm']).optional() }),
     response: z.object({
@@ -144,6 +148,7 @@ export function budgetRoutes(r: Router, ctx: Ctx): void {
       pending: z.array(pendingView).optional(),
     }),
     handler: async ({ auth, params, query }) => {
+      await refuseProbeCapChange(ctx, auth.orgId, params.scope);
       const kinds: ('d' | 'm')[] = [];
       const pending = [];
       for (const kind of query.kind ? [query.kind] : (['d', 'm'] as const)) {

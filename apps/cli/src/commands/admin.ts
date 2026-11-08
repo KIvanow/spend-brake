@@ -1,6 +1,6 @@
 import type { Command } from 'commander';
-import { apiCall, money, print } from '../admin.js';
-import { CliError, EXIT, type Io, config, usdToMicros } from '../io.js';
+import { ApiRefusal, apiCall, money, print } from '../admin.js';
+import { CliError, EXIT, type Io, config, keyHeaders, usdToMicros } from '../io.js';
 
 const pretty = (cmd: Command) => Boolean(cmd.optsWithGlobals<{ pretty?: boolean }>().pretty);
 const leaf = (parent: Command, name: string) =>
@@ -305,7 +305,21 @@ export function adminCommands(program: Command, io: Io, done: (code: number) => 
       const cfg = config(io);
       let r: { scopes: Status[]; killed: unknown };
       if (cfg.key && !o.scope) {
-        r = await apiCall(io, 'GET', '/v1/me', undefined, { 'x-brake-key': cfg.key });
+        try {
+          r = await apiCall(io, 'GET', '/v1/me', undefined, keyHeaders(cfg));
+        } catch (err) {
+          // A BRAKE_SESSION this key may not name: say so (the proxy refuses calls with it too),
+          // and still show the key's own budget.
+          if (!(err instanceof ApiRefusal && err.status === 400 && cfg.session)) throw err;
+          io.stderr(`brake: warning: BRAKE_SESSION is refused: ${err.message}\n`);
+          r = await apiCall(
+            io,
+            'GET',
+            '/v1/me',
+            undefined,
+            keyHeaders({ ...cfg, session: undefined }),
+          );
+        }
       } else {
         const q = (o.scope ?? []).map((s) => `scope=${encodeURIComponent(s)}`).join('&');
         r = await apiCall(io, 'GET', `/v1/status${q ? `?${q}` : ''}`);

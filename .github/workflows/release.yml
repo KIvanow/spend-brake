@@ -3,7 +3,8 @@ name: Release
 # Push a tag like v0.1.0 (matching apps/cli/package.json's version) to publish:
 # - container images for linux/amd64 and linux/arm64 to ghcr.io/<owner>/spend-brake-<service>:<version>,
 #   with a build provenance attestation, and :latest once every image is pushed
-# - the CLI to npm as @spend-brake/cli (needs the NPM_TOKEN repository secret)
+# - the CLI to npm as @spend-brake/cli, and the MCP server as @spend-brake/mcp at the same version
+#   (needs the NPM_TOKEN repository secret, with publish rights to both)
 # - a GitHub release with that version's CHANGELOG section
 # Nothing is published unless the same checks as CI pass on the tagged commit.
 on:
@@ -31,6 +32,13 @@ jobs:
             echo "::error::tag $GITHUB_REF_NAME does not match apps/cli/package.json version $cli"
             exit 1
           fi
+          for f in apps/mcp/package.json apps/mcp/server.json; do
+            v="$(node -p "require('./$f').version")"
+            if [ "$v" != "$version" ]; then
+              echo "::error::$f version $v does not match the tag $GITHUB_REF_NAME"
+              exit 1
+            fi
+          done
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
   # The same checks as ci.yml, on the tagged commit.
@@ -220,12 +228,36 @@ jobs:
       - name: Publish @spend-brake/cli
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
           if [ -z "$NODE_AUTH_TOKEN" ]; then
             echo "::warning::NPM_TOKEN is not set; skipping the npm release"
             exit 0
           fi
+          # A re-run after a later step failed: this version is already out, and npm never
+          # takes the same version twice.
+          if npm view "@spend-brake/cli@$VERSION" version >/dev/null 2>&1; then
+            echo "@spend-brake/cli@$VERSION is already published; skipping"
+            exit 0
+          fi
           cd apps/cli && npm publish --provenance --access public
+      - name: Publish @spend-brake/mcp
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::warning::NPM_TOKEN is not set; skipping the npm release"
+            exit 0
+          fi
+          if npm view "@spend-brake/mcp@$VERSION" version >/dev/null 2>&1; then
+            echo "@spend-brake/mcp@$VERSION is already published; skipping"
+            exit 0
+          fi
+          # npm does not resolve pnpm's workspace: protocol: pin the CLI published above.
+          cd apps/mcp
+          npm pkg set "dependencies.@spend-brake/cli=$VERSION"
+          npm publish --provenance --access public
 
   release:
     needs: [version, licensing, merge, latest, npm]

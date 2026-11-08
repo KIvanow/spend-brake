@@ -1,12 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
   BudgetEngine,
-  type CapTemplate,
   type Crossing,
   DEFAULT_LOOP_POLICY,
   DEFAULT_PUMPING_POLICY,
   type KeyRecord,
-  type KillTarget,
   type OrgRecord,
   type PauseReason,
   Registry,
@@ -14,8 +12,11 @@ import {
   type ScopeShare,
   type Scope,
   type ValkeyClient,
+  capTemplatesFor,
   isVirtualKey,
+  killTargetsFor,
   scopeLabel,
+  sessionFor,
   shareOf,
   windowsFor,
 } from '@spend-brake/budget';
@@ -114,7 +115,6 @@ declare module 'fastify' {
 
 class KeyNotFound extends Error {}
 
-const SESSION_ID = /^[A-Za-z0-9_.-]{1,128}$/;
 /** Messaging destinations allowed when a key has no country list: high-risk ones need opting in. */
 const DEFAULT_COUNTRIES = ['US', 'CA'];
 const CONFIG_STALE_MS = 10 * 60_000;
@@ -586,19 +586,9 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
       );
     }
     // A session key carries its session; otherwise the client may name one.
-    const session = key.sessionId ?? request.headers['x-brake-session'];
-    if (session !== undefined && (typeof session !== 'string' || !SESSION_ID.test(session))) {
-      return sendError(reply, 'invalid_request', 'Invalid X-Brake-Session.');
-    }
-    // Sessions are client-named scopes; only keys with a session budget may open them, so a
-    // client cannot create unbounded per-session counters.
-    if (session !== undefined && key.sessionCapMicros === null && key.sessionId === null) {
-      return sendError(
-        reply,
-        'invalid_request',
-        'This key has no session budget; drop X-Brake-Session.',
-      );
-    }
+    const named = sessionFor(key, request.headers['x-brake-session']);
+    if (named.refusal !== undefined) return sendError(reply, 'invalid_request', named.refusal);
+    const session = named.session;
     query.delete('key');
     for (const name of DROP_IN_PARAMS) if (isVirtualKey(query.get(name) ?? '')) query.delete(name);
 
@@ -791,24 +781,8 @@ export function buildServer(deps: ProxyDeps): FastifyInstance {
     if (key.env) scopes.push({ kind: 'env', name: key.env });
     if (key.agentId) scopes.push({ kind: 'agent', id: key.agentId });
     if (sessionScope) scopes.push(sessionScope);
-    const killTargets: KillTarget[] = [
-      { kind: 'org' },
-      { kind: 'key', id: key.id },
-      { kind: 'prov', name: adapter.id },
-    ];
-    if (session) killTargets.push({ kind: 'sess', id: session });
-    if (key.parentKeyId) killTargets.push({ kind: 'key', id: key.parentKeyId });
-    const capTemplates: CapTemplate[] = [];
-    if (sessionScope && key.sessionCapMicros) {
-      capTemplates.push({ scope: sessionScope, kind: 'm', hard: BigInt(key.sessionCapMicros) });
-    }
-    if (key.agentId && key.agentDayCapMicros) {
-      capTemplates.push({
-        scope: { kind: 'agent', id: key.agentId },
-        kind: 'd',
-        hard: BigInt(key.agentDayCapMicros),
-      });
-    }
+    const killTargets = killTargetsFor(key, session, adapter.id);
+    const capTemplates = capTemplatesFor(key, session ?? null);
 
     const reqId = request.id;
     let remaining: bigint | null = null;

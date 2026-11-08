@@ -162,13 +162,24 @@ export async function buildApi(deps: ApiDeps): Promise<FastifyInstance> {
   app.get('/v1/openapi.json', { config: { rateLimit: false } }, () => spec);
   // Liveness: the process answers. Readiness: Valkey and Postgres answer too.
   app.get('/healthz', { config: { rateLimit: false } }, () => ({ ok: true, service: 'api' }));
-  app.get('/readyz', { config: { rateLimit: false } }, async (_req, reply) => {
+  const ready = async () => {
     const [valkey, postgres] = await Promise.all([
       answers(() => deps.valkey.ping()),
       answers(() => deps.db.execute(sql`select 1`)),
     ]);
-    const ok = valkey && postgres;
-    return reply.code(ok ? 200 : 503).send({ ok, valkey, postgres });
+    return { ok: valkey && postgres, valkey, postgres };
+  };
+  app.get('/readyz', { config: { rateLimit: false } }, async (_req, reply) => {
+    const r = await ready();
+    return reply.code(r.ok ? 200 : 503).send(r);
+  });
+  // Also under /v1, the only path the dashboard's nginx forwards, so `brake doctor` can check
+  // readiness through the dashboard domain. That one is public: rate limited (but answered when
+  // the limiter's Valkey is the thing down), and it says only whether the API is ready, not
+  // which backend is down.
+  app.get('/v1/readyz', { config: { rateLimit: { skipOnError: true } } }, async (_req, reply) => {
+    const { ok } = await ready();
+    return reply.code(ok ? 200 : 503).send({ ok });
   });
   return app;
 }

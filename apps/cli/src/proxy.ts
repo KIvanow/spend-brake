@@ -1,4 +1,4 @@
-import { CliError, EXIT, type Io, config, microsToUsd } from './io.js';
+import { CliError, EXIT, type Io, config, keyHeaders, microsToUsd } from './io.js';
 
 export interface ProxyRequest {
   method: string;
@@ -36,8 +36,7 @@ export async function proxyCall(io: Io, req: ProxyRequest): Promise<ProxyResult>
   for (const [k, v] of Object.entries(req.headers ?? {})) {
     if (!k.toLowerCase().startsWith('x-brake-')) headers[k] = v;
   }
-  headers['x-brake-key'] = cfg.key;
-  if (cfg.session) headers['x-brake-session'] = cfg.session;
+  Object.assign(headers, keyHeaders(cfg));
   let body: string | undefined;
   if (req.body !== undefined) {
     body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
@@ -51,7 +50,11 @@ export async function proxyCall(io: Io, req: ProxyRequest): Promise<ProxyResult>
       ...(body !== undefined ? { body } : {}),
     });
   } catch (err) {
-    throw new CliError(`cannot reach the proxy at ${cfg.proxyUrl}: ${(err as Error).message}`);
+    throw new CliError(
+      `cannot reach the proxy at ${cfg.proxyUrl}: ${(err as Error).message}`,
+      EXIT.error,
+      { cause: err },
+    );
   }
   const text = await res.text();
   let data: unknown = text;
@@ -82,6 +85,51 @@ interface BrakeErrorBody {
 }
 
 /**
+ * Why the proxy refused a result, as one line telling an agent to stop rather than retry, and
+ * the exit code that goes with it. Null when the call succeeded.
+ */
+export function refusal(r: ProxyResult): { message: string; code: number } | null {
+  if (r.ok) return null;
+  const e = (typeof r.data === 'object' && r.data !== null ? r.data : {}) as BrakeErrorBody;
+  // A failed call can still be charged (a provider that timed out may have done the work).
+  const charged = r.costMicros ? `; charged ${r.cost}` : '';
+  switch (e.error) {
+    case 'budget_exceeded':
+      return {
+        message: `STOP. Spend cap reached for ${e.scope ?? 'this key'}${e.cap !== undefined ? ` (cap ${microsToUsd(e.cap, 2)})` : ''}. Do not retry; ask the user to raise the cap.`,
+        code: EXIT.budget,
+      };
+    case 'killed':
+      return {
+        message: `STOP. Spending is switched off for ${e.target ?? 'this key'}. Ask the user.`,
+        code: EXIT.budget,
+      };
+    case 'unpriced_route':
+      return {
+        message: 'STOP. This route has no known price, so it is blocked. Ask the user.',
+        code: EXIT.budget,
+      };
+    case 'loop_detected':
+      return {
+        message: `STOP. Repeated identical requests; the key is paused${e.retryAfter ? ` for ${e.retryAfter} s` : ''}. Do not retry; ask the user.`,
+        code: EXIT.loop,
+      };
+    case 'upstream_timeout':
+      return {
+        message: `STOP. The provider did not answer in time${charged}. It may have done the request anyway: do not retry it blindly; check the budget and ask the user.`,
+        code: EXIT.budget,
+      };
+    case 'invalid_key':
+      return { message: e.message ?? 'invalid virtual key', code: EXIT.auth };
+    default:
+      return {
+        message: `request failed with HTTP ${r.status}${e.message ? `: ${e.message}` : ''}${charged}`,
+        code: EXIT.error,
+      };
+  }
+}
+
+/**
  * Print a result (JSON by default) and work out the exit code. Proxy refusals get a one-line
  * reason on stderr that tells an agent to stop rather than retry.
  */
@@ -94,34 +142,8 @@ export function report(io: Io, r: ProxyResult, pretty: boolean): number {
   } else {
     io.stdout(`${JSON.stringify(r)}\n`);
   }
-  if (r.ok) return EXIT.ok;
-  const e = (typeof r.data === 'object' && r.data !== null ? r.data : {}) as BrakeErrorBody;
-  switch (e.error) {
-    case 'budget_exceeded':
-      io.stderr(
-        `brake: STOP. Spend cap reached for ${e.scope ?? 'this key'}${e.cap !== undefined ? ` (cap ${microsToUsd(e.cap, 2)})` : ''}. Do not retry; ask the user to raise the cap.\n`,
-      );
-      return EXIT.budget;
-    case 'killed':
-      io.stderr(
-        `brake: STOP. Spending is switched off for ${e.target ?? 'this key'}. Ask the user.\n`,
-      );
-      return EXIT.budget;
-    case 'unpriced_route':
-      io.stderr('brake: STOP. This route has no known price, so it is blocked. Ask the user.\n');
-      return EXIT.budget;
-    case 'loop_detected':
-      io.stderr(
-        `brake: STOP. Repeated identical requests; the key is paused${e.retryAfter ? ` for ${e.retryAfter} s` : ''}. Do not retry; ask the user.\n`,
-      );
-      return EXIT.loop;
-    case 'invalid_key':
-      io.stderr(`brake: ${e.message ?? 'invalid virtual key'}\n`);
-      return EXIT.auth;
-    default:
-      io.stderr(
-        `brake: request failed with HTTP ${r.status}${e.message ? `: ${e.message}` : ''}\n`,
-      );
-      return EXIT.error;
-  }
+  const why = refusal(r);
+  if (!why) return EXIT.ok;
+  io.stderr(`brake: ${why.message}\n`);
+  return why.code;
 }

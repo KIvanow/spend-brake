@@ -904,8 +904,11 @@ export class BudgetEngine {
     scopes: Scope[],
     timeZone: string,
     now = new Date(),
+    /** Caps that the first call creates (capTemplatesFor): the cap of a scope not made yet. */
+    templates: CapTemplate[] = [],
   ): Promise<ScopeStatus[]> {
     const k = orgKeys(orgId);
+    const templated = new Map(templates.map((t) => [`${scopeLabel(t.scope)}|${t.kind}`, t.hard]));
     const windows = windowsFor(now, timeZone);
     const pairs = [...new Set(scopes.map(scopeLabel))].flatMap((scope) =>
       windows.map((w) => ({ scope, w })),
@@ -927,7 +930,7 @@ export class BudgetEngine {
       const spent = optBig(spentR as string | null) ?? 0n;
       const held = optBig(heldR as string | null) ?? 0n;
       const [hardR, softR] = capR as (string | null)[];
-      const hard = optBig(hardR);
+      const hard = optBig(hardR) ?? templated.get(`${scope}|${w.kind}`) ?? null;
       const remaining = hard === null ? null : hard - spent - held > 0n ? hard - spent - held : 0n;
       return { scope, window: w.id, spent, held, hard, soft: optBig(softR), remaining };
     });
