@@ -6,7 +6,6 @@ import {
   eq,
   isNull,
   issuedLicenses,
-  lte,
   or,
   orgEntitlements,
   orgs,
@@ -172,26 +171,18 @@ export async function applyEvent(deps: WebhookDeps, event: Stripe.Event): Promis
 
 /**
  * Lift a failed payment's hold once an invoice is paid: the status alone, in one statement, so
- * the org's limits are kept. Only a hold that began before the payment (both by Stripe's clock):
- * a retry of an old paid invoice does not lift a hold a newer failure set since.
+ * the org's limits are kept. Only the hold that invoice's failure set (or one that names none):
+ * paying, or retrying, an older invoice does not lift a hold a newer failure set since.
  */
 async function liftHold(db: Db | Tx, orgId: string, invoice: Stripe.Invoice, now: Date) {
-  const paidAt = invoice.status_transitions?.paid_at;
   await db
     .update(orgEntitlements)
-    .set({ status: 'active', holdSince: null, updatedAt: now })
+    .set({ status: 'active', holdInvoice: null, updatedAt: now })
     .where(
       and(
         eq(orgEntitlements.orgId, orgId),
         eq(orgEntitlements.status, 'past_due'),
-        ...(paidAt
-          ? [
-              or(
-                isNull(orgEntitlements.holdSince),
-                lte(orgEntitlements.holdSince, new Date(paidAt * 1000)),
-              ),
-            ]
-          : []),
+        or(isNull(orgEntitlements.holdInvoice), eq(orgEntitlements.holdInvoice, invoice.id)),
       ),
     );
 }
@@ -214,11 +205,11 @@ function applyInTransaction(
         return checkoutCompleted(tx, deps, event.data.object);
       case 'customer.subscription.created':
       case 'customer.subscription.updated':
-        return subscriptionChanged(tx, deps, event.data.object, stripeTime(event, deps.now()));
+        return subscriptionChanged(tx, deps, event.data.object);
       case 'customer.subscription.deleted':
         return subscriptionDeleted(tx, deps, event.data.object);
       case 'invoice.payment_failed':
-        return paymentFailed(tx, deps, event.data.object, stripeTime(event, deps.now()));
+        return paymentFailed(tx, deps, event.data.object);
       case 'invoice.paid':
         return invoicePaid(tx, deps, event.data.object, reads!, mails);
       default:
@@ -248,11 +239,7 @@ async function checkoutCompleted(tx: Tx, deps: WebhookDeps, s: Stripe.Checkout.S
   return 'applied';
 }
 
-/** When Stripe created the event: holds are timed by Stripe's clock, like payments. */
-const stripeTime = (event: Stripe.Event, now: Date) =>
-  Number.isFinite(event.created) ? new Date(event.created * 1000) : now;
-
-async function subscriptionChanged(tx: Tx, deps: WebhookDeps, sub: Stripe.Subscription, at: Date) {
+async function subscriptionChanged(tx: Tx, deps: WebhookDeps, sub: Stripe.Subscription) {
   const orgId = await orgForCustomer(tx, deps, id(sub.customer), sub.metadata);
   if (!orgId) return 'ignored';
   const { plan, status } = subscriptionPlan(sub);
@@ -267,7 +254,8 @@ async function subscriptionChanged(tx: Tx, deps: WebhookDeps, sub: Stripe.Subscr
       stripeCustomerId: id(sub.customer),
       stripeSubscriptionId: ended ? null : sub.id,
       currentPeriodEnd: ended || !end ? null : new Date(end * 1000),
-      holdAt: at,
+      // Past due: the subscription's unpaid invoice is the one whose payment lifts the hold.
+      holdInvoice: sub.latest_invoice ? id(sub.latest_invoice) : null,
     },
     deps.now(),
   );
@@ -289,22 +277,42 @@ async function subscriptionDeleted(tx: Tx, deps: WebhookDeps, sub: Stripe.Subscr
   return 'applied';
 }
 
-async function paymentFailed(tx: Tx, deps: WebhookDeps, invoice: Stripe.Invoice, at: Date) {
+async function paymentFailed(tx: Tx, deps: WebhookDeps, invoice: Stripe.Invoice) {
   const orgId = await orgForCustomer(tx, deps, id(invoice.customer));
   const current = orgId ? await planOf(tx, orgId) : null;
   if (!orgId || !current) return 'ignored';
-  await setPlan(tx, orgId, { plan: current.plan, status: 'past_due', holdAt: at }, deps.now());
+  await setPlan(
+    tx,
+    orgId,
+    { plan: current.plan, status: 'past_due', holdInvoice: invoice.id },
+    deps.now(),
+  );
   return 'applied';
 }
 
 /** What a paid invoice needs from Stripe: its license lines' plans and products, the customer. */
 interface InvoiceReads {
   lines: { line: Stripe.InvoiceLineItem; plan: LicensePlan; product: Stripe.Product }[];
-  /** Fetched for invoices with license lines (undefined otherwise); null once deleted. */
+  /** Fetched when no row of ours names it, or its license_org may be needed; null once deleted. */
   customer: Stripe.Customer | null | undefined;
 }
 
 async function invoiceReads(deps: WebhookDeps, invoice: Stripe.Invoice): Promise<InvoiceReads> {
+  // Ours first: an invoice for a customer that is no org's is ignored without reading products
+  // (a failed read would only fail an event we do not care about).
+  const customerId = id(invoice.customer);
+  const [row] = customerId
+    ? await deps.db
+        .select({ licenseOrg: orgEntitlements.licenseOrg })
+        .from(orgEntitlements)
+        .where(eq(orgEntitlements.stripeCustomerId, customerId))
+        .limit(1)
+    : [];
+  let customer: Stripe.Customer | null | undefined;
+  if (!row && customerId) {
+    customer = await retrieveCustomer(deps, customerId);
+    if (!customer?.metadata.orgId) return { lines: [], customer };
+  }
   const lines: InvoiceReads['lines'] = [];
   const products = await Promise.all(
     invoice.lines.data.map((line) => {
@@ -317,11 +325,11 @@ async function invoiceReads(deps: WebhookDeps, invoice: Stripe.Invoice): Promise
     const plan = product?.metadata[PLAN_METADATA];
     if (product && plan && isLicensePlan(plan)) lines.push({ line, plan, product });
   });
-  // The customer, for an invoice with license lines: its metadata may name the org (no row of
-  // ours names the customer) or the install (license_org).
-  const customer = id(invoice.customer);
-  if (lines.length === 0 || !customer) return { lines, customer: undefined };
-  return { lines, customer: await retrieveCustomer(deps, customer) };
+  // The customer's metadata may name the install (license_org) when none is stored.
+  if (customer === undefined && customerId && lines.length > 0 && !row?.licenseOrg) {
+    customer = await retrieveCustomer(deps, customerId);
+  }
+  return { lines, customer };
 }
 
 async function invoicePaid(

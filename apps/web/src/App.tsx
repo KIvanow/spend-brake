@@ -196,6 +196,8 @@ export function App({
       setPending(false);
       setSignedIn(change.token !== null);
       setLinkError(change.token === null ? 'You signed out in another tab. Sign in again.' : null);
+      // Signed in from the emailed link in another tab: the welcome page has done its job here.
+      if (change.token !== null && route() === 'welcome') window.location.hash = '/';
       setSession((n) => n + 1);
     };
     window.addEventListener('hashchange', onHash);

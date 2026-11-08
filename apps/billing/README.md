@@ -64,11 +64,11 @@ Billing) wins over the customer's metadata: check it under Billing before sendin
 A first license needs a `license_org` (renewals of a license issued before it keep the id that
 license named). Without one, or with one that is not a valid org id, no license is issued: the webhook answers 500 and logs a
 warning, so Stripe retries the event (a failed payment's hold is still lifted). Fix the id in
-the customer's metadata (hand-made invoices), or store one with `PUT /v1/billing/license-org` as
-the org's owner. When the bad id is in a subscription's metadata, only the stored id fixes it:
-that metadata is copied into each event, so fixing it in Stripe does not change a retry. The
-next retry, or **Resend** on the event in the Stripe Dashboard, then issues the license for the
-period paid.
+the customer's metadata, or store one with `PUT /v1/billing/license-org` as the org's owner (a
+stored id wins over any metadata). A bad id in a subscription's metadata is copied into each
+event, so fixing it on the subscription does not change a retry; fixing it on the customer does
+(the first valid id wins). The next retry, or **Resend** on the event in the Stripe Dashboard,
+then issues the license for the period paid.
 
 Stripe retries a failed live event for up to three days. After that, **Resend** in the
 Dashboard works for events up to 30 days old (`stripe events resend <evt_…>` with the CLI). An

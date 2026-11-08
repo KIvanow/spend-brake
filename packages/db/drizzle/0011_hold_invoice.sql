@@ -1,0 +1,1 @@
+ALTER TABLE "org_entitlements" ADD COLUMN "hold_invoice" text;

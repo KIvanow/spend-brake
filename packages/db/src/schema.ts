@@ -288,8 +288,8 @@ export const orgEntitlements = pgTable(
     status: text('status', { enum: ['active', 'past_due'] })
       .notNull()
       .default('active'),
-    /** When the current hold began, by Stripe's clock: a payment from before it does not lift it. */
-    holdSince: timestamp('hold_since', { withTimezone: true }),
+    /** The Stripe invoice whose failed payment set the hold: paying that one lifts it. */
+    holdInvoice: text('hold_invoice'),
     maxKeys: bigint('max_keys', { mode: 'number' }),
     maxProviders: bigint('max_providers', { mode: 'number' }),
     maxCustomApis: bigint('max_custom_apis', { mode: 'number' }),

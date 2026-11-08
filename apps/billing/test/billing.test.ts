@@ -25,7 +25,7 @@ import {
 import type { FastifyInstance } from 'fastify';
 import Stripe from 'stripe';
 import { GenericContainer, type StartedTestContainer, Wait } from 'testcontainers';
-import { afterAll, beforeAll, describe, expect, it, onTestFinished } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { setLicenseOrg } from '../src/entitlements.js';
 import { licenseMailer } from '../src/mail.js';
 import { PLAN_METADATA, type Plan, lookupKey } from '../src/plans.js';
@@ -979,9 +979,10 @@ describe('plan transitions', () => {
     );
     expect((await plan(orgId)).status).toBe('past_due');
     expect((await newKey(t, cred)).json()).toMatchObject({ error: 'payment_required' });
+    // Paying the invoice that failed lifts the hold.
     await post(
       event('invoice.paid', {
-        id: 'in_ok',
+        id: 'in_f',
         object: 'invoice',
         customer: 'cus_t',
         lines: { data: [] },
@@ -1326,55 +1327,60 @@ describe('licenses', () => {
     expect((await plan(orgId)).licenseOrg).toBe('kept');
   });
 
-  it("does not lift a hold a newer failure set when an older invoice's event is retried", async () => {
+  it('lifts a hold only when the invoice whose failure set it is paid', async () => {
     const { orgId } = await signup('free', '203.0.113.96');
     customers.set('cus_hold', {
       id: 'cus_hold',
       metadata: { orgId },
     } as unknown as Stripe.Customer);
-    // The invoice was paid before the newer failure set the hold.
-    await db
-      .update(orgEntitlements)
-      .set({ status: 'past_due', holdSince: NOW })
-      .where(eq(orgEntitlements.orgId, orgId));
-    const old = invoice('in_hold', 'cus_hold', 'prod_enterprise', new Date('2027-10-30T00:00:00Z'));
-    const paid = {
-      ...old,
-      status_transitions: { paid_at: Math.floor(NOW.getTime() / 1000) - 3600 },
+    const deps = {
+      db,
+      stripe: fakeStripe,
+      licenseKey: signer.privateKey,
+      now: () => NOW,
+      sendLicense: () => Promise.resolve(),
     };
-    await expect(
+    const apply = (type: string, invoiceId: string) =>
       applyEvent(
-        {
-          db,
-          stripe: fakeStripe,
-          licenseKey: signer.privateKey,
-          now: () => NOW,
-          sendLicense: () => Promise.resolve(),
-        },
-        event('invoice.paid', paid) as unknown as Stripe.Event,
-      ),
-    ).rejects.toThrow(/no license_org/);
+        deps,
+        event(type, {
+          id: invoiceId,
+          object: 'invoice',
+          customer: 'cus_hold',
+          lines: { data: [] },
+        }) as unknown as Stripe.Event,
+      );
+    // Invoice A fails, then B: the hold is B's.
+    await apply('invoice.payment_failed', 'in_a');
+    await apply('invoice.payment_failed', 'in_b');
+    expect(await plan(orgId)).toMatchObject({ status: 'past_due', holdInvoice: 'in_b' });
+    // Paying A (or a retry of an old paid A) leaves B's hold in place.
+    await apply('invoice.paid', 'in_a');
     expect((await plan(orgId)).status).toBe('past_due');
+    // Paying B lifts it, with the org's own limits kept.
+    await db.update(orgEntitlements).set({ maxKeys: 9 }).where(eq(orgEntitlements.orgId, orgId));
+    await apply('invoice.paid', 'in_b');
+    expect(await plan(orgId)).toMatchObject({ status: 'active', holdInvoice: null, maxKeys: 9 });
+  });
 
-    // A hold from before the payment is lifted, even when the row changed since (an id saved
-    // under Billing): the hold's own start is what counts, not the row's last update.
-    await db
-      .update(orgEntitlements)
-      .set({ holdSince: new Date(NOW.getTime() - 7200_000), updatedAt: NOW })
-      .where(eq(orgEntitlements.orgId, orgId));
-    await expect(
-      applyEvent(
-        {
-          db,
-          stripe: fakeStripe,
-          licenseKey: signer.privateKey,
-          now: () => NOW,
-          sendLicense: () => Promise.resolve(),
-        },
-        event('invoice.paid', paid) as unknown as Stripe.Event,
-      ),
-    ).rejects.toThrow(/no license_org/);
-    expect(await plan(orgId)).toMatchObject({ status: 'active', holdSince: null });
+  it('ignores a paid invoice for a customer that is no org, without reading its products', async () => {
+    const reads = vi.spyOn(fakeStripe.products, 'retrieve');
+    onTestFinished(() => reads.mockRestore());
+    const outcome = await applyEvent(
+      {
+        db,
+        stripe: fakeStripe,
+        licenseKey: signer.privateKey,
+        now: () => NOW,
+        sendLicense: () => Promise.resolve(),
+      },
+      event(
+        'invoice.paid',
+        invoice('in_stranger', 'cus_stranger', 'prod_business', new Date('2026-11-30T12:00:00Z')),
+      ) as unknown as Stripe.Event,
+    );
+    expect(outcome).toBe('ignored');
+    expect(reads).not.toHaveBeenCalled();
   });
 
   it('takes a valid license_org from the customer over an invalid one on the subscription', async () => {

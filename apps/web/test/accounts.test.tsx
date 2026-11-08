@@ -806,6 +806,18 @@ describe('sign-up', () => {
     expect(screen.queryByRole('heading', { name: 'Create your account' })).toBeNull();
   });
 
+  it('leaves the welcome page once the emailed link signs them in in another tab', async () => {
+    window.location.hash = '/welcome';
+    render(<App client={client()} />);
+    expect(await screen.findByRole('heading', { name: 'Check your email' })).toBeTruthy();
+    window.localStorage.setItem('brake.adminToken', 'sbt_new');
+    window.dispatchEvent(
+      new StorageEvent('storage', { key: 'brake.adminToken', oldValue: null, newValue: 'sbt_new' }),
+    );
+    await waitFor(() => expect(window.location.hash).toBe('#/'));
+    expect(screen.queryByText(/not the one you are signed in to/)).toBeNull();
+  });
+
   it('welcomes people back from Checkout before they sign in', async () => {
     window.location.hash = '/welcome';
     render(<App client={client()} />);

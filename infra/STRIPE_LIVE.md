@@ -159,7 +159,7 @@ The only expected warning is `no license signing key` if `BRAKE_LICENSE_SIGNING_
 not set: then Business is not on sale (the pricing page's **Buy Business** opens sign-up with
 Free selected and a note that the plan in the link is not sold here, so set the key before
 linking to it). With a key, billing refuses to start in live mode unless it is the key released
-ee builds verify licenses with (`ee/src/license/keys.ts`).
+ee builds verify licenses with (`LICENSE_PUBLIC_KEY` in `packages/shared/src/license-format.ts`).
 
 ## 5. Real-card test
 
