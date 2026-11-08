@@ -5,6 +5,7 @@ import {
   desc,
   eq,
   isNull,
+  lte,
   issuedLicenses,
   or,
   orgEntitlements,
@@ -171,18 +172,28 @@ export async function applyEvent(deps: WebhookDeps, event: Stripe.Event): Promis
 
 /**
  * Lift a failed payment's hold once an invoice is paid: the status alone, in one statement, so
- * the org's limits are kept. Only the hold that invoice's failure set (or one that names none):
- * paying, or retrying, an older invoice does not lift a hold a newer failure set since.
+ * the org's limits are kept. Any payment made after the latest failure lifts it (another invoice
+ * paid in its place included; a subscription still past due puts the hold back with its next
+ * event), but not one made before it: a retried event of an old payment leaves a newer hold.
+ * Both times are Stripe's.
  */
 async function liftHold(db: Db | Tx, orgId: string, invoice: Stripe.Invoice, now: Date) {
+  const paidAt = invoice.status_transitions?.paid_at;
   await db
     .update(orgEntitlements)
-    .set({ status: 'active', holdInvoice: null, updatedAt: now })
+    .set({ status: 'active', holdSince: null, updatedAt: now })
     .where(
       and(
         eq(orgEntitlements.orgId, orgId),
         eq(orgEntitlements.status, 'past_due'),
-        or(isNull(orgEntitlements.holdInvoice), eq(orgEntitlements.holdInvoice, invoice.id)),
+        ...(paidAt
+          ? [
+              or(
+                isNull(orgEntitlements.holdSince),
+                lte(orgEntitlements.holdSince, new Date(paidAt * 1000)),
+              ),
+            ]
+          : []),
       ),
     );
 }
@@ -205,11 +216,11 @@ function applyInTransaction(
         return checkoutCompleted(tx, deps, event.data.object);
       case 'customer.subscription.created':
       case 'customer.subscription.updated':
-        return subscriptionChanged(tx, deps, event.data.object);
+        return subscriptionChanged(tx, deps, event.data.object, stripeTime(event, deps.now()));
       case 'customer.subscription.deleted':
         return subscriptionDeleted(tx, deps, event.data.object);
       case 'invoice.payment_failed':
-        return paymentFailed(tx, deps, event.data.object);
+        return paymentFailed(tx, deps, event.data.object, stripeTime(event, deps.now()));
       case 'invoice.paid':
         return invoicePaid(tx, deps, event.data.object, reads!, mails);
       default:
@@ -239,7 +250,11 @@ async function checkoutCompleted(tx: Tx, deps: WebhookDeps, s: Stripe.Checkout.S
   return 'applied';
 }
 
-async function subscriptionChanged(tx: Tx, deps: WebhookDeps, sub: Stripe.Subscription) {
+/** When Stripe created the event: holds are timed by Stripe's clock, like payments. */
+const stripeTime = (event: Stripe.Event, now: Date) =>
+  Number.isFinite(event.created) ? new Date(event.created * 1000) : now;
+
+async function subscriptionChanged(tx: Tx, deps: WebhookDeps, sub: Stripe.Subscription, at: Date) {
   const orgId = await orgForCustomer(tx, deps, id(sub.customer), sub.metadata);
   if (!orgId) return 'ignored';
   const { plan, status } = subscriptionPlan(sub);
@@ -254,8 +269,7 @@ async function subscriptionChanged(tx: Tx, deps: WebhookDeps, sub: Stripe.Subscr
       stripeCustomerId: id(sub.customer),
       stripeSubscriptionId: ended ? null : sub.id,
       currentPeriodEnd: ended || !end ? null : new Date(end * 1000),
-      // Past due: the subscription's unpaid invoice is the one whose payment lifts the hold.
-      holdInvoice: sub.latest_invoice ? id(sub.latest_invoice) : null,
+      holdAt: at,
     },
     deps.now(),
   );
@@ -277,16 +291,11 @@ async function subscriptionDeleted(tx: Tx, deps: WebhookDeps, sub: Stripe.Subscr
   return 'applied';
 }
 
-async function paymentFailed(tx: Tx, deps: WebhookDeps, invoice: Stripe.Invoice) {
+async function paymentFailed(tx: Tx, deps: WebhookDeps, invoice: Stripe.Invoice, at: Date) {
   const orgId = await orgForCustomer(tx, deps, id(invoice.customer));
   const current = orgId ? await planOf(tx, orgId) : null;
   if (!orgId || !current) return 'ignored';
-  await setPlan(
-    tx,
-    orgId,
-    { plan: current.plan, status: 'past_due', holdInvoice: invoice.id },
-    deps.now(),
-  );
+  await setPlan(tx, orgId, { plan: current.plan, status: 'past_due', holdAt: at }, deps.now());
   return 'applied';
 }
 

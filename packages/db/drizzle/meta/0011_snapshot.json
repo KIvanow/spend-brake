@@ -1,5 +1,5 @@
 {
-  "id": "e94b550f-31c7-4c3e-b981-b730c30fa281",
+  "id": "600857e4-6879-487a-9c84-86bb9df91234",
   "prevId": "0b7cb157-5a27-43d8-b842-5c176b13244d",
   "version": "7",
   "dialect": "postgresql",
@@ -579,9 +579,9 @@
           "notNull": true,
           "default": "'active'"
         },
-        "hold_invoice": {
-          "name": "hold_invoice",
-          "type": "text",
+        "hold_since": {
+          "name": "hold_since",
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },

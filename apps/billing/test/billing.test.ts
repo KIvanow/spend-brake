@@ -979,10 +979,9 @@ describe('plan transitions', () => {
     );
     expect((await plan(orgId)).status).toBe('past_due');
     expect((await newKey(t, cred)).json()).toMatchObject({ error: 'payment_required' });
-    // Paying the invoice that failed lifts the hold.
     await post(
       event('invoice.paid', {
-        id: 'in_f',
+        id: 'in_ok',
         object: 'invoice',
         customer: 'cus_t',
         lines: { data: [] },
@@ -1327,7 +1326,7 @@ describe('licenses', () => {
     expect((await plan(orgId)).licenseOrg).toBe('kept');
   });
 
-  it('lifts a hold only when the invoice whose failure set it is paid', async () => {
+  it('lifts a hold with any payment after its latest failure, not with an older one', async () => {
     const { orgId } = await signup('free', '203.0.113.96');
     customers.set('cus_hold', {
       id: 'cus_hold',
@@ -1340,27 +1339,43 @@ describe('licenses', () => {
       now: () => NOW,
       sendLicense: () => Promise.resolve(),
     };
-    const apply = (type: string, invoiceId: string) =>
-      applyEvent(
-        deps,
-        event(type, {
+    const t = (hours: number) => Math.floor(NOW.getTime() / 1000) + hours * 3600;
+    const failed = (invoiceId: string, at: number) =>
+      applyEvent(deps, {
+        ...event('invoice.payment_failed', {
           id: invoiceId,
           object: 'invoice',
           customer: 'cus_hold',
           lines: { data: [] },
+        }),
+        created: at,
+      } as unknown as Stripe.Event);
+    const paid = (invoiceId: string, paidAt: number) =>
+      applyEvent(
+        deps,
+        event('invoice.paid', {
+          id: invoiceId,
+          object: 'invoice',
+          customer: 'cus_hold',
+          status_transitions: { paid_at: paidAt },
+          lines: { data: [] },
         }) as unknown as Stripe.Event,
       );
-    // Invoice A fails, then B: the hold is B's.
-    await apply('invoice.payment_failed', 'in_a');
-    await apply('invoice.payment_failed', 'in_b');
-    expect(await plan(orgId)).toMatchObject({ status: 'past_due', holdInvoice: 'in_b' });
-    // Paying A (or a retry of an old paid A) leaves B's hold in place.
-    await apply('invoice.paid', 'in_a');
+    // Invoice A fails, then B: the hold dates from B's failure.
+    await failed('in_a', t(1));
+    await failed('in_b', t(3));
+    expect(await plan(orgId)).toMatchObject({
+      status: 'past_due',
+      holdSince: new Date(t(3) * 1000),
+    });
+    // A payment made before B failed (an old event, retried) leaves the hold.
+    await paid('in_a', t(2));
     expect((await plan(orgId)).status).toBe('past_due');
-    // Paying B lifts it, with the org's own limits kept.
+    // A payment after it lifts it, even of another invoice (A voided, C sent and paid), and keeps
+    // the org's own limits.
     await db.update(orgEntitlements).set({ maxKeys: 9 }).where(eq(orgEntitlements.orgId, orgId));
-    await apply('invoice.paid', 'in_b');
-    expect(await plan(orgId)).toMatchObject({ status: 'active', holdInvoice: null, maxKeys: 9 });
+    await paid('in_c', t(4));
+    expect(await plan(orgId)).toMatchObject({ status: 'active', holdSince: null, maxKeys: 9 });
   });
 
   it('ignores a paid invoice for a customer that is no org, without reading its products', async () => {
