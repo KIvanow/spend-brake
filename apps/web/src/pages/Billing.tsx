@@ -125,7 +125,7 @@ export function Billing() {
   const installValue = (installOrg ?? b.licenseOrg ?? '').trim();
   const installValid = LICENSE_ORG.test(installValue);
   // Also for a license plan with no id stored yet (bought before the id was asked for): its
-  // owner sets the id here, and the license waiting for it is issued.
+  // owner sets the id here, and Stripe's next retry of the paid invoice issues the license.
   const licenseSection =
     b.licenses.length > 0 ||
     Boolean(b.licenseOrg) ||

@@ -1,4 +1,4 @@
-import { type Db, auditLog, eq, orgEntitlements } from '@spend-brake/db';
+import { type Db, auditLog, eq, orgEntitlements, sql } from '@spend-brake/db';
 import { LIMITS, type Plan } from './plans.js';
 
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
@@ -10,6 +10,8 @@ export interface PlanChange {
   stripeSubscriptionId?: string | null;
   currentPeriodEnd?: Date | null;
   billingEmail?: string | null;
+  /** With status past_due: when the failure happened (Stripe's event time). */
+  holdAt?: Date;
 }
 
 /** Write an org's plan and the limits that come with it. */
@@ -26,10 +28,26 @@ export async function setPlan(db: Db | Tx, orgId: string, change: PlanChange, no
     ...(change.billingEmail !== undefined ? { billingEmail: change.billingEmail } : {}),
     updatedAt: now,
   };
+  // A hold keeps the time it began (a later failure does not move it); lifting it clears it.
+  const holdAt = change.holdAt ?? now;
+  const hold =
+    change.status === 'past_due'
+      ? { insert: holdAt, update: sql`coalesce(${orgEntitlements.holdSince}, ${holdAt})` }
+      : change.status === 'active'
+        ? { insert: null, update: null }
+        : null;
   await db
     .insert(orgEntitlements)
-    .values({ orgId, status: 'active', ...values })
-    .onConflictDoUpdate({ target: orgEntitlements.orgId, set: values });
+    .values({
+      orgId,
+      status: 'active',
+      ...values,
+      ...(hold ? { holdSince: hold.insert } : {}),
+    })
+    .onConflictDoUpdate({
+      target: orgEntitlements.orgId,
+      set: { ...values, ...(hold ? { holdSince: hold.update } : {}) },
+    });
 }
 
 /**

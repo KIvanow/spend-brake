@@ -1335,7 +1335,7 @@ describe('licenses', () => {
     // The invoice was paid before the newer failure set the hold.
     await db
       .update(orgEntitlements)
-      .set({ status: 'past_due', updatedAt: NOW })
+      .set({ status: 'past_due', holdSince: NOW })
       .where(eq(orgEntitlements.orgId, orgId));
     const old = invoice('in_hold', 'cus_hold', 'prod_enterprise', new Date('2027-10-30T00:00:00Z'));
     const paid = {
@@ -1355,6 +1355,52 @@ describe('licenses', () => {
       ),
     ).rejects.toThrow(/no license_org/);
     expect((await plan(orgId)).status).toBe('past_due');
+
+    // A hold from before the payment is lifted, even when the row changed since (an id saved
+    // under Billing): the hold's own start is what counts, not the row's last update.
+    await db
+      .update(orgEntitlements)
+      .set({ holdSince: new Date(NOW.getTime() - 7200_000), updatedAt: NOW })
+      .where(eq(orgEntitlements.orgId, orgId));
+    await expect(
+      applyEvent(
+        {
+          db,
+          stripe: fakeStripe,
+          licenseKey: signer.privateKey,
+          now: () => NOW,
+          sendLicense: () => Promise.resolve(),
+        },
+        event('invoice.paid', paid) as unknown as Stripe.Event,
+      ),
+    ).rejects.toThrow(/no license_org/);
+    expect(await plan(orgId)).toMatchObject({ status: 'active', holdSince: null });
+  });
+
+  it('takes a valid license_org from the customer over an invalid one on the subscription', async () => {
+    const { orgId } = await signup('free', '203.0.113.97');
+    customers.set('cus_both', {
+      id: 'cus_both',
+      metadata: { orgId, license_org: 'acme' },
+    } as unknown as Stripe.Customer);
+    const inv = {
+      ...invoice('in_both', 'cus_both', 'prod_enterprise', new Date('2027-10-30T00:00:00Z')),
+      parent: { subscription_details: { metadata: { license_org: 'acme corp' } } },
+    };
+    expect(
+      await applyEvent(
+        {
+          db,
+          stripe: fakeStripe,
+          licenseKey: signer.privateKey,
+          now: () => NOW,
+          sendLicense: () => Promise.resolve(),
+        },
+        event('invoice.paid', inv) as unknown as Stripe.Event,
+      ),
+    ).toBe('applied');
+    const [row] = await db.select().from(issuedLicenses).where(eq(issuedLicenses.orgId, orgId));
+    expect(verify(row!.raw).org).toBe('acme');
   });
 
   it('emails each license on an invoice with several license lines', async () => {

@@ -50,9 +50,9 @@ Business is bought online ([pricing](https://spendbrake.dev/#pricing)):
    one `brake init` printed). Read it without echo, so it stays out of your shell history:
 
    ```sh
-   # bash or zsh; in sh or dash: stty -echo; read -r BRAKE_ADMIN_TOKEN; stty echo; export BRAKE_ADMIN_TOKEN
-   read -rs BRAKE_ADMIN_TOKEN && export BRAKE_ADMIN_TOKEN   # paste the owner token, then Enter
-   brake license install acme.license
+   # bash or zsh; in sh or dash: stty -echo; read -r t; stty echo; then the second line
+   read -rs t                                   # paste the owner token, then Enter
+   BRAKE_ADMIN_TOKEN="$t" brake license install acme.license; unset t
    ```
 
 The account at app.spendbrake.dev is only the customer record (invoices, card, cancelling);

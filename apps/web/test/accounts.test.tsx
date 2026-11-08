@@ -790,11 +790,20 @@ describe('sign-up', () => {
     expect(await screen.findByLabelText(/^Org id on your install/)).toBeTruthy();
   });
 
-  it('opens sign-up from a sign-up link for someone already signed in', async () => {
+  it('opens sign-up from a Buy Business link for someone already signed in', async () => {
     setToken('tok');
     window.location.hash = '/signup?plan=business';
     render(<App client={client()} />);
     expect(await screen.findByRole('heading', { name: 'Create your account' })).toBeTruthy();
+  });
+
+  it('keeps someone signed in on their dashboard for any other sign-up link', () => {
+    setToken('tok');
+    window.location.hash = '/signup?plan=team';
+    render(<App client={client()} />);
+    // The first render is the dashboard (this test's API answers nothing, which later signs out).
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Create your account' })).toBeNull();
   });
 
   it('welcomes people back from Checkout before they sign in', async () => {

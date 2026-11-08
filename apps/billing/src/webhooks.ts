@@ -4,8 +4,10 @@ import {
   and,
   desc,
   eq,
+  isNull,
   issuedLicenses,
   lte,
+  or,
   orgEntitlements,
   orgs,
   stripeEvents,
@@ -147,7 +149,10 @@ export async function applyEvent(deps: WebhookDeps, event: Stripe.Event): Promis
     // The payment still went through: a failed payment's hold is lifted now, while the license
     // waits for the retry.
     if (err instanceof LicenseNotIssued && event.type === 'invoice.paid') {
-      await liftHold(deps.db, err.orgId, event.data.object, deps.now());
+      // A failure here must not hide why the license waits: that error is the one rethrown.
+      await liftHold(deps.db, err.orgId, event.data.object, deps.now()).catch((e: unknown) =>
+        deps.log?.warn({ orgId: err.orgId, err: String(e) }, 'payment hold not lifted'),
+      );
     }
     throw err;
   }
@@ -167,19 +172,26 @@ export async function applyEvent(deps: WebhookDeps, event: Stripe.Event): Promis
 
 /**
  * Lift a failed payment's hold once an invoice is paid: the status alone, in one statement, so
- * the org's limits are kept. Only a hold set before the payment: a retry of an old paid invoice
- * does not lift a hold a newer failure set since.
+ * the org's limits are kept. Only a hold that began before the payment (both by Stripe's clock):
+ * a retry of an old paid invoice does not lift a hold a newer failure set since.
  */
 async function liftHold(db: Db | Tx, orgId: string, invoice: Stripe.Invoice, now: Date) {
   const paidAt = invoice.status_transitions?.paid_at;
   await db
     .update(orgEntitlements)
-    .set({ status: 'active', updatedAt: now })
+    .set({ status: 'active', holdSince: null, updatedAt: now })
     .where(
       and(
         eq(orgEntitlements.orgId, orgId),
         eq(orgEntitlements.status, 'past_due'),
-        ...(paidAt ? [lte(orgEntitlements.updatedAt, new Date(paidAt * 1000))] : []),
+        ...(paidAt
+          ? [
+              or(
+                isNull(orgEntitlements.holdSince),
+                lte(orgEntitlements.holdSince, new Date(paidAt * 1000)),
+              ),
+            ]
+          : []),
       ),
     );
 }
@@ -202,11 +214,11 @@ function applyInTransaction(
         return checkoutCompleted(tx, deps, event.data.object);
       case 'customer.subscription.created':
       case 'customer.subscription.updated':
-        return subscriptionChanged(tx, deps, event.data.object);
+        return subscriptionChanged(tx, deps, event.data.object, stripeTime(event, deps.now()));
       case 'customer.subscription.deleted':
         return subscriptionDeleted(tx, deps, event.data.object);
       case 'invoice.payment_failed':
-        return paymentFailed(tx, deps, event.data.object);
+        return paymentFailed(tx, deps, event.data.object, stripeTime(event, deps.now()));
       case 'invoice.paid':
         return invoicePaid(tx, deps, event.data.object, reads!, mails);
       default:
@@ -236,7 +248,11 @@ async function checkoutCompleted(tx: Tx, deps: WebhookDeps, s: Stripe.Checkout.S
   return 'applied';
 }
 
-async function subscriptionChanged(tx: Tx, deps: WebhookDeps, sub: Stripe.Subscription) {
+/** When Stripe created the event: holds are timed by Stripe's clock, like payments. */
+const stripeTime = (event: Stripe.Event, now: Date) =>
+  Number.isFinite(event.created) ? new Date(event.created * 1000) : now;
+
+async function subscriptionChanged(tx: Tx, deps: WebhookDeps, sub: Stripe.Subscription, at: Date) {
   const orgId = await orgForCustomer(tx, deps, id(sub.customer), sub.metadata);
   if (!orgId) return 'ignored';
   const { plan, status } = subscriptionPlan(sub);
@@ -251,6 +267,7 @@ async function subscriptionChanged(tx: Tx, deps: WebhookDeps, sub: Stripe.Subscr
       stripeCustomerId: id(sub.customer),
       stripeSubscriptionId: ended ? null : sub.id,
       currentPeriodEnd: ended || !end ? null : new Date(end * 1000),
+      holdAt: at,
     },
     deps.now(),
   );
@@ -272,11 +289,11 @@ async function subscriptionDeleted(tx: Tx, deps: WebhookDeps, sub: Stripe.Subscr
   return 'applied';
 }
 
-async function paymentFailed(tx: Tx, deps: WebhookDeps, invoice: Stripe.Invoice) {
+async function paymentFailed(tx: Tx, deps: WebhookDeps, invoice: Stripe.Invoice, at: Date) {
   const orgId = await orgForCustomer(tx, deps, id(invoice.customer));
   const current = orgId ? await planOf(tx, orgId) : null;
   if (!orgId || !current) return 'ignored';
-  await setPlan(tx, orgId, { plan: current.plan, status: 'past_due' }, deps.now());
+  await setPlan(tx, orgId, { plan: current.plan, status: 'past_due', holdAt: at }, deps.now());
   return 'applied';
 }
 
@@ -404,11 +421,16 @@ async function licenseOrgFor(
   reads: InvoiceReads,
 ): Promise<string> {
   if (stored) return stored;
-  // Typed by hand in the Stripe Dashboard: surrounding spaces are not part of the id.
-  const fromStripe = (
-    invoice.parent?.subscription_details?.metadata?.license_org ??
-    reads.customer?.metadata?.license_org
-  )?.trim();
+  // Typed by hand in the Stripe Dashboard: surrounding spaces are not part of the id. The first
+  // valid one wins, so a bad subscription value does not hide a good one fixed on the customer
+  // (the subscription's is a copy frozen into the event, which a retry cannot change).
+  const given = [
+    invoice.parent?.subscription_details?.metadata?.license_org,
+    reads.customer?.metadata?.license_org,
+  ]
+    .map((v) => v?.trim())
+    .filter((v): v is string => Boolean(v));
+  const fromStripe = given.find((v) => LICENSE_ORG.test(v)) ?? given[0];
   if (!fromStripe) {
     // Renewals of licenses issued before license_org keep naming the id they named.
     const [last] = await tx

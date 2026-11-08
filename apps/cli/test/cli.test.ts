@@ -458,8 +458,10 @@ describe('brake license', () => {
     expect(await run(['license', 'install', file], f.io)).toBe(EXIT.error);
     const err = f.err.join('');
     // The token is read without echo, never typed into the command line.
-    expect(err).toContain('read -rs BRAKE_ADMIN_TOKEN && export BRAKE_ADMIN_TOKEN && brake');
-    expect(err).not.toContain('BRAKE_ADMIN_TOKEN=');
+    // Scoped to this one command: not exported to the rest of the shell session.
+    expect(err).toContain('read -rs t && BRAKE_ADMIN_TOKEN="$t" brake license install');
+    expect(err).toContain('; unset t');
+    expect(err).not.toContain('export');
     expect(err).toContain(`brake license install '${file.replaceAll("'", "'\\''")}'`);
   });
 });

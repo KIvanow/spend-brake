@@ -262,10 +262,12 @@ export function App({
       </main>
     );
   }
-  // A sign-up link (the website's Buy Business, say) opens sign-up even for someone signed in:
-  // a license is bought by its own account, and a hosted org's Billing does not offer one.
-  // Checkout returns them to the welcome page, so it shows signed in too.
-  if (publicRoute === 'signup') return <Signup />;
+  // The website's Buy Business link opens sign-up even for someone signed in: a license is
+  // bought by its own account, and a hosted org's Billing does not offer one. Other sign-up links
+  // take someone signed in to their dashboard. Checkout returns them to the welcome page, so it
+  // shows signed in too.
+  const licenseLink = /[?&]plan=business\b/.test(window.location.hash);
+  if (publicRoute === 'signup' && (!signedIn || licenseLink)) return <Signup />;
   if (publicRoute === 'welcome') return <Welcome signedIn={signedIn} />;
   if (!signedIn) {
     if (!options) return null;
