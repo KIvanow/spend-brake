@@ -64,6 +64,7 @@
           <a href="#how">How it works</a>
           <a href="#features">Features</a>
           <a href="#agents">Agents</a>
+          <a href="#mcp">MCP</a>
           <a href="#pricing">Pricing</a>
           <a href="#self-host">Self-host</a>
           <a href="https://docs.spendbrake.dev/">Docs</a>
@@ -75,6 +76,7 @@
             <a href="#how">How it works</a>
             <a href="#features">Features</a>
             <a href="#agents">Agents</a>
+            <a href="#mcp">MCP</a>
             <a href="#pricing">Pricing</a>
             <a href="#self-host">Self-host</a>
             <a href="https://docs.spendbrake.dev/">Docs</a>
@@ -454,6 +456,87 @@ HTTP 200 · cost <span class="ok">$0.0050</span> · remaining $4.99
 <span class="c">… the agent keeps going …</span>
 <span class="stop"><span class="brake">brake: STOP. Spend cap reached for sess:s_7f3a (cap $5.00).</span>
 <span class="brake">Do not retry; ask the user to raise the cap.</span>  <span class="c">exit 3</span></span></pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="mcp">
+        <div class="wrap">
+          <p class="eyebrow">MCP server</p>
+          <div class="split">
+            <div>
+              <h2>Swap your search MCP for one with a cap.</h2>
+              <p class="lede">
+                <code>@spend-brake/mcp</code> replaces a Tavily or Exa MCP server entry. The agent
+                gets capped search, the Google Maps tools and the other paid APIs, and never sees a
+                provider key.
+              </p>
+              <ul>
+                <li>
+                  <b>Search, Maps and APIs</b>: Tavily, Exa, Brave and SerpApi search, the Google
+                  Maps tools, and <code>brake_call</code> for Mapbox, HERE, Twilio and custom APIs.
+                </li>
+                <li>
+                  <b>Cost on every result</b>, and <code>brake_budget</code> shows what is left. A
+                  call that would cross a cap answers <code>STOP.</code> and is never sent.
+                </li>
+                <li>
+                  <b>A separate admin server</b> (<code>--admin</code>) for keys, caps and kill
+                  switches, as its own entry with its own token.
+                </li>
+              </ul>
+            </div>
+            <div class="term" aria-label="Example: MCP client configuration for Spend Brake">
+              <header><i></i><i></i><i></i><span>mcp.json</span></header>
+              <pre>  "mcpServers": {
+<span class="del">-   "tavily": { "env": { "TAVILY_API_KEY": "tvly-…" } }</span>
+<span class="add">+   "spend-brake": {</span>
+<span class="add">+     "command": "npx",</span>
+<span class="add">+     "args": ["-y", "@spend-brake/mcp"],</span>
+<span class="add">+     "env": {</span>
+<span class="add">+       "BRAKE_KEY": "sb_live_…",</span>
+<span class="add">+       "BRAKE_URL": "https://proxy.spendbrake.dev",</span>
+<span class="add">+       "BRAKE_API_URL": "https://app.spendbrake.dev"</span>
+<span class="add">+     }</span>
+<span class="add">+   }</span>
+  }</pre>
+            </div>
+          </div>
+          <div class="split">
+            <div>
+              <h2>Prove the cap holds, from the agent's side.</h2>
+              <p class="lede">
+                <code>brake doctor</code> runs where the agent runs and checks what could let it
+                spend past its caps. <code>--prove</code> mints a $0 session and sends one priced
+                call: the proxy must refuse it before it reaches the provider. It spends nothing.
+              </p>
+              <ul>
+                <li>
+                  <b>Fails on what goes around the caps</b>: an uncapped or killed key, an admin
+                  token the agent can read, raw provider keys in the environment or
+                  <code>.env</code> files.
+                </li>
+                <li>
+                  <b>Exit code 0 only when it can vouch</b>, so it fits in CI or an agent's setup
+                  step. Secrets are named, never printed.
+                </li>
+              </ul>
+            </div>
+            <div class="term" aria-label="Example: brake doctor --prove output">
+              <header><i></i><i></i><i></i><span>shell</span></header>
+              <pre><span class="c">$</span> brake doctor --prove --pretty
+brake doctor: 0 failed, 0 warnings, 14 passed, 0 could not be checked
+
+<span class="ok">ok</span>    No admin token in the environment
+<span class="ok">ok</span>    No provider keys in the environment
+<span class="ok">ok</span>    No secrets in .env files in the working directory
+<span class="c">…</span>
+<span class="ok">ok</span>    A hard cap applies to this key
+<span class="ok">ok</span>    Routes with no known price are refused
+<span class="ok">ok</span>    An exhausted budget stops forwarding
+
+No failed checks in what doctor can verify.  <span class="c">exit 0</span></pre>
             </div>
           </div>
         </div>
