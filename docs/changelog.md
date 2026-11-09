@@ -14,6 +14,8 @@ images for linux/amd64 and linux/arm64
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-09
+
 ### Added
 
 - `brake doctor` checks, from where an agent runs, what could let it spend past its caps: a
