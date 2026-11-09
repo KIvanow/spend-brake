@@ -241,8 +241,11 @@ async function admin(
     return result(present(data, headers, raw), structured);
   } catch (err) {
     if (timedOut(err)) {
+      // A GET changed nothing. A write may have landed before the answer came back.
       return text(
-        'The admin API did not answer in time. A change might have been applied: check before sending it again.',
+        method === 'GET'
+          ? 'The admin API did not answer in time. Nothing was changed.'
+          : 'The admin API did not answer in time. A change might have been applied: check before sending it again.',
         true,
       );
     }

@@ -641,6 +641,20 @@ describe('brake mcp', () => {
     expect(t).toContain('A change might have been applied: check before sending it again.');
   });
 
+  it('says an admin read that timed out changed nothing', async () => {
+    const m = await mcp(
+      [init(), call(2, 'keys_list', {})],
+      () => {
+        throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+      },
+      { args: ['--admin'], env: { ...ENV, BRAKE_ADMIN_TOKEN: 'sbt_test' } },
+    );
+    const t = m.byId(2).result!.content![0]!.text;
+    expect(m.byId(2).result!.isError).toBe(true);
+    expect(t).toContain('Nothing was changed.');
+    expect(t).not.toContain('might have been applied');
+  });
+
   it('refuses a brake_call path with dot segments, and sends a string body as JSON', async () => {
     const bad = await mcp([
       init(),
