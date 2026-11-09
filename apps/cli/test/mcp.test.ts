@@ -717,14 +717,18 @@ describe('brake mcp', () => {
         call(2, 'custom_apis_add', { definition: shown }),
         call(3, 'custom_apis_update', { id: 'acme', definition: shown }),
       ],
-      () => ({ status: 200, body: { id: 'acme' } }),
+      // The update reads the current definition first (same origin here).
+      (c) =>
+        c.method === 'GET' ? { status: 200, body: shown } : { status: 200, body: { id: 'acme' } },
       { args: ['--admin'], env },
     );
-    expect(m.f.calls[0]).toMatchObject({ method: 'POST', url: 'http://api/v1/custom-apis' });
-    expect(JSON.parse(m.f.calls[0]!.body!)).toEqual(kept);
-    expect(m.f.calls[1]).toMatchObject({ method: 'PUT', url: 'http://api/v1/custom-apis/acme' });
-    const { id: _id, ...updated } = kept;
-    expect(JSON.parse(m.f.calls[1]!.body!)).toEqual(updated);
+    const post = m.f.calls.find((c) => c.method === 'POST')!;
+    const put = m.f.calls.find((c) => c.method === 'PUT')!;
+    expect(post).toMatchObject({ url: 'http://api/v1/custom-apis' });
+    expect(JSON.parse(post.body!)).toEqual(kept);
+    expect(put).toMatchObject({ url: 'http://api/v1/custom-apis/acme' });
+    const updated = Object.fromEntries(Object.entries(kept).filter(([k]) => k !== 'id'));
+    expect(JSON.parse(put.body!)).toEqual(updated);
 
     const bad = await mcp(
       [
@@ -764,13 +768,14 @@ describe('brake mcp', () => {
     );
   });
 
-  it('forwards an audit cursor only when the page was not cut', async () => {
+  it('pages through a cut audit export from the last line kept', async () => {
     const env = { ...ENV, BRAKE_ADMIN_TOKEN: 'sbt_test' };
+    // Audit lines carry their row id, which is what the cursor is.
     const page = (n: number) =>
-      `${Array.from({ length: n }, (_, i) => JSON.stringify({ i })).join('\n')}\n`;
+      `${Array.from({ length: n }, (_, i) => JSON.stringify({ id: String(1000 + i) })).join('\n')}\n`;
     const cut = await mcp(
       [init(), call(2, 'audit_export')],
-      () => ({ status: 200, body: page(201), headers: { 'x-next-cursor': 'page-2' } }),
+      () => ({ status: 200, body: page(5000), headers: { 'x-next-cursor': '5999' } }),
       { args: ['--admin'], env },
     );
     const cutBody = JSON.parse(cut.byId(2).result!.content![0]!.text) as {
@@ -780,7 +785,8 @@ describe('brake mcp', () => {
     };
     expect(cutBody.truncated).toBe(true);
     expect(cutBody.lines).toHaveLength(200);
-    expect(cutBody.nextCursor).toBeUndefined();
+    // Not the API's cursor (it would skip lines 200 to 4999): the last line kept.
+    expect(cutBody.nextCursor).toBe('1199');
 
     const whole = await mcp(
       [init(), call(2, 'audit_export')],
@@ -790,7 +796,149 @@ describe('brake mcp', () => {
     expect(JSON.parse(whole.byId(2).result!.content![0]!.text)).toMatchObject({
       truncated: false,
       nextCursor: 'page-2',
-      lines: ['{"i":0}'],
+      lines: ['{"id":"1000"}'],
     });
+  });
+
+  it('keeps stored secrets with their host: telemetry headers and custom API origins', async () => {
+    const env = { ...ENV, BRAKE_ADMIN_TOKEN: 'sbt_test' };
+    const stored = {
+      otlp: {
+        endpoint: 'https://otlp.honeycomb.io/v1/traces',
+        enabled: false,
+        headerNames: ['x-api-key'],
+      },
+    };
+    const m = await mcp(
+      [
+        init(),
+        // Another host, no headers: refused, nothing written.
+        call(2, 'telemetry_set', { endpoint: 'https://evil.example/v1/traces' }),
+        // Same host, no headers: kept, and a disabled export stays disabled.
+        call(3, 'telemetry_set', { endpoint: 'https://otlp.honeycomb.io/v2/traces' }),
+        // Another host with headers given again: allowed.
+        call(4, 'telemetry_set', { endpoint: 'https://collector.example', headers: {} }),
+      ],
+      (c) =>
+        c.method === 'GET' ? { status: 200, body: stored } : { status: 200, body: { otlp: null } },
+      { args: ['--admin'], env },
+    );
+    expect(m.byId(2).result!.content![0]!.text).toContain('give headers again');
+    const puts = m.f.calls
+      .filter((c) => c.method === 'PUT')
+      .map((c) => JSON.parse(c.body!) as unknown);
+    expect(puts).toEqual([
+      { endpoint: 'https://otlp.honeycomb.io/v2/traces', enabled: false },
+      { endpoint: 'https://collector.example', headers: {}, enabled: false },
+    ]);
+
+    const shown = { id: 'acme', name: 'Acme', origin: 'https://acme.example', routes: [] };
+    const moved = { ...shown, origin: 'https://evil.example' };
+    const c = await mcp(
+      [
+        init(),
+        call(2, 'custom_apis_update', { id: 'acme', definition: moved }),
+        call(3, 'custom_apis_update', { id: 'acme', definition: moved, moveOrigin: true }),
+      ],
+      (r) => (r.method === 'GET' ? { status: 200, body: shown } : { status: 200, body: moved }),
+      { args: ['--admin'], env },
+    );
+    expect(c.byId(2).result!.content![0]!.text).toContain('Pass moveOrigin: true');
+    expect(c.f.calls.filter((r) => r.method === 'PUT')).toHaveLength(1);
+  });
+
+  it('marks the tools that loosen spend or reach outside hosts as destructive', async () => {
+    const env = { ...ENV, BRAKE_ADMIN_TOKEN: 'sbt_test' };
+    const hints = async (args: string[], e: Record<string, string>) => {
+      const m = await mcp([init(), { jsonrpc: '2.0', id: 2, method: 'tools/list' }], undefined, {
+        args,
+        env: e,
+      });
+      const tools = m.byId(2).result!.tools as unknown as {
+        name: string;
+        annotations: { destructiveHint?: boolean; openWorldHint?: boolean };
+      }[];
+      return Object.fromEntries(tools.map((t) => [t.name, t.annotations]));
+    };
+    const owner = await hints(['--admin', '--owner'], env);
+    for (const name of [
+      'caps_set',
+      'keys_resume',
+      'org_update',
+      'sso_set',
+      'users_update',
+      'license_install',
+      'telemetry_set',
+      'custom_apis_update',
+    ]) {
+      expect(owner[name]!.destructiveHint, name).toBe(true);
+    }
+    expect(owner.telemetry_set!.openWorldHint).toBe(true);
+    expect(owner.custom_apis_update!.openWorldHint).toBe(true);
+    // The owner-only policy route is offered with --owner only; listing people needs admin.
+    const adminOnly = await hints(['--admin'], env);
+    expect(adminOnly.approvals_set_policy).toBeUndefined();
+    expect(owner.approvals_set_policy).toBeDefined();
+    expect(adminOnly.users_list).toBeDefined();
+    const spend = await hints([], ENV);
+    expect(spend.brake_call!.destructiveHint).toBe(true);
+  });
+
+  it('names the field an admin request failed on, and converts dollars to micros', async () => {
+    const env = { ...ENV, BRAKE_ADMIN_TOKEN: 'sbt_test' };
+    const refused = await mcp(
+      [init(), call(2, 'keys_list')],
+      () => ({
+        status: 400,
+        body: {
+          error: 'invalid_request',
+          message: 'Request failed validation.',
+          issues: [{ in: 'body', path: 'expiresAt', message: 'Invalid ISO datetime' }],
+        },
+      }),
+      { args: ['--admin'], env },
+    );
+    expect(refused.byId(2).result!.content![0]!.text).toBe(
+      'Request failed validation. (expiresAt: Invalid ISO datetime)',
+    );
+
+    const minted = await mcp(
+      [init(), call(2, 'sessions_mint', { parentKeyId: 'key_p', budget: '1.25', dayBudget: '10' })],
+      () => ({ status: 201, body: { sessionId: 's', keyId: 'k', token: 't' } }),
+      { args: ['--admin'], env },
+    );
+    expect(JSON.parse(minted.f.calls[0]!.body!)).toMatchObject({
+      parentKeyId: 'key_p',
+      budgetMicros: '1250000',
+      dayBudgetMicros: '10000000',
+    });
+  });
+
+  it('answers a timeout while caps_set reads the current caps as a tool error', async () => {
+    const m = await mcp(
+      [init(), call(2, 'caps_set', { scope: 'org', softDay: '1' })],
+      () => {
+        throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+      },
+      { args: ['--admin'], env: { ...ENV, BRAKE_ADMIN_TOKEN: 'sbt_test' } },
+    );
+    expect(m.byId(2).result).toMatchObject({ isError: true });
+    expect(m.byId(2).result!.content![0]!.text).toContain('Nothing was changed');
+  });
+
+  it('cuts metrics at a line end', async () => {
+    const line = 'brake_requests_total{provider="x"} 1\n';
+    const body = line.repeat(Math.ceil(110_000 / line.length));
+    const m = await mcp([init(), call(2, 'metrics')], () => ({ status: 200, body }), {
+      args: ['--admin'],
+      env: { ...ENV, BRAKE_ADMIN_TOKEN: 'sbt_test' },
+    });
+    const out = JSON.parse(m.byId(2).result!.content![0]!.text) as {
+      text: string;
+      truncated: boolean;
+    };
+    expect(out.truncated).toBe(true);
+    expect(out.text.endsWith('\n')).toBe(true);
+    expect(out.text.length).toBeLessThanOrEqual(100_001);
   });
 });

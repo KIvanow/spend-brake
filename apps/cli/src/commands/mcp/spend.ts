@@ -443,7 +443,8 @@ export const SPEND_TOOLS: Tool[] = [
       },
       ['provider', 'method', 'path'],
     ),
-    annotations: { title: 'Capped provider call', ...SPEND },
+    // Any method on any priced route: it can send an SMS or a DELETE, not only read.
+    annotations: { title: 'Capped provider call', ...SPEND, destructiveHint: true },
     run: (io, args, structured) => {
       const headers = args.headers as Record<string, string> | undefined;
       if (headers) {

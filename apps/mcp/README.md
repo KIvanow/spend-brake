@@ -69,6 +69,11 @@ people, SSO, the license and orgs:
 - The spend tools are annotated as not read-only and not idempotent: each call spends money.
 - On the admin server, a result with `pending` is waiting for a second person and is not
   applied. A new key, session, token or webhook shows its secret once.
+- Tools that loosen spend safety (raising a cap, resuming a paused key, org pricing policy,
+  SSO, roles, licenses) and `brake_call` are annotated destructive, so a client that asks
+  before such tools asks for these. So are `telemetry_set` and `custom_apis_update`: stored
+  collector headers and provider keys go to their endpoint, so a new host needs the headers
+  given again, or `moveOrigin: true` for a custom API.
 
 This package runs `brake mcp` from [`@spend-brake/cli`](https://www.npmjs.com/package/@spend-brake/cli).
 Docs: [MCP clients](https://docs.spendbrake.dev/agents/#mcp-clients-preview).

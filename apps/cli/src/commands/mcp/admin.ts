@@ -34,6 +34,11 @@ const DESTROY = {
   openWorldHint: false,
 };
 
+/** Destructive, and reaches a host outside Spend Brake (stored secrets can go there). */
+const EXPOSE = { ...DESTROY, openWorldHint: true };
+/** A write that sends something to a host outside Spend Brake. */
+const OUTBOUND = { ...WRITE, openWorldHint: true };
+
 const str = { type: 'string' };
 const strings = { type: 'array', items: { type: 'string' } };
 const stringMap = { type: 'object', additionalProperties: { type: 'string' } };
@@ -51,6 +56,15 @@ function schema(properties: Json, required?: string[]): Json {
     ...(required ? { required } : {}),
     additionalProperties: false,
   };
+}
+
+/** Scheme, host and port of a URL (what a secret is sent to); the input itself when unparsable. */
+function hostOf(url: unknown): string {
+  try {
+    return new URL(String(url)).origin;
+  } catch {
+    return String(url);
+  }
 }
 
 function pathId(value: unknown, name: string): string {
@@ -71,7 +85,7 @@ function customApiBody(value: unknown, id?: unknown): Json {
   const src = value as Json;
   if (id !== undefined && src.id !== undefined && src.id !== id) {
     throw new CliError(
-      `definition is for ${JSON.stringify(src.id)}, not ${String(id)}`,
+      `definition is for ${JSON.stringify(src.id)}, not ${JSON.stringify(id)}`,
       EXIT.usage,
     );
   }
@@ -122,11 +136,23 @@ async function capsBody(io: Io, scope: string, a: Json) {
   );
   let current: CapRow[] = [];
   if (partial) {
-    const { data } = await apiExchange<{ items: CapRow[] }>(
-      withTimeout(io, READ_MS),
-      'GET',
-      '/v1/caps',
-    );
+    let data: { items: CapRow[] };
+    try {
+      ({ data } = await apiExchange<{ items: CapRow[] }>(
+        withTimeout(io, READ_MS),
+        'GET',
+        '/v1/caps',
+      ));
+    } catch (err) {
+      // Only a read so far: nothing was changed, so this may be retried.
+      throw new CliError(
+        timedOut(err)
+          ? 'The admin API did not answer in time while reading the current caps. Nothing was changed.'
+          : (err as Error).message,
+        EXIT.error,
+        { cause: err },
+      );
+    }
     current = data.items.filter((c) => c.scope === scope);
   }
   const body: Json = {};
@@ -159,7 +185,13 @@ type Present = (data: unknown, headers: Headers, raw: string) => Json;
 
 function metricsText(_data: unknown, _headers: Headers, raw: string): Json {
   if (raw.length <= METRICS_CAP) return { text: raw };
-  return { text: raw.slice(0, METRICS_CAP), truncated: true, note: 'Cut at 100 KB.' };
+  // At a line end: a half metric line would read as a different value.
+  const cut = raw.lastIndexOf('\n', METRICS_CAP);
+  return {
+    text: raw.slice(0, cut > 0 ? cut + 1 : METRICS_CAP),
+    truncated: true,
+    note: 'Cut at about 100,000 characters, at a line end.',
+  };
 }
 
 function auditLines(_data: unknown, headers: Headers, raw: string): Json {
@@ -168,17 +200,25 @@ function auditLines(_data: unknown, headers: Headers, raw: string): Json {
   if (lines.at(-1) === '') lines.pop();
   const truncated = lines.length > AUDIT_CAP;
   const cursor = headers.get('x-next-cursor');
+  const kept = truncated ? lines.slice(0, AUDIT_CAP) : lines;
+  // The cursor is an audit row id. After a cut, the next page starts after the last line kept
+  // (the API's own cursor is for its full page, and would skip the lines left out).
+  let next: string | null = cursor;
+  if (truncated) {
+    try {
+      const id = (JSON.parse(kept.at(-1)!) as { id?: unknown }).id;
+      next = typeof id === 'string' || typeof id === 'number' ? String(id) : null;
+    } catch {
+      next = null;
+    }
+  }
   return {
-    lines: truncated ? lines.slice(0, AUDIT_CAP) : lines,
+    lines: kept,
     truncated,
-    // A cursor belongs to the API's full page. Forwarding it after a cut would skip the rest.
+    ...(next ? { nextCursor: next } : {}),
     ...(truncated
-      ? {
-          note: 'Cut at 200 lines. Narrow from and to; the page cursor would skip the lines left out.',
-        }
-      : cursor
-        ? { nextCursor: cursor }
-        : {}),
+      ? { note: 'Cut at 200 lines. Pass nextCursor as cursor for the lines after these.' }
+      : {}),
   };
 }
 
@@ -311,7 +351,7 @@ export const ADMIN_TOOLS: Tool[] = [
     'keys_resume',
     'Resume a paused key',
     'Resume a key the loop breaker paused, and reset its repeat counts.',
-    WRITE,
+    DESTROY,
     schema({ id: idArg }, ['id']),
     (io, a, s) => admin(io, s, 'POST', `/v1/keys/${pathId(a.id, 'id')}/resume`),
   ),
@@ -322,7 +362,7 @@ export const ADMIN_TOOLS: Tool[] = [
     'caps_set',
     'Set caps',
     `Set hard and soft caps for a scope, in dollars. Omit a window to leave it; within a window, a value left out keeps its current setting. To remove caps use caps_rm. ${pending}`,
-    WRITE,
+    DESTROY,
     schema(
       {
         scope: scopeArg,
@@ -481,8 +521,8 @@ export const ADMIN_TOOLS: Tool[] = [
   tool(
     'custom_apis_update',
     'Update a custom API',
-    'Replace the definition of a custom API. The id in the path stays. A copy of custom_apis_show is accepted when its id matches.',
-    WRITE,
+    'Replace the definition of a custom API. The id in the path stays. A copy of custom_apis_show is accepted when its id matches. Its provider keys are sent to its origin: moving the origin needs moveOrigin: true.',
+    EXPOSE,
     schema(
       {
         id: idArg,
@@ -490,17 +530,35 @@ export const ADMIN_TOOLS: Tool[] = [
           ...jsonObj,
           description: 'Replacement definition. Its id, if set, must match.',
         },
+        moveOrigin: {
+          type: 'boolean',
+          description:
+            'Confirms a new origin: every call then sends the provider key bound to this API there.',
+        },
       },
       ['id', 'definition'],
     ),
-    (io, a, s) =>
-      admin(
-        io,
-        s,
-        'PUT',
-        `/v1/custom-apis/${pathId(a.id, 'id')}`,
-        customApiBody(a.definition, a.id),
-      ),
+    async (io, a, s) => {
+      const id = pathId(a.id, 'id');
+      const body = customApiBody(a.definition, a.id);
+      const { data: now } = await apiExchange<{ origin: string }>(
+        withTimeout(io, READ_MS),
+        'GET',
+        `/v1/custom-apis/${id}`,
+      );
+      const origin = (body as { origin?: unknown }).origin;
+      if (
+        typeof origin === 'string' &&
+        hostOf(origin) !== hostOf(now.origin) &&
+        a.moveOrigin !== true
+      ) {
+        throw new CliError(
+          `The origin moves from ${now.origin} to ${origin}: the provider key bound to this API would be sent there. Pass moveOrigin: true to confirm.`,
+          EXIT.usage,
+        );
+      }
+      return admin(io, s, 'PUT', `/v1/custom-apis/${id}`, body);
+    },
   ),
   tool(
     'custom_apis_delete',
@@ -614,22 +672,41 @@ export const ADMIN_TOOLS: Tool[] = [
   tool(
     'telemetry_set',
     'Set OTLP export',
-    'Send every call as a span to an OTLP/HTTP collector.',
-    WRITE,
+    'Send every call as a span to an OTLP/HTTP collector. The collector headers (often an API key) go to this endpoint: a new host needs its headers given again.',
+    EXPOSE,
     schema(
       {
         endpoint: { ...str, description: 'OTLP/HTTP endpoint URL' },
-        headers: { ...stringMap, description: 'Collector headers. Omit to keep the stored ones.' },
-        enabled: { type: 'boolean' },
+        headers: {
+          ...stringMap,
+          description:
+            'Collector headers; {} for none. Omit to keep the stored ones, only while the host stays the same.',
+        },
+        enabled: { type: 'boolean', description: 'Omit to keep the current setting' },
       },
       ['endpoint'],
     ),
-    (io, a, s) =>
-      admin(io, s, 'PUT', '/v1/telemetry/otlp', {
+    async (io, a, s) => {
+      const { data } = await apiExchange<{ otlp: { endpoint: string; enabled: boolean } | null }>(
+        withTimeout(io, READ_MS),
+        'GET',
+        '/v1/telemetry/otlp',
+      );
+      const now = data.otlp;
+      // Stored headers are a secret the token cannot read: never let them follow a new host.
+      if (now && !a.headers && hostOf(now.endpoint) !== hostOf(a.endpoint)) {
+        throw new CliError(
+          'The endpoint moves to another host: give headers again ({} for none). Stored headers are kept only for the same host.',
+          EXIT.usage,
+        );
+      }
+      return admin(io, s, 'PUT', '/v1/telemetry/otlp', {
         endpoint: a.endpoint,
         ...(a.headers ? { headers: a.headers } : {}),
-        ...(a.enabled !== undefined ? { enabled: a.enabled } : {}),
-      }),
+        // The API turns export on when left out: keep a disabled export disabled.
+        enabled: a.enabled !== undefined ? a.enabled : (now?.enabled ?? true),
+      });
+    },
   ),
   tool(
     'telemetry_delete',
@@ -643,7 +720,7 @@ export const ADMIN_TOOLS: Tool[] = [
     'telemetry_test',
     'Test OTLP export',
     'Send one test span to the configured collector now.',
-    WRITE,
+    OUTBOUND,
     none,
     (io, _a, s) => admin(io, s, 'POST', '/v1/telemetry/otlp/test'),
   ),
@@ -714,14 +791,6 @@ export const ADMIN_TOOLS: Tool[] = [
     READ,
     none,
     (io, _a, s) => admin(io, s, 'GET', '/v1/approvals/policy'),
-  ),
-  tool(
-    'approvals_set_policy',
-    'Set approval policy',
-    `Turn the two-person rule on or off. Turning it off is itself a request another owner approves. ${pending}`,
-    WRITE,
-    schema({ capApprovals: { type: 'boolean' } }, ['capApprovals']),
-    (io, a, s) => admin(io, s, 'PUT', '/v1/approvals/policy', { capApprovals: a.capApprovals }),
   ),
   tool(
     'approvals_approve',
@@ -815,6 +884,9 @@ export const ADMIN_TOOLS: Tool[] = [
     none,
     (io, _a, s) => admin(io, s, 'GET', '/v1/license'),
   ),
+  tool('users_list', 'List people', 'People in the org. Admin or owner.', READ, none, (io, _a, s) =>
+    admin(io, s, 'GET', '/v1/users'),
+  ),
 ];
 
 const loopSchema = {
@@ -831,10 +903,18 @@ const loopSchema = {
 
 export const OWNER_TOOLS: Tool[] = [
   tool(
+    'approvals_set_policy',
+    'Set approval policy',
+    `Turn the two-person rule on or off. Owner. Turning it off is itself a request another owner approves, and needs SSO (a bearer token names no person). ${pending}`,
+    WRITE,
+    schema({ capApprovals: { type: 'boolean' } }, ['capApprovals']),
+    (io, a, s) => admin(io, s, 'PUT', '/v1/approvals/policy', { capApprovals: a.capApprovals }),
+  ),
+  tool(
     'org_update',
     'Update org settings',
     'Update the org name, time zone, alert email, raise-link rule, loop rule or provider policy. Owner.',
-    WRITE,
+    DESTROY,
     schema({
       name: str,
       timeZone: str,
@@ -895,9 +975,6 @@ export const OWNER_TOOLS: Tool[] = [
     schema({ id: idArg }, ['id']),
     (io, a, s) => admin(io, s, 'DELETE', `/v1/tokens/${pathId(a.id, 'id')}`),
   ),
-  tool('users_list', 'List people', 'People in the org. Owner.', READ, none, (io, _a, s) =>
-    admin(io, s, 'GET', '/v1/users'),
-  ),
   tool(
     'users_invite',
     'Invite a person',
@@ -910,7 +987,7 @@ export const OWNER_TOOLS: Tool[] = [
     'users_update',
     'Change the role of a person',
     'Change the role of a person. Their sessions end. Owner.',
-    WRITE,
+    DESTROY,
     schema({ id: idArg, role: { type: 'string', enum: [...ROLES] } }, ['id', 'role']),
     (io, a, s) => admin(io, s, 'PATCH', `/v1/users/${pathId(a.id, 'id')}`, { role: a.role }),
   ),
@@ -926,7 +1003,7 @@ export const OWNER_TOOLS: Tool[] = [
     'license_install',
     'Install a license',
     'Install a Business or Enterprise license. license is the JSON text of the license file, not a path. Owner of the licensed org.',
-    WRITE,
+    DESTROY,
     schema({ license: { ...str, description: 'The license file contents' } }, ['license']),
     (io, a, s) => admin(io, s, 'POST', '/v1/license', { license: a.license }),
   ),
@@ -942,7 +1019,7 @@ export const OWNER_TOOLS: Tool[] = [
     'sso_set',
     'Configure single sign-on',
     'Configure OIDC or SAML. config is the PUT /v1/sso body: protocol "oidc" (issuer, clientId, clientSecret) or "saml" (entryPoint, idpCert), plus roleMap. The client secret is not in later reads. Owner.',
-    WRITE,
+    DESTROY,
     schema({ config: { ...jsonObj, description: 'OIDC or SAML configuration' } }, ['config']),
     (io, a, s) => admin(io, s, 'PUT', '/v1/sso', a.config),
   ),

@@ -60,9 +60,19 @@ export async function apiExchange<T = unknown>(
     // keep text
   }
   if (!res.ok) {
-    const e = data as { message?: string; error?: string } | null;
+    const e = data as { message?: string; error?: string; issues?: unknown } | null;
+    // Which field failed and why (the API never echoes the values), so the caller can fix it.
+    const issues = Array.isArray(e?.issues)
+      ? (e.issues as { path?: unknown; message?: unknown }[])
+          .filter((i) => typeof i.message === 'string')
+          .map((i) =>
+            typeof i.path === 'string' && i.path
+              ? `${i.path}: ${i.message as string}`
+              : (i.message as string),
+          )
+      : [];
     throw new ApiRefusal(
-      e?.message ?? `HTTP ${res.status}`,
+      `${e?.message ?? `HTTP ${res.status}`}${issues.length ? ` (${issues.join('; ')})` : ''}`,
       res.status === 401 ? EXIT.auth : EXIT.error,
       res.status,
       typeof e?.error === 'string' ? e.error : undefined,
