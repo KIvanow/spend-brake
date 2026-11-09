@@ -60,6 +60,27 @@ function pathId(value: unknown, name: string): string {
   return encodeURIComponent(value);
 }
 
+/** Fields `custom_apis_show` adds. The write routes reject them. */
+const SHOWN_ONLY = ['proxyPath', 'createdAt', 'updatedAt'] as const;
+
+/**
+ * A custom API write body. Update drops `id` (it lives in the path) and refuses a different one.
+ * Add keeps `id`.
+ */
+function customApiBody(value: unknown, id?: unknown): Json {
+  const src = value as Json;
+  if (id !== undefined && src.id !== undefined && src.id !== id) {
+    throw new CliError(
+      `definition is for ${JSON.stringify(src.id)}, not ${String(id)}`,
+      EXIT.usage,
+    );
+  }
+  const body: Json = { ...src };
+  for (const k of SHOWN_ONLY) delete body[k];
+  if (id !== undefined) delete body.id;
+  return body;
+}
+
 /** A scope label (`org`, `key:<id>`, …). Not a path id: it may contain `:`. */
 function scopeOf(value: unknown): string {
   if (typeof value !== 'string' || !value.trim()) {
@@ -452,24 +473,34 @@ export const ADMIN_TOOLS: Tool[] = [
   tool(
     'custom_apis_add',
     'Add a custom API',
-    'Add a custom API. definition is the same JSON object `brake custom-apis add` reads from a file.',
+    'Add a custom API. definition is the custom API object, including its id. proxyPath, createdAt and updatedAt are ignored.',
     WRITE,
     schema({ definition: { ...jsonObj, description: 'Custom API definition' } }, ['definition']),
-    (io, a, s) => admin(io, s, 'POST', '/v1/custom-apis', a.definition),
+    (io, a, s) => admin(io, s, 'POST', '/v1/custom-apis', customApiBody(a.definition)),
   ),
   tool(
     'custom_apis_update',
     'Update a custom API',
-    'Replace the definition of a custom API. The id stays.',
+    'Replace the definition of a custom API. The id in the path stays. A copy of custom_apis_show is accepted when its id matches.',
     WRITE,
     schema(
       {
         id: idArg,
-        definition: { ...jsonObj, description: 'Replacement definition, without the id' },
+        definition: {
+          ...jsonObj,
+          description: 'Replacement definition. Its id, if set, must match.',
+        },
       },
       ['id', 'definition'],
     ),
-    (io, a, s) => admin(io, s, 'PUT', `/v1/custom-apis/${pathId(a.id, 'id')}`, a.definition),
+    (io, a, s) =>
+      admin(
+        io,
+        s,
+        'PUT',
+        `/v1/custom-apis/${pathId(a.id, 'id')}`,
+        customApiBody(a.definition, a.id),
+      ),
   ),
   tool(
     'custom_apis_delete',

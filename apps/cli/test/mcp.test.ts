@@ -688,6 +688,57 @@ describe('brake mcp', () => {
     expect(JSON.parse(m.f.calls[0]!.body!)).toEqual({ alertEmail: null });
   });
 
+  it('strips show fields from a custom API write and refuses a mismatched id', async () => {
+    const env = { ...ENV, BRAKE_ADMIN_TOKEN: 'sbt_test' };
+    const shown = {
+      id: 'acme',
+      name: 'Acme',
+      origin: 'https://acme.example',
+      auth: { type: 'header', name: 'Authorization' },
+      routes: [],
+      billed: '2xx',
+      timeoutBilled: false,
+      proxyPath: '/custom/acme',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    const kept = {
+      id: 'acme',
+      name: 'Acme',
+      origin: 'https://acme.example',
+      auth: { type: 'header', name: 'Authorization' },
+      routes: [],
+      billed: '2xx',
+      timeoutBilled: false,
+    };
+    const m = await mcp(
+      [
+        init(),
+        call(2, 'custom_apis_add', { definition: shown }),
+        call(3, 'custom_apis_update', { id: 'acme', definition: shown }),
+      ],
+      () => ({ status: 200, body: { id: 'acme' } }),
+      { args: ['--admin'], env },
+    );
+    expect(m.f.calls[0]).toMatchObject({ method: 'POST', url: 'http://api/v1/custom-apis' });
+    expect(JSON.parse(m.f.calls[0]!.body!)).toEqual(kept);
+    expect(m.f.calls[1]).toMatchObject({ method: 'PUT', url: 'http://api/v1/custom-apis/acme' });
+    const { id: _id, ...updated } = kept;
+    expect(JSON.parse(m.f.calls[1]!.body!)).toEqual(updated);
+
+    const bad = await mcp(
+      [
+        init(),
+        call(2, 'custom_apis_update', { id: 'acme', definition: { ...shown, id: 'other' } }),
+      ],
+      () => ({ status: 200, body: {} }),
+      { args: ['--admin'], env },
+    );
+    expect(bad.f.calls).toHaveLength(0);
+    expect(bad.byId(2).result).toMatchObject({ isError: true });
+    expect(bad.byId(2).result!.content![0]!.text).toContain('"other"');
+  });
+
   it('sends a provider secret and does not echo it', async () => {
     const secret = 'tvly-secret-value';
     const m = await mcp(
