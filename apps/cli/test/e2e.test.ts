@@ -383,7 +383,9 @@ describe('brake mcp end to end', () => {
     });
     expect(geo.code).toBe(0);
     expect(geo.result.isError).toBeUndefined();
-    expect(JSON.parse(geo.result.content[0]!.text).result).toMatchObject({ status: 'OK' });
+    expect((JSON.parse(geo.result.content[0]!.text) as { result: unknown }).result).toMatchObject({
+      status: 'OK',
+    });
     expect(googleCalls - before).toBe(1);
 
     const caps = await rpc(['--admin'], { BRAKE_ADMIN_TOKEN: parent.ownerToken }, 'caps_list', {});

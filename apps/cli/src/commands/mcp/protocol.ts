@@ -60,8 +60,10 @@ export function pick(args: Json, schema: Json): Json | string {
 }
 
 function checkProp(k: string, v: unknown, p: Json): Checked {
-  if (v === null && p.nullable === true) return good(null);
-  if (p.type === 'string' && (typeof v !== 'string' || !v.trim())) {
+  // `type: ["string", "null"]`: null is a value of its own (it clears a setting).
+  const types = Array.isArray(p.type) ? (p.type as string[]) : [p.type as string];
+  if (v === null && types.includes('null')) return good(null);
+  if (types.includes('string') && (typeof v !== 'string' || !v.trim())) {
     return bad(`${k} must be a non-empty string`);
   }
   if (p.enum && !(p.enum as unknown[]).includes(v)) {
@@ -105,7 +107,7 @@ export function jsonArg(description: string): Json {
       { type: 'null' },
     ],
     [JSON_VALUE]: true,
-  } as Json;
+  };
 }
 
 function isJsonValue(p: Json): boolean {
@@ -121,7 +123,7 @@ function checkObject(k: string, v: unknown, p: Json): Checked {
   const add = p.additionalProperties as Json | boolean | undefined;
   if (typeof add === 'object' && add.type === 'string') {
     const rec: Record<string, string> = {};
-    for (const [kk, vv] of Object.entries(v as object)) {
+    for (const [kk, vv] of Object.entries(v)) {
       if (typeof vv !== 'string') return bad(`${k}.${kk} must be a string`);
       rec[kk] = vv;
     }

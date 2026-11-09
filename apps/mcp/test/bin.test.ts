@@ -44,12 +44,12 @@ it('keeps its version, the registry entry and the CLI in step', () => {
     version: pkg.version,
   });
   expect(server.name).toBe(pkg.mcpName);
-  // Without BRAKE_API_URL the CLI falls back to localhost and sends the key there.
+  // Without BRAKE_API_URL the CLI falls back to localhost and sends the key there. The registry
+  // entry is the spend server: an admin token listed here would end up in the workload's env.
   expect(server.packages[0]!.environmentVariables.map((v) => [v.name, v.isRequired])).toEqual([
     ['BRAKE_KEY', true],
     ['BRAKE_URL', true],
     ['BRAKE_API_URL', true],
-    ['BRAKE_ADMIN_TOKEN', false],
   ]);
   // The registry's limit.
   expect(server.description.length).toBeLessThanOrEqual(100);

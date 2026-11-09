@@ -29,6 +29,18 @@ export function callRequest(
     throw new CliError('invalid provider', EXIT.usage);
   }
   if (!path.startsWith('/')) throw new CliError('path must start with /', EXIT.usage);
+  // URL parsing resolves `.` and `..` (also encoded, or after `\`): the request would leave the
+  // provider's prefix, and be priced as another provider's route.
+  const segments = path.split(/[/\\]/).map((seg) => {
+    try {
+      return decodeURIComponent(seg);
+    } catch {
+      return seg;
+    }
+  });
+  if (path.includes('\\') || segments.some((seg) => seg === '.' || seg === '..')) {
+    throw new CliError('path must not contain . or .. segments, or backslashes', EXIT.usage);
+  }
   const headers: Record<string, string> = {};
   for (const [k, v] of Object.entries(o.headers ?? {})) {
     const name = k.trim().toLowerCase();

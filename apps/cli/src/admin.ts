@@ -45,7 +45,12 @@ export async function apiExchange<T = unknown>(
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
   } catch (err) {
-    throw new CliError(`cannot reach the admin API at ${cfg.apiUrl}: ${(err as Error).message}`);
+    // The cause stays attached: a timeout must still read as one (see timedOut).
+    throw new CliError(
+      `cannot reach the admin API at ${cfg.apiUrl}: ${(err as Error).message}`,
+      EXIT.error,
+      { cause: err },
+    );
   }
   const text = await res.text();
   let data: unknown = text;

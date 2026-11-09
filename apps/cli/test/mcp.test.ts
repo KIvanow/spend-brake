@@ -549,6 +549,7 @@ describe('brake mcp', () => {
       env: { ...ENV, BRAKE_ADMIN_TOKEN: 'sbt_test' },
     });
     expect(m.f.err.join('')).toContain('Admin tools are not offered here');
+    expect(m.f.err.join('')).toContain('BRAKE_ADMIN_TOKEN is set on the spend server');
     expect(m.f.out.join('')).not.toContain('Admin tools are not offered here');
     const names = m.byId(2).result!.tools!.map((t) => t.name);
     expect(names).toContain('tavily_search');
@@ -573,7 +574,8 @@ describe('brake mcp', () => {
     });
     expect(JSON.parse(caps.byId(2).result!.content![0]!.text)).toEqual({ items: [] });
     expect(set).toMatchObject({ method: 'PUT' });
-    expect(JSON.parse(set.body!)).toEqual({ day: { hard: '5000000' } });
+    // Only the hard cap was given: the soft value is the current one (none here).
+    expect(JSON.parse(set.body!)).toEqual({ day: { hard: '5000000', soft: null } });
     expect(JSON.parse(caps.byId(3).result!.content![0]!.text)).toMatchObject({ pending: true });
 
     const refused = await mcp(
@@ -593,6 +595,97 @@ describe('brake mcp', () => {
     expect(refused.byId(2).result!.content![0]!.text).toContain(
       'This install does not include that feature.',
     );
+  });
+
+  it('caps_set keeps the value a window is not given, instead of removing it', async () => {
+    const env = { ...ENV, BRAKE_ADMIN_TOKEN: 'sbt_test' };
+    const m = await mcp(
+      [
+        init(),
+        // An alert only: the $10 hard cap must stay. A hard cap only: the $8 alert must stay.
+        call(2, 'caps_set', { scope: 'key:abc', softDay: '8' }),
+        call(3, 'caps_set', { scope: 'key:abc', month: '50' }),
+      ],
+      (c) =>
+        c.method === 'GET'
+          ? {
+              status: 200,
+              body: {
+                items: [
+                  { scope: 'key:abc', kind: 'd', hard: 10_000_000, soft: null },
+                  { scope: 'key:abc', kind: 'm', hard: 40_000_000, soft: 8_000_000 },
+                  { scope: 'org', kind: 'd', hard: 1, soft: 1 },
+                ],
+              },
+            }
+          : { status: 200, body: { items: [] } },
+      { args: ['--admin'], env },
+    );
+    const puts = m.f.calls
+      .filter((c) => c.method === 'PUT')
+      .map((c) => JSON.parse(c.body!) as unknown);
+    expect(puts).toContainEqual({ day: { hard: '10000000', soft: '8000000' } });
+    expect(puts).toContainEqual({ month: { hard: '50000000', soft: '8000000' } });
+  });
+
+  it('says an admin write that timed out may have been applied', async () => {
+    const m = await mcp(
+      [init(), call(2, 'kill', { target: 'org' })],
+      () => {
+        throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+      },
+      { args: ['--admin'], env: { ...ENV, BRAKE_ADMIN_TOKEN: 'sbt_test' } },
+    );
+    const t = m.byId(2).result!.content![0]!.text;
+    expect(m.byId(2).result!.isError).toBe(true);
+    expect(t).toContain('A change might have been applied: check before sending it again.');
+  });
+
+  it('refuses a brake_call path with dot segments, and sends a string body as JSON', async () => {
+    const bad = await mcp([
+      init(),
+      call(2, 'brake_call', { provider: 'brave', method: 'GET', path: '/../google-places/v1/x' }),
+      call(3, 'brake_call', { provider: 'brave', method: 'GET', path: '/a/%2e%2e/%2E%2E/x' }),
+      call(4, 'brake_call', { provider: 'brave', method: 'GET', path: '/a\\..\\x' }),
+      call(5, 'brake_call', {
+        provider: 'mapbox',
+        method: 'GET',
+        path: '/x',
+        headers: { ' X-Brake-Session': 'x' },
+      }),
+    ]);
+    expect(bad.f.calls).toHaveLength(0);
+    for (const id of [2, 3, 4]) {
+      expect(bad.byId(id).result!.content![0]!.text).toContain('must not contain . or ..');
+    }
+    expect(bad.byId(5).result!.content![0]!.text).toContain('is set by the server from BRAKE_KEY');
+
+    const sent = await mcp([
+      init(),
+      call(2, 'brake_call', { provider: 'mapbox', method: 'POST', path: '/x', body: 'hello' }),
+    ]);
+    expect(sent.f.calls[0]!.body).toBe('"hello"');
+  });
+
+  it('publishes a nullable alertEmail as JSON Schema, and sends null to clear it', async () => {
+    const env = { ...ENV, BRAKE_ADMIN_TOKEN: 'sbt_test' };
+    const m = await mcp(
+      [
+        init(),
+        { jsonrpc: '2.0', id: 2, method: 'tools/list' },
+        call(3, 'org_update', { alertEmail: null }),
+      ],
+      () => ({ status: 200, body: { ok: true } }),
+      { args: ['--admin', '--owner'], env },
+    );
+    const tools = m.byId(2).result!.tools as unknown as {
+      name: string;
+      inputSchema: { properties: Record<string, { type: unknown; nullable?: unknown }> };
+    }[];
+    const email = tools.find((t) => t.name === 'org_update')!.inputSchema.properties.alertEmail!;
+    expect(email.type).toEqual(['string', 'null']);
+    expect(email.nullable).toBeUndefined();
+    expect(JSON.parse(m.f.calls[0]!.body!)).toEqual({ alertEmail: null });
   });
 
   it('sends a provider secret and does not echo it', async () => {

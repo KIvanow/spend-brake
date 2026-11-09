@@ -79,12 +79,47 @@ function query(params: Record<string, unknown>): string {
   return s ? `?${s}` : '';
 }
 
-function moneyWindow(hard?: unknown, soft?: unknown) {
-  if (typeof hard !== 'string' && typeof soft !== 'string') return undefined;
-  return {
-    hard: typeof hard === 'string' ? usdToMicros(hard).toString() : null,
-    ...(typeof soft === 'string' ? { soft: usdToMicros(soft).toString() } : {}),
-  };
+interface CapRow {
+  scope: string;
+  kind: 'd' | 'm';
+  hard: number | null;
+  soft: number | null;
+}
+
+/**
+ * The body of PUT /v1/caps. The API replaces a window's hard and soft values together (a value
+ * left out is removed), so a window given only one of them keeps the other from the current cap.
+ */
+async function capsBody(io: Io, scope: string, a: Json) {
+  const given = {
+    day: [a.day, a.softDay],
+    month: [a.month, a.softMonth],
+  } as const;
+  const asMicros = (v: unknown) => (typeof v === 'string' ? usdToMicros(v).toString() : undefined);
+  const partial = Object.values(given).some(
+    ([hard, soft]) => (typeof hard === 'string') !== (typeof soft === 'string'),
+  );
+  let current: CapRow[] = [];
+  if (partial) {
+    const { data } = await apiExchange<{ items: CapRow[] }>(
+      withTimeout(io, READ_MS),
+      'GET',
+      '/v1/caps',
+    );
+    current = data.items.filter((c) => c.scope === scope);
+  }
+  const body: Json = {};
+  for (const [window, [hard, soft]] of Object.entries(given)) {
+    if (typeof hard !== 'string' && typeof soft !== 'string') continue;
+    const now = current.find((c) => c.kind === window[0]);
+    const keep = (v: number | null | undefined) =>
+      v === null || v === undefined ? null : String(v);
+    body[window] = {
+      hard: asMicros(hard) ?? keep(now?.hard),
+      soft: asMicros(soft) ?? keep(now?.soft),
+    };
+  }
+  return body;
 }
 
 function num(value: unknown, fallback: number): number {
@@ -93,7 +128,7 @@ function num(value: unknown, fallback: number): number {
 
 function plain(data: unknown): Json {
   if (typeof data === 'object' && data !== null && !Array.isArray(data)) return data as Json;
-  return { result: data as never };
+  return { result: data };
 }
 
 const METRICS_CAP = 100_000;
@@ -265,7 +300,7 @@ export const ADMIN_TOOLS: Tool[] = [
   tool(
     'caps_set',
     'Set caps',
-    `Set hard and soft caps for a scope, in dollars. Omit a window to leave it. A hard value of a removal is not supported here; use caps_rm. ${pending}`,
+    `Set hard and soft caps for a scope, in dollars. Omit a window to leave it; within a window, a value left out keeps its current setting. To remove caps use caps_rm. ${pending}`,
     WRITE,
     schema(
       {
@@ -277,14 +312,13 @@ export const ADMIN_TOOLS: Tool[] = [
       },
       ['scope'],
     ),
-    (io, a, s) => {
-      const day = moneyWindow(a.day, a.softDay);
-      const month = moneyWindow(a.month, a.softMonth);
-      if (!day && !month) throw new CliError('Give day and/or month, or a soft limit.', EXIT.usage);
-      return admin(io, s, 'PUT', `/v1/caps/${scopeOf(a.scope)}`, {
-        ...(day ? { day } : {}),
-        ...(month ? { month } : {}),
-      });
+    async (io, a, s) => {
+      const scope = scopeOf(a.scope);
+      const body = await capsBody(io, a.scope as string, a);
+      if (!body.day && !body.month) {
+        throw new CliError('Give day and/or month, or a soft limit.', EXIT.usage);
+      }
+      return admin(io, s, 'PUT', `/v1/caps/${scope}`, body);
     },
   ),
   tool(
@@ -773,7 +807,7 @@ export const OWNER_TOOLS: Tool[] = [
     schema({
       name: str,
       timeZone: str,
-      alertEmail: { ...str, nullable: true, description: 'Null clears it' },
+      alertEmail: { type: ['string', 'null'], description: 'Null clears it' },
       requireLoginForRaise: { type: 'boolean' },
       loop: loopSchema,
       providers: { ...jsonObj, description: 'Provider pricing policy, as PUT /v1/org expects' },

@@ -160,6 +160,14 @@ describe('exit codes for proxy refusals', () => {
 });
 
 describe('brake call', () => {
+  it('refuses a path that would leave the provider through dot segments', async () => {
+    for (const path of ['/../google-places/v1/x', '/a/%2e%2E/b', '/a\\..\\b']) {
+      const f = fake(ENV, () => ok);
+      expect(await run(['call', 'brave', 'GET', path], f.io), path).toBe(EXIT.usage);
+      expect(f.calls).toHaveLength(0);
+    }
+  });
+
   it('sends any capped request through the proxy', async () => {
     const f = fake(ENV, () => ok);
     const code = await run(

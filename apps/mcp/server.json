@@ -15,7 +15,9 @@
       "registryType": "npm",
       "identifier": "@spend-brake/mcp",
       "version": "0.3.0",
-      "transport": { "type": "stdio" },
+      "transport": {
+        "type": "stdio"
+      },
       "environmentVariables": [
         {
           "name": "BRAKE_KEY",
@@ -34,13 +36,6 @@
           "name": "BRAKE_API_URL",
           "description": "The Spend Brake admin API, for the budget tool and for --admin, e.g. https://app.spendbrake.dev",
           "isRequired": true,
-          "format": "string"
-        },
-        {
-          "name": "BRAKE_ADMIN_TOKEN",
-          "description": "Admin token (sbt_…) for brake mcp --admin, as its own MCP entry",
-          "isRequired": false,
-          "isSecret": true,
           "format": "string"
         }
       ]

@@ -283,7 +283,7 @@ export const SPEND_TOOLS: Tool[] = [
     ),
     (args) =>
       searchRequest('brave', args.query as string, {
-        ...(args.count !== undefined ? { results: String(args.count) } : {}),
+        ...(args.count !== undefined ? { results: String(Number(args.count)) } : {}),
       }),
   ),
   spend(
@@ -302,7 +302,7 @@ export const SPEND_TOOLS: Tool[] = [
     (args) =>
       searchRequest('serpapi', args.query as string, {
         engine: (args.engine as string | undefined) ?? 'google',
-        ...(args.num !== undefined ? { results: String(args.num) } : {}),
+        ...(args.num !== undefined ? { results: String(Number(args.num)) } : {}),
       }),
   ),
   spend(
@@ -323,7 +323,7 @@ export const SPEND_TOOLS: Tool[] = [
         op: 'search',
         query: args.query as string,
         ...(args.fields ? { fields: args.fields as string } : {}),
-        ...(args.limit !== undefined ? { limit: String(args.limit) } : {}),
+        ...(args.limit !== undefined ? { limit: String(Number(args.limit)) } : {}),
       }),
   ),
   spend(
@@ -351,7 +351,7 @@ export const SPEND_TOOLS: Tool[] = [
         op: 'nearby',
         lat: args.lat as string,
         lng: args.lng as string,
-        ...(args.radius !== undefined ? { radius: String(args.radius) } : {}),
+        ...(args.radius !== undefined ? { radius: String(Number(args.radius)) } : {}),
         ...(args.type ? { type: args.type as string[] } : {}),
         ...(args.fields ? { fields: args.fields as string } : {}),
       }),
@@ -448,7 +448,8 @@ export const SPEND_TOOLS: Tool[] = [
       const headers = args.headers as Record<string, string> | undefined;
       if (headers) {
         for (const k of Object.keys(headers)) {
-          if (k.toLowerCase().startsWith('x-brake-')) {
+          // As callRequest reads names: trimmed, any case.
+          if (k.trim().toLowerCase().startsWith('x-brake-')) {
             return Promise.resolve(
               text(`Invalid arguments: ${k} is set by the server from BRAKE_KEY.`, true),
             );
@@ -461,7 +462,8 @@ export const SPEND_TOOLS: Tool[] = [
           callRequest(args.provider as string, args.method as string, args.path as string, {
             ...(args.query ? { query: args.query as Record<string, string> } : {}),
             ...(headers ? { headers } : {}),
-            ...(args.body !== undefined ? { body: args.body } : {}),
+            // Encoded here: a JSON string value is sent as a JSON string, not as raw text.
+            ...(args.body !== undefined ? { body: JSON.stringify(args.body) } : {}),
           }),
         structured,
       );

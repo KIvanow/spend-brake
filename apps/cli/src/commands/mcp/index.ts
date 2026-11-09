@@ -38,8 +38,12 @@ export function mcpCommand(program: Command, io: Io, done: (code: number) => voi
       }
       // The workload must not hold the admin token. Warn, and do not grow admin tools here.
       if (config(io).adminToken) {
+        // Say where the token is: the environment, or the config `brake init` saved.
+        const where = io.env.BRAKE_ADMIN_TOKEN
+          ? 'BRAKE_ADMIN_TOKEN is set on the spend server'
+          : 'an admin token is saved in the brake config this server reads (from `brake init`)';
         io.stderr(
-          'brake mcp: warning: BRAKE_ADMIN_TOKEN is set on the spend server. Admin tools are not offered here. Run `brake mcp --admin` as a separate MCP entry, so the workload cannot read the admin token.\n',
+          `brake mcp: warning: ${where}. Admin tools are not offered here. Run \`brake mcp --admin\` as a separate MCP entry, and keep the admin token where the workload cannot read it.\n`,
         );
       }
       await serveMcp(
