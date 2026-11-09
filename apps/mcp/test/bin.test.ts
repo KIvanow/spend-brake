@@ -49,6 +49,7 @@ it('keeps its version, the registry entry and the CLI in step', () => {
     ['BRAKE_KEY', true],
     ['BRAKE_URL', true],
     ['BRAKE_API_URL', true],
+    ['BRAKE_ADMIN_TOKEN', false],
   ]);
   // The registry's limit.
   expect(server.description.length).toBeLessThanOrEqual(100);

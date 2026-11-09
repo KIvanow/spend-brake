@@ -105,8 +105,9 @@ hides the file from `brake`, not from the agent). `brake session` warns when it 
 `brake doctor` checks a workload for these holes from where it runs (a readable admin token,
 raw provider keys, an uncapped key, unpriced routes that are let through), and `--prove` shows
 that an exhausted budget stops forwarding. It lists what it cannot verify rather than calling
-anything protected. Agents that search through MCP can swap their Tavily or Exa server for
-`brake mcp` (preview), which sends every search through the proxy.
+anything protected. Agents that call paid APIs through MCP can use `brake mcp` (preview),
+which sends search, maps and other calls through the proxy. `brake mcp --admin` is a separate
+entry for the dashboard.
 
 ## Google's controls vs Spend Brake
 

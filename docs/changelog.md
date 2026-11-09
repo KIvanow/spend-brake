@@ -14,6 +14,21 @@ images for linux/amd64 and linux/arm64
 
 ## [Unreleased]
 
+### Added
+
+- `brake mcp` offers the rest of the capped calls: Brave and SerpApi search, the Google Maps
+  commands (text search, nearby, details, geocode, reverse, route) with the same cheap field
+  masks as the CLI, and `brake_call` for Mapbox, HERE, Twilio, extracts and custom APIs.
+  `brake mcp --admin` offers the admin API (keys, caps, the kill switch, spend, credentials,
+  webhooks, and the rest of the dashboard). `--owner` adds tokens, people, SSO, the license
+  and orgs. Run that as its own MCP entry with `BRAKE_ADMIN_TOKEN`, not in the workload.
+
+### Changed
+
+- `brake mcp` with no `--tools` lists every spend group. `--tools tavily,exa` restores the
+  previous search-only set. A spend server that also sees `BRAKE_ADMIN_TOKEN` warns and still
+  does not offer admin tools.
+
 ## [0.3.0] - 2026-11-09
 
 ### Added

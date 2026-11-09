@@ -1,8 +1,8 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.KIvanow/spend-brake",
-  "title": "Spend Brake capped search",
-  "description": "Web search for agents with hard dollar caps: Tavily and Exa through a budget-enforcing proxy.",
+  "title": "Spend Brake",
+  "description": "Capped search, maps and other paid APIs, or Spend Brake admin, over MCP.",
   "websiteUrl": "https://docs.spendbrake.dev/agents/#mcp-clients-preview",
   "repository": {
     "url": "https://github.com/KIvanow/spend-brake",
@@ -19,7 +19,7 @@
       "environmentVariables": [
         {
           "name": "BRAKE_KEY",
-          "description": "A Spend Brake virtual key (sb_live_…); its caps apply to every search",
+          "description": "A Spend Brake virtual key (sb_live_…); its caps apply to every call",
           "isRequired": true,
           "isSecret": true,
           "format": "string"
@@ -32,8 +32,15 @@
         },
         {
           "name": "BRAKE_API_URL",
-          "description": "The Spend Brake admin API, for the budget tool, e.g. https://app.spendbrake.dev",
+          "description": "The Spend Brake admin API, for the budget tool and for --admin, e.g. https://app.spendbrake.dev",
           "isRequired": true,
+          "format": "string"
+        },
+        {
+          "name": "BRAKE_ADMIN_TOKEN",
+          "description": "Admin token (sbt_…) for brake mcp --admin, as its own MCP entry",
+          "isRequired": false,
+          "isSecret": true,
           "format": "string"
         }
       ]

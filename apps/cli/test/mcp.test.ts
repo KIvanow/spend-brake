@@ -57,22 +57,29 @@ const call = (id: number, name: string, args: object = {}) => ({
 });
 
 describe('brake mcp', () => {
-  it('negotiates the protocol version and lists its three tools', async () => {
+  it('negotiates the protocol version and lists the spend tools', async () => {
     const m = await mcp([init(), initialized, { jsonrpc: '2.0', id: 2, method: 'tools/list' }]);
     expect(m.code).toBe(EXIT.ok);
     // The notification gets no answer.
     expect(m.replies).toHaveLength(2);
-    expect(String(m.byId(1).result!.instructions)).toContain(
-      'do not switch to the other search tool',
-    );
+    expect(String(m.byId(1).result!.instructions)).toContain('do not switch to another tool');
     expect(m.byId(1).result).toMatchObject({
       protocolVersion: '2025-06-18',
       capabilities: { tools: {} },
-      serverInfo: { name: 'spend-brake' },
+      serverInfo: { name: 'spend-brake', title: 'Spend Brake' },
     });
     expect(m.byId(2).result!.tools!.map((t) => t.name)).toEqual([
       'tavily_search',
       'exa_search',
+      'brave_search',
+      'serpapi_search',
+      'maps_search',
+      'maps_nearby',
+      'maps_details',
+      'maps_geocode',
+      'maps_reverse',
+      'maps_route',
+      'brake_call',
       'brake_budget',
     ]);
     // The searches spend money, and a repeat spends it again; only the budget is read-only.
@@ -98,9 +105,22 @@ describe('brake mcp', () => {
       args: ['--tools', 'exa'],
     });
     expect(m.byId(2).result!.tools!.map((t) => t.name)).toEqual(['exa_search', 'brake_budget']);
+    const only = await mcp([{ jsonrpc: '2.0', id: 2, method: 'tools/list' }], undefined, {
+      args: ['--tools', 'tavily'],
+    });
+    expect(only.byId(2).result!.tools!.map((t) => t.name)).toEqual([
+      'tavily_search',
+      'brake_budget',
+    ]);
     const f = fake(ENV, () => found);
     f.io.stdin = new PassThrough();
     expect(await run(['mcp', '--tools', 'google'], f.io)).toBe(EXIT.usage);
+    const both = fake(ENV, () => found);
+    both.io.stdin = new PassThrough();
+    expect(await run(['mcp', '--admin', '--tools', 'tavily'], both.io)).toBe(EXIT.usage);
+    const owner = fake(ENV, () => found);
+    owner.io.stdin = new PassThrough();
+    expect(await run(['mcp', '--owner'], owner.io)).toBe(EXIT.usage);
   });
 
   it('sends a Tavily search through the proxy with cheap defaults and reports the cost', async () => {
@@ -390,5 +410,241 @@ describe('brake mcp', () => {
       headers: { 'x-brake-cost-micros': '5000' },
     }));
     expect(m.byId(2).result!.content![0]!.text).toContain('charged $0.0050');
+  });
+
+  it('sends Brave, SerpApi, Maps and brake_call with the cheap defaults', async () => {
+    const m = await mcp([
+      init(),
+      call(2, 'brave_search', { query: 'coffee' }),
+      call(3, 'serpapi_search', { query: 'coffee', engine: 'bing', num: 3 }),
+      call(4, 'maps_search', { query: 'pizza' }),
+      call(5, 'maps_nearby', { lat: '42.7', lng: '23.3' }),
+      call(6, 'maps_details', { placeId: 'ChIJabc' }),
+      call(7, 'maps_geocode', { address: '1 Main St' }),
+      call(8, 'maps_reverse', { lat: '42.7', lng: '23.3' }),
+      call(9, 'maps_route', { origin: 'Sofia', destination: '42.14,24.75' }),
+      call(10, 'brake_call', {
+        provider: 'mapbox',
+        method: 'GET',
+        path: '/styles/v1/mapbox/streets-v12',
+        query: { limit: '1' },
+      }),
+    ]);
+    // Calls run concurrently, so match each request rather than the arrival order.
+    const seen = m.f.calls.map((c) => {
+      const u = new URL(c.url);
+      return {
+        method: c.method,
+        path: u.pathname,
+        query: Object.fromEntries(u.searchParams),
+        body: c.body ? (JSON.parse(c.body) as unknown) : undefined,
+        mask: c.headers['x-goog-fieldmask'],
+      };
+    });
+    const one = (path: string, queryKey?: string) => {
+      const hits = seen.filter((s) => s.path === path && (!queryKey || queryKey in s.query));
+      expect(hits).toHaveLength(1);
+      return hits[0]!;
+    };
+    expect(seen).toHaveLength(9);
+    expect(one('/brave/res/v1/web/search')).toMatchObject({
+      method: 'GET',
+      query: { q: 'coffee' },
+    });
+    expect(one('/serpapi/search.json')).toMatchObject({
+      method: 'GET',
+      query: { engine: 'bing', q: 'coffee', num: '3' },
+    });
+    expect(one('/google-places/v1/places:searchText')).toMatchObject({
+      method: 'POST',
+      body: { textQuery: 'pizza' },
+      mask: 'places.id,places.name',
+    });
+    expect(one('/google-places/v1/places:searchNearby')).toMatchObject({
+      method: 'POST',
+      body: {
+        locationRestriction: {
+          circle: { center: { latitude: 42.7, longitude: 23.3 }, radius: 500 },
+        },
+      },
+      mask: 'places.id,places.displayName,places.formattedAddress,places.location',
+    });
+    expect(one('/google-places/v1/places/ChIJabc')).toMatchObject({
+      method: 'GET',
+      mask: 'id,formattedAddress,location,types',
+    });
+    expect(one('/google-maps/maps/api/geocode/json', 'address')).toMatchObject({
+      method: 'GET',
+      query: { address: '1 Main St' },
+    });
+    expect(one('/google-maps/maps/api/geocode/json', 'latlng')).toMatchObject({
+      method: 'GET',
+      query: { latlng: '42.7,23.3' },
+    });
+    expect(one('/google-routes/directions/v2:computeRoutes')).toMatchObject({
+      method: 'POST',
+      body: {
+        origin: { address: 'Sofia' },
+        destination: { location: { latLng: { latitude: 42.14, longitude: 24.75 } } },
+        travelMode: 'DRIVE',
+      },
+      mask: 'routes.duration,routes.distanceMeters',
+    });
+    expect(one('/mapbox/styles/v1/mapbox/streets-v12')).toMatchObject({
+      method: 'GET',
+      query: { limit: '1' },
+    });
+  });
+
+  it('refuses a brake_call that would read a file, spoof the key, or leave the provider', async () => {
+    const m = await mcp([
+      init(),
+      call(2, 'brake_call', { provider: '..', method: 'GET', path: '/x' }),
+      call(3, 'brake_call', { provider: 'foo/bar', method: 'GET', path: '/x' }),
+      call(4, 'brake_call', {
+        provider: 'mapbox',
+        method: 'POST',
+        path: '/x',
+        body: '@secret.json',
+      }),
+      call(5, 'brake_call', {
+        provider: 'mapbox',
+        method: 'GET',
+        path: '/x',
+        headers: { 'X-Brake-Key': 'sb_live_stolen' },
+      }),
+    ]);
+    expect(m.f.calls).toHaveLength(0);
+    expect(m.byId(2).result!.content![0]!.text).toContain('invalid provider');
+    expect(m.byId(3).result!.content![0]!.text).toContain('invalid provider');
+    expect(m.byId(4).result!.content![0]!.text).toContain('cannot read a file');
+    expect(m.byId(5).result!.content![0]!.text).toContain(
+      'X-Brake-Key is set by the server from BRAKE_KEY',
+    );
+  });
+
+  it('keeps admin tools on their own server, and owner tools behind --owner', async () => {
+    const env = { ...ENV, BRAKE_ADMIN_TOKEN: 'sbt_test' };
+    const listed = await mcp([init(), { jsonrpc: '2.0', id: 2, method: 'tools/list' }], undefined, {
+      args: ['--admin'],
+      env,
+    });
+    const adminNames = listed.byId(2).result!.tools!.map((t) => t.name);
+    expect(adminNames).toContain('kill');
+    expect(adminNames).toContain('caps_list');
+    expect(adminNames).not.toContain('tavily_search');
+    expect(adminNames).not.toContain('tokens_create');
+    expect(listed.byId(1).result!.serverInfo).toMatchObject({ title: 'Spend Brake admin' });
+    const owner = await mcp([init(), { jsonrpc: '2.0', id: 2, method: 'tools/list' }], undefined, {
+      args: ['--admin', '--owner'],
+      env,
+    });
+    expect(owner.byId(2).result!.tools!.map((t) => t.name)).toContain('tokens_create');
+  });
+
+  it('warns when the spend server can see an admin token, and still lists only spend tools', async () => {
+    const m = await mcp([init(), { jsonrpc: '2.0', id: 2, method: 'tools/list' }], undefined, {
+      env: { ...ENV, BRAKE_ADMIN_TOKEN: 'sbt_test' },
+    });
+    expect(m.f.err.join('')).toContain('Admin tools are not offered here');
+    expect(m.f.out.join('')).not.toContain('Admin tools are not offered here');
+    const names = m.byId(2).result!.tools!.map((t) => t.name);
+    expect(names).toContain('tavily_search');
+    expect(names).not.toContain('kill');
+  });
+
+  it('lists caps, passes a pending cap change through, and maps a 403', async () => {
+    const env = { ...ENV, BRAKE_ADMIN_TOKEN: 'sbt_test' };
+    const caps = await mcp(
+      [init(), call(2, 'caps_list'), call(3, 'caps_set', { scope: 'org', day: '5' })],
+      (c) =>
+        c.url.endsWith('/v1/caps')
+          ? { status: 200, body: { items: [] } }
+          : { status: 200, body: { pending: true, scope: 'org' } },
+      { args: ['--admin'], env },
+    );
+    const listed = caps.f.calls.find((c) => c.url === 'http://api/v1/caps')!;
+    const set = caps.f.calls.find((c) => c.url === 'http://api/v1/caps/org')!;
+    expect(listed).toMatchObject({
+      method: 'GET',
+      headers: { authorization: 'Bearer sbt_test' },
+    });
+    expect(JSON.parse(caps.byId(2).result!.content![0]!.text)).toEqual({ items: [] });
+    expect(set).toMatchObject({ method: 'PUT' });
+    expect(JSON.parse(set.body!)).toEqual({ day: { hard: '5000000' } });
+    expect(JSON.parse(caps.byId(3).result!.content![0]!.text)).toMatchObject({ pending: true });
+
+    const refused = await mcp(
+      [init(), call(2, 'kill', { target: 'org' })],
+      () => ({
+        status: 403,
+        body: { error: 'license_required', message: 'This install does not include that feature.' },
+      }),
+      { args: ['--admin'], env },
+    );
+    expect(refused.f.calls[0]).toMatchObject({
+      method: 'POST',
+      url: 'http://api/v1/kill',
+    });
+    expect(JSON.parse(refused.f.calls[0]!.body!)).toEqual({ target: 'org' });
+    expect(refused.byId(2).result).toMatchObject({ isError: true });
+    expect(refused.byId(2).result!.content![0]!.text).toContain(
+      'This install does not include that feature.',
+    );
+  });
+
+  it('sends a provider secret and does not echo it', async () => {
+    const secret = 'tvly-secret-value';
+    const m = await mcp(
+      [init(), call(2, 'credentials_add', { provider: 'tavily', name: 'main', secret })],
+      () => ({ status: 201, body: { id: 'cred_1', provider: 'tavily', name: 'main' } }),
+      { args: ['--admin'], env: { ...ENV, BRAKE_ADMIN_TOKEN: 'sbt_test' } },
+    );
+    expect(JSON.parse(m.f.calls[0]!.body!)).toMatchObject({ secret });
+    expect(m.byId(2).result!.content![0]!.text).not.toContain(secret);
+    expect(m.f.err.join('')).not.toContain(secret);
+    expect(m.f.out.join('')).not.toContain(secret);
+  });
+
+  it('explains a missing admin token on the first call instead of failing to start', async () => {
+    const m = await mcp([init(), call(2, 'caps_list')], undefined, {
+      args: ['--admin'],
+      env: { BRAKE_API_URL: 'http://api' },
+    });
+    expect(m.f.calls).toHaveLength(0);
+    expect(m.byId(2).result).toMatchObject({ isError: true });
+    expect(m.byId(2).result!.content![0]!.text).toContain(
+      'add an admin token to the "env" of its entry',
+    );
+  });
+
+  it('forwards an audit cursor only when the page was not cut', async () => {
+    const env = { ...ENV, BRAKE_ADMIN_TOKEN: 'sbt_test' };
+    const page = (n: number) =>
+      `${Array.from({ length: n }, (_, i) => JSON.stringify({ i })).join('\n')}\n`;
+    const cut = await mcp(
+      [init(), call(2, 'audit_export')],
+      () => ({ status: 200, body: page(201), headers: { 'x-next-cursor': 'page-2' } }),
+      { args: ['--admin'], env },
+    );
+    const cutBody = JSON.parse(cut.byId(2).result!.content![0]!.text) as {
+      lines: string[];
+      truncated: boolean;
+      nextCursor?: string;
+    };
+    expect(cutBody.truncated).toBe(true);
+    expect(cutBody.lines).toHaveLength(200);
+    expect(cutBody.nextCursor).toBeUndefined();
+
+    const whole = await mcp(
+      [init(), call(2, 'audit_export')],
+      () => ({ status: 200, body: page(1), headers: { 'x-next-cursor': 'page-2' } }),
+      { args: ['--admin'], env },
+    );
+    expect(JSON.parse(whole.byId(2).result!.content![0]!.text)).toMatchObject({
+      truncated: false,
+      nextCursor: 'page-2',
+      lines: ['{"i":0}'],
+    });
   });
 });

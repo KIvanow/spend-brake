@@ -13,14 +13,21 @@ export class ApiRefusal extends CliError {
   }
 }
 
-/** Call the admin API with the admin token (env or `brake init` config). */
-export async function apiCall<T = unknown>(
+export interface ApiResponse<T> {
+  data: T;
+  headers: Headers;
+  /** Body text before JSON parsing. Audit export and metrics are not JSON. */
+  text: string;
+}
+
+/** Call the admin API and keep the response headers (audit export sends `X-Next-Cursor`). */
+export async function apiExchange<T = unknown>(
   io: Io,
   method: string,
   path: string,
   body?: unknown,
   auth: Record<string, string> | null = null,
-): Promise<T> {
+): Promise<ApiResponse<T>> {
   const cfg = config(io);
   const headers: Record<string, string> = { ...auth };
   if (!auth) {
@@ -56,7 +63,18 @@ export async function apiCall<T = unknown>(
       typeof e?.error === 'string' ? e.error : undefined,
     );
   }
-  return data as T;
+  return { data: data as T, headers: res.headers, text };
+}
+
+/** Call the admin API with the admin token (env or `brake init` config). */
+export async function apiCall<T = unknown>(
+  io: Io,
+  method: string,
+  path: string,
+  body?: unknown,
+  auth: Record<string, string> | null = null,
+): Promise<T> {
+  return (await apiExchange<T>(io, method, path, body, auth)).data;
 }
 
 /** GET /v1/me: a virtual key's own view of its caps and policy. */

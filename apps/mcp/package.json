@@ -4,7 +4,7 @@
   "mcpName": "io.github.KIvanow/spend-brake",
   "license": "Apache-2.0",
   "type": "module",
-  "description": "Web search for AI agents with hard dollar caps: Tavily and Exa over MCP, through the Spend Brake proxy.",
+  "description": "Capped search, maps and other paid APIs for AI agents over MCP, through the Spend Brake proxy, plus a separate admin server.",
   "bin": {
     "spend-brake-mcp": "./bin.mjs"
   },
@@ -24,6 +24,8 @@
     "model-context-protocol",
     "tavily",
     "exa",
+    "brave",
+    "google-maps",
     "web-search",
     "ai-agents",
     "spend-cap",

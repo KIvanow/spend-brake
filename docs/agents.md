@@ -151,16 +151,17 @@ providers' own hosts at the firewall is what makes the proxy the only way out.
 
 ## MCP clients (preview)
 
-Agents that search through an MCP server can use Spend Brake's,
-[`@spend-brake/mcp`](https://www.npmjs.com/package/@spend-brake/mcp), instead of the Tavily or Exa
-server. It offers `tavily_search`, `exa_search` and a read-only `brake_budget`, and sends every
-search through the proxy with the virtual key, so the provider key never reaches the agent.
-Replace the existing entry:
+Agents that call paid APIs through MCP can use Spend Brake's,
+[`@spend-brake/mcp`](https://www.npmjs.com/package/@spend-brake/mcp). The spend server offers
+Tavily, Exa, Brave and SerpApi search, the Google Maps commands (with the same cheap field
+masks as `brake maps`), `brake_call` for Mapbox, HERE, Twilio, extracts and custom APIs, and a
+read-only `brake_budget`. Every call goes through the proxy with the virtual key, so the
+provider key never reaches the agent. Replace a Tavily or Exa entry, or add one:
 
 ```json
 {
   "mcpServers": {
-    "search": {
+    "spend-brake": {
       "command": "npx",
       "args": ["-y", "@spend-brake/mcp"],
       "env": {
@@ -175,13 +176,22 @@ Replace the existing entry:
 
 and remove `TAVILY_API_KEY` / `EXA_API_KEY` from the agent's configuration. For a budget per
 MCP connection, start it in a session: `"args": ["-y", "@spend-brake/cli", "session",
-"--budget", "2", "--", "npx", "-y", "@spend-brake/mcp"]`. `--tools tavily` (or `exa`)
-offers one provider only. With the CLI installed, `brake mcp` is the same server.
+"--budget", "2", "--", "npx", "-y", "@spend-brake/mcp"]`. `--tools tavily,exa` is the previous
+search-only set; `--tools tavily` (or `exa`, `brave`, `serpapi`, `maps`, `call`) offers one
+group. With the CLI installed, `brake mcp` is the same server.
 
-Each result carries its `cost` and the `remaining` budget. When a cap stops a search the tool
-answers with an error that starts with `STOP.` and tells the model not to retry. So does a
-search with no answer within 60 s, or one the provider did not answer in time behind the proxy
-(`504 upstream_timeout`): it may have been forwarded and charged, so the model is told the
-charge and to check `brake_budget` before searching again. Other failures carry a short excerpt
-of the provider's error, and the charge when there was one. The search tools are annotated as neither read-only nor idempotent.
+Each result carries its `cost` and the `remaining` budget. When a cap stops a call the tool
+answers with an error that starts with `STOP.` and tells the model not to retry and not to
+switch tools: the same caps apply to all of them. So does a call with no answer within 60 s,
+or one the provider did not answer in time behind the proxy (`504 upstream_timeout`): it may
+have been forwarded and charged, so the model is told the charge and to check `brake_budget`
+before calling again. Other failures carry a short excerpt of the provider's error, and the
+charge when there was one. The spend tools are annotated as neither read-only nor idempotent.
 `BRAKE_API_URL` is required: without it `brake_budget` asks `http://localhost:8081`.
+
+Admin is a separate entry, so the workload cannot read the token. `brake mcp --admin` offers
+the dashboard API (keys, caps, the kill switch, spend, credentials, webhooks, and the rest).
+`--owner` adds tokens, people, SSO, the license and orgs. A result with `pending` is waiting
+for a second person and is not applied. Put `BRAKE_ADMIN_TOKEN` and `BRAKE_API_URL` on that
+entry only. A spend server that also sees the admin token warns and still does not offer
+admin tools.
