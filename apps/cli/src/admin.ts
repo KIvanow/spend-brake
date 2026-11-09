@@ -1,4 +1,4 @@
-import { CliError, EXIT, type Io, config, microsToUsd } from './io.js';
+import { CliError, EXIT, type Io, config, microsToUsd, usdToMicros } from './io.js';
 
 /** A refusal from the admin API, with its HTTP status. */
 export class ApiRefusal extends CliError {
@@ -192,3 +192,47 @@ export function print(
 
 export const money = (v: unknown, decimals = 2) =>
   v === null || v === undefined ? '' : microsToUsd(BigInt(v as number), decimals);
+
+/** A cap as GET /v1/caps lists it (micros). */
+interface CapRow {
+  scope: string;
+  kind: 'd' | 'm';
+  hard: number | null;
+  soft: number | null;
+}
+
+/** Dollar amounts for a caps change; a window left out is not touched. */
+export interface CapsChange {
+  day?: string | undefined;
+  month?: string | undefined;
+  softDay?: string | undefined;
+  softMonth?: string | undefined;
+}
+
+/**
+ * The body of PUT /v1/caps/<scope>. The API replaces a window's hard and soft values together (a
+ * value left out is removed), so a window given only one of them keeps the other from the current
+ * cap, read first. Used by `brake caps set` and the MCP caps_set tool alike.
+ */
+export async function capsSetBody(io: Io, scope: string, o: CapsChange) {
+  const given = { day: [o.day, o.softDay], month: [o.month, o.softMonth] } as const;
+  const partial = Object.values(given).some(
+    ([hard, soft]) => (hard === undefined) !== (soft === undefined),
+  );
+  const current = partial
+    ? (await apiExchange<{ items: CapRow[] }>(io, 'GET', '/v1/caps')).data.items.filter(
+        (c) => c.scope === scope,
+      )
+    : [];
+  const keep = (v: number | null | undefined) => (v === null || v === undefined ? null : String(v));
+  const body: Record<string, { hard: string | null; soft: string | null }> = {};
+  for (const [window, [hard, soft]] of Object.entries(given)) {
+    if (hard === undefined && soft === undefined) continue;
+    const now = current.find((c) => c.kind === window[0]);
+    body[window] = {
+      hard: hard !== undefined ? usdToMicros(hard).toString() : keep(now?.hard),
+      soft: soft !== undefined ? usdToMicros(soft).toString() : keep(now?.soft),
+    };
+  }
+  return body;
+}

@@ -41,6 +41,17 @@ export function callRequest(
   if (path.includes('\\') || segments.some((seg) => seg === '.' || seg === '..')) {
     throw new CliError('path must not contain . or .. segments, or backslashes', EXIT.usage);
   }
+  // URL parsing drops tab, CR and LF first (".\t." would then read as ".."): refuse control
+  // characters, and check the path as the parser resolves it, which is what is sent.
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(path)) {
+    throw new CliError('path must not contain control characters', EXIT.usage);
+  }
+  const prefix = `/${provider}`;
+  const resolved = new URL(`http://h${prefix}${path}`).pathname;
+  if (resolved !== prefix && !resolved.startsWith(`${prefix}/`)) {
+    throw new CliError('path leaves the provider', EXIT.usage);
+  }
   const headers: Record<string, string> = {};
   for (const [k, v] of Object.entries(o.headers ?? {})) {
     const name = k.trim().toLowerCase();

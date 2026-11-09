@@ -60,9 +60,10 @@ const PROVIDERS: Record<string, (q: string, o: SearchOpts) => ProxyRequest> = {
 
 /** The request `brake search` sends. An unknown provider or an out-of-range count throws. */
 export function searchRequest(provider: string, query: string, o: SearchOpts = {}): ProxyRequest {
-  const build = PROVIDERS[provider];
-  if (!build) throw new CliError(`unknown provider ${provider}`, EXIT.usage);
-  return build(query, o);
+  // Own keys only: `constructor` or `__proto__` would pass a plain lookup.
+  if (!Object.hasOwn(PROVIDERS, provider))
+    throw new CliError(`unknown provider ${provider}`, EXIT.usage);
+  return PROVIDERS[provider]!(query, o);
 }
 
 export function searchCommand(program: Command, io: Io, done: (code: number) => void): void {

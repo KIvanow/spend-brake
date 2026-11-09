@@ -595,6 +595,8 @@ describe('brake mcp', () => {
     expect(refused.byId(2).result!.content![0]!.text).toContain(
       'This install does not include that feature.',
     );
+    // The status and code the server's instructions key on.
+    expect(refused.byId(2).result!.content![0]!.text).toContain('(HTTP 403 license_required)');
   });
 
   it('caps_set keeps the value a window is not given, instead of removing it', async () => {
@@ -913,7 +915,7 @@ describe('brake mcp', () => {
       { args: ['--admin'], env },
     );
     expect(refused.byId(2).result!.content![0]!.text).toBe(
-      'Request failed validation. (expiresAt: Invalid ISO datetime)',
+      'Request failed validation. (expiresAt: Invalid ISO datetime) (HTTP 400 invalid_request)',
     );
 
     const minted = await mcp(

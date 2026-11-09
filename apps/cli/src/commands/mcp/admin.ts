@@ -1,4 +1,4 @@
-import { apiExchange } from '../../admin.js';
+import { ApiRefusal, apiExchange, capsSetBody } from '../../admin.js';
 import { CliError, EXIT, type Io, config, timedOut, usdToMicros, withTimeout } from '../../io.js';
 import { type Json, type Tool, type ToolResult, jsonArg, result, text } from './protocol.js';
 
@@ -114,59 +114,27 @@ function query(params: Record<string, unknown>): string {
   return s ? `?${s}` : '';
 }
 
-interface CapRow {
-  scope: string;
-  kind: 'd' | 'm';
-  hard: number | null;
-  soft: number | null;
-}
-
-/**
- * The body of PUT /v1/caps. The API replaces a window's hard and soft values together (a value
- * left out is removed), so a window given only one of them keeps the other from the current cap.
- */
+/** caps_set's body: the shared rule (a window keeps the value it is not given), read in time. */
 async function capsBody(io: Io, scope: string, a: Json) {
-  const given = {
-    day: [a.day, a.softDay],
-    month: [a.month, a.softMonth],
-  } as const;
-  const asMicros = (v: unknown) => (typeof v === 'string' ? usdToMicros(v).toString() : undefined);
-  const partial = Object.values(given).some(
-    ([hard, soft]) => (typeof hard === 'string') !== (typeof soft === 'string'),
-  );
-  let current: CapRow[] = [];
-  if (partial) {
-    let data: { items: CapRow[] };
-    try {
-      ({ data } = await apiExchange<{ items: CapRow[] }>(
-        withTimeout(io, READ_MS),
-        'GET',
-        '/v1/caps',
-      ));
-    } catch (err) {
-      // Only a read so far: nothing was changed, so this may be retried.
-      throw new CliError(
-        timedOut(err)
-          ? 'The admin API did not answer in time while reading the current caps. Nothing was changed.'
-          : (err as Error).message,
-        EXIT.error,
-        { cause: err },
-      );
-    }
-    current = data.items.filter((c) => c.scope === scope);
+  const usdArg = (v: unknown) => (typeof v === 'string' ? v : undefined);
+  try {
+    return await capsSetBody(withTimeout(io, READ_MS), scope, {
+      day: usdArg(a.day),
+      month: usdArg(a.month),
+      softDay: usdArg(a.softDay),
+      softMonth: usdArg(a.softMonth),
+    });
+  } catch (err) {
+    if (err instanceof CliError && !timedOut(err)) throw err;
+    // Only a read so far: nothing was changed, so this may be retried.
+    throw new CliError(
+      timedOut(err)
+        ? 'The admin API did not answer in time while reading the current caps. Nothing was changed.'
+        : (err as Error).message,
+      EXIT.error,
+      { cause: err },
+    );
   }
-  const body: Json = {};
-  for (const [window, [hard, soft]] of Object.entries(given)) {
-    if (typeof hard !== 'string' && typeof soft !== 'string') continue;
-    const now = current.find((c) => c.kind === window[0]);
-    const keep = (v: number | null | undefined) =>
-      v === null || v === undefined ? null : String(v);
-    body[window] = {
-      hard: asMicros(hard) ?? keep(now?.hard),
-      soft: asMicros(soft) ?? keep(now?.soft),
-    };
-  }
-  return body;
 }
 
 function num(value: unknown, fallback: number): number {
@@ -248,6 +216,10 @@ async function admin(
           : 'The admin API did not answer in time. A change might have been applied: check before sending it again.',
         true,
       );
+    }
+    // The status and code too: the instructions key on them (403 license_required, …).
+    if (err instanceof ApiRefusal) {
+      return text(`${err.message} (HTTP ${err.status}${err.error ? ` ${err.error}` : ''})`, true);
     }
     if (err instanceof CliError) return text(err.message, true);
     return text((err as Error).message, true);

@@ -22,6 +22,14 @@ images for linux/amd64 and linux/arm64
   previous search-only set. A spend server that also sees `BRAKE_ADMIN_TOKEN` warns and still
   does not offer admin tools.
 
+### Fixed
+
+- `brake caps set <scope> --soft-day <usd>` (or `--soft-month`) without the hard value removed
+  that window's hard cap; it now keeps the current hard cap, and a hard value given alone keeps
+  the current alert.
+- `brake search` refuses `constructor` and other inherited names as a provider instead of
+  sending a request to a malformed host.
+
 ## [0.3.0] - 2026-11-09
 
 ### Added

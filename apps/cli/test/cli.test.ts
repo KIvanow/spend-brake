@@ -167,7 +167,14 @@ describe('exit codes for proxy refusals', () => {
 
 describe('brake call', () => {
   it('refuses a path that would leave the provider through dot segments', async () => {
-    for (const path of ['/../google-places/v1/x', '/a/%2e%2E/b', '/a\\..\\b']) {
+    for (const path of [
+      '/../google-places/v1/x',
+      '/a/%2e%2E/b',
+      '/a\\..\\b',
+      // URL parsing drops tab and newline, which would turn these into "..".
+      '/x/.\t./.\n./custom/evil/y',
+      '/x/.\r.',
+    ]) {
       const f = fake(ENV, () => ok);
       expect(await run(['call', 'brave', 'GET', path], f.io), path).toBe(EXIT.usage);
       expect(f.calls).toHaveLength(0);
@@ -409,6 +416,12 @@ describe('brake search', () => {
     const unknown = await runSearch(['google', 'x']);
     expect(unknown.code).toBe(EXIT.usage);
     expect(unknown.f.calls).toHaveLength(0);
+    // An inherited name is not a provider: nothing is sent anywhere.
+    for (const name of ['constructor', 'toString', '__proto__']) {
+      const r = await runSearch([name, 'x']);
+      expect(r.code, name).toBe(EXIT.usage);
+      expect(r.f.calls, name).toHaveLength(0);
+    }
     const tooMany = await runSearch(['tavily', 'x', '--results', '50']);
     expect(tooMany.code).toBe(EXIT.usage);
     expect(tooMany.f.calls).toHaveLength(0);
