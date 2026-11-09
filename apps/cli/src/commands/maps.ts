@@ -90,8 +90,11 @@ export function mapsRequest(a: MapsCall): ProxyRequest {
         query: { latlng: `${number(a.lat, 'lat')},${number(a.lng, 'lng')}` },
       };
     case 'route': {
-      const mode = TRAVEL_MODES[(a.mode ?? 'drive') as keyof typeof TRAVEL_MODES];
-      if (!mode) throw new CliError(`unknown --mode ${a.mode}`, EXIT.usage);
+      const key = a.mode ?? 'drive';
+      // Own keys only: `constructor` or `toString` would pass a plain lookup.
+      if (!Object.hasOwn(TRAVEL_MODES, key))
+        throw new CliError(`unknown --mode ${a.mode}`, EXIT.usage);
+      const mode = TRAVEL_MODES[key as keyof typeof TRAVEL_MODES];
       return {
         method: 'POST',
         path: '/google-routes/directions/v2:computeRoutes',

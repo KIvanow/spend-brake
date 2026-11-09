@@ -110,6 +110,12 @@ describe('brake maps', () => {
   it('rejects bad input with exit 2 and a missing key with exit 5', async () => {
     expect((await runMaps(['nearby', '--lat', 'north', '--lng', '1'])).code).toBe(EXIT.usage);
     expect((await runMaps(['route', 'a', 'b', '--mode', 'teleport'])).code).toBe(EXIT.usage);
+    // An inherited name is not a mode either, and nothing is sent.
+    for (const mode of ['constructor', 'toString', '__proto__']) {
+      const r = await runMaps(['route', 'a', 'b', '--mode', mode]);
+      expect(r.code, mode).toBe(EXIT.usage);
+      expect(r.f.calls, mode).toHaveLength(0);
+    }
     expect((await runMaps(['details', '../admin'])).code).toBe(EXIT.usage);
     const noKey = await runMaps(['geocode', 'x'], { BRAKE_URL: 'http://proxy' });
     expect(noKey.code).toBe(EXIT.auth);
