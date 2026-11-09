@@ -68,6 +68,8 @@ describe('brake mcp', () => {
       capabilities: { tools: {} },
       serverInfo: { name: 'spend-brake', title: 'Spend Brake' },
     });
+    // jsonArg marks free JSON with a symbol, so the published schema stays plain JSON Schema.
+    expect(JSON.stringify(m.byId(2).result!.tools)).not.toContain('x-json');
     expect(m.byId(2).result!.tools!.map((t) => t.name)).toEqual([
       'tavily_search',
       'exa_search',

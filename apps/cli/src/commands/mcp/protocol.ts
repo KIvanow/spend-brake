@@ -33,16 +33,16 @@ export const result = (data: Json, structured: boolean): ToolResult => ({
   ...(structured ? { structuredContent: data } : {}),
 });
 
-/**
- * Copies the arguments the schema names. Returns a message on the first bad one.
- * Own properties only: `constructor` and `toString` are not arguments.
- */
 /** A checked value. An error is not a string: a successful argument can be one. */
 type Checked = { ok: true; value: unknown } | { ok: false; error: string };
 
 const good = (value: unknown): Checked => ({ ok: true, value });
 const bad = (error: string): Checked => ({ ok: false, error });
 
+/**
+ * Copies the arguments the schema names. Returns a message on the first bad one.
+ * Own properties only: `constructor` and `toString` are not arguments.
+ */
 export function pick(args: Json, schema: Json): Json | string {
   const props = (schema.properties ?? {}) as Record<string, Json>;
   for (const k of (schema.required as string[] | undefined) ?? []) {
@@ -84,10 +84,13 @@ function checkProp(k: string, v: unknown, p: Json): Checked {
     return bad(`${k} must be a list of strings`);
   }
   if (p.type === 'object') return checkObject(k, v, p);
-  // `anyOf` here means any JSON value. A string starting with @ is the CLI's file read.
-  if (p.type === 'json' || Array.isArray(p.anyOf)) return checkJson(k, v);
+  // Set by jsonArg. Any other anyOf is a real union and is not "any JSON".
+  if (isJsonValue(p)) return checkJson(k, v);
   return good(v);
 }
+
+/** Not a schema keyword: `tools/list` must publish plain JSON Schema. */
+const JSON_VALUE = Symbol('json');
 
 /** JSON Schema for any JSON value. `pick` refuses a string that starts with `@`. */
 export function jsonArg(description: string): Json {
@@ -101,7 +104,12 @@ export function jsonArg(description: string): Json {
       { type: 'boolean' },
       { type: 'null' },
     ],
-  };
+    [JSON_VALUE]: true,
+  } as Json;
+}
+
+function isJsonValue(p: Json): boolean {
+  return (p as { [JSON_VALUE]?: true })[JSON_VALUE] === true;
 }
 
 function checkObject(k: string, v: unknown, p: Json): Checked {
@@ -120,7 +128,6 @@ function checkObject(k: string, v: unknown, p: Json): Checked {
     return good(rec);
   }
   // A free JSON object (a custom API definition, an SSO config). The API checks its fields.
-  if (add === true) return good(v);
   return good(v);
 }
 

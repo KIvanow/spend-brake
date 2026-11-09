@@ -53,76 +53,96 @@ function schema(properties: Json, required?: string[]): Json {
   };
 }
 
-function pathId(value: string, name: string): string {
-  if (!ID.test(value)) throw new CliError(`${name} must be a single token`, EXIT.usage);
+function pathId(value: unknown, name: string): string {
+  if (typeof value !== 'string' || !ID.test(value)) {
+    throw new CliError(`${name} must be a single token`, EXIT.usage);
+  }
   return encodeURIComponent(value);
 }
 
-function query(params: Record<string, string | number | undefined>): string {
+/** A scope label (`org`, `key:<id>`, …). Not a path id: it may contain `:`. */
+function scopeOf(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new CliError('scope must be a non-empty string', EXIT.usage);
+  }
+  return encodeURIComponent(value);
+}
+
+function query(params: Record<string, unknown>): string {
   const u = new URLSearchParams();
-  for (const [k, v] of Object.entries(params)) if (v !== undefined) u.append(k, String(v));
+  for (const [k, v] of Object.entries(params)) {
+    if (typeof v === 'string' || typeof v === 'number') u.append(k, String(v));
+    else if (Array.isArray(v))
+      for (const item of v) if (typeof item === 'string') u.append(k, item);
+  }
   const s = u.toString();
   return s ? `?${s}` : '';
 }
 
-function moneyWindow(hard?: string, soft?: string) {
-  if (!hard && !soft) return undefined;
+function moneyWindow(hard?: unknown, soft?: unknown) {
+  if (typeof hard !== 'string' && typeof soft !== 'string') return undefined;
   return {
-    hard: hard ? usdToMicros(hard).toString() : null,
-    ...(soft ? { soft: usdToMicros(soft).toString() } : {}),
+    hard: typeof hard === 'string' ? usdToMicros(hard).toString() : null,
+    ...(typeof soft === 'string' ? { soft: usdToMicros(soft).toString() } : {}),
   };
+}
+
+function num(value: unknown, fallback: number): number {
+  return typeof value === 'number' ? value : fallback;
+}
+
+function plain(data: unknown): Json {
+  if (typeof data === 'object' && data !== null && !Array.isArray(data)) return data as Json;
+  return { result: data as never };
 }
 
 const METRICS_CAP = 100_000;
 const AUDIT_CAP = 200;
 
-function present(path: string, data: unknown, headers: Headers, raw: string): Json {
-  if (path.startsWith('/v1/metrics')) {
-    const body = raw;
-    if (body.length <= METRICS_CAP) return { text: body };
-    return {
-      text: body.slice(0, METRICS_CAP),
-      truncated: true,
-      note: 'Cut at 100 KB.',
-    };
-  }
-  if (path.startsWith('/v1/audit/export')) {
-    // Use the body text. One JSON line still parses as JSON, and that would drop the cursor.
-    const lines = raw.split('\n');
-    if (lines.at(-1) === '') lines.pop();
-    const truncated = lines.length > AUDIT_CAP;
-    const cursor = headers.get('x-next-cursor');
-    return {
-      lines: truncated ? lines.slice(0, AUDIT_CAP) : lines,
-      truncated,
-      // A cursor belongs to the API's full page. Forwarding it after a cut would skip the rest.
-      ...(truncated
-        ? {
-            note: 'Cut at 200 lines. Narrow from and to; the page cursor would skip the lines left out.',
-          }
-        : cursor
-          ? { nextCursor: cursor }
-          : {}),
-    };
-  }
-  if (typeof data === 'object' && data !== null && !Array.isArray(data)) return data as Json;
-  return { result: data as never };
+type Present = (data: unknown, headers: Headers, raw: string) => Json;
+
+function metricsText(_data: unknown, _headers: Headers, raw: string): Json {
+  if (raw.length <= METRICS_CAP) return { text: raw };
+  return { text: raw.slice(0, METRICS_CAP), truncated: true, note: 'Cut at 100 KB.' };
+}
+
+function auditLines(_data: unknown, headers: Headers, raw: string): Json {
+  // Body text, not the parsed JSON: one JSON line still parses, and that would drop the cursor.
+  const lines = raw.split('\n');
+  if (lines.at(-1) === '') lines.pop();
+  const truncated = lines.length > AUDIT_CAP;
+  const cursor = headers.get('x-next-cursor');
+  return {
+    lines: truncated ? lines.slice(0, AUDIT_CAP) : lines,
+    truncated,
+    // A cursor belongs to the API's full page. Forwarding it after a cut would skip the rest.
+    ...(truncated
+      ? {
+          note: 'Cut at 200 lines. Narrow from and to; the page cursor would skip the lines left out.',
+        }
+      : cursor
+        ? { nextCursor: cursor }
+        : {}),
+  };
 }
 
 async function admin(
   io: Io,
   structured: boolean,
   method: string,
-  path: string | (() => string),
-  body?: unknown | (() => unknown),
+  path: string,
+  body?: unknown,
   timeout = READ_MS,
+  present: Present = plain,
 ): Promise<ToolResult> {
   if (!config(io).adminToken) return text(NO_ADMIN, true);
   try {
-    const p = typeof path === 'function' ? path() : path;
-    const b = typeof body === 'function' ? body() : body;
-    const { data, headers, text: raw } = await apiExchange(withTimeout(io, timeout), method, p, b);
-    return result(present(p, data, headers, raw), structured);
+    const {
+      data,
+      headers,
+      text: raw,
+    } = await apiExchange(withTimeout(io, timeout), method, path, body);
+    return result(present(data, headers, raw), structured);
   } catch (err) {
     if (timedOut(err)) {
       return text(
@@ -149,7 +169,15 @@ function tool(
     description,
     inputSchema,
     annotations: { title, ...annotations },
-    run,
+    // Argument checks throw CliError. The protocol loop would report that as an internal error.
+    run: async (io, args, structured) => {
+      try {
+        return await run(io, args, structured);
+      } catch (err) {
+        if (err instanceof CliError) return text(err.message, true);
+        throw err;
+      }
+    },
   };
 }
 
@@ -177,7 +205,7 @@ export const ADMIN_TOOLS: Tool[] = [
     'Get one virtual key. The token is not included. Read-only.',
     READ,
     schema({ id: idArg }, ['id']),
-    (io, a, s) => admin(io, s, 'GET', () => `/v1/keys/${pathId(a.id as string, 'id')}`),
+    (io, a, s) => admin(io, s, 'GET', `/v1/keys/${pathId(a.id, 'id')}`),
   ),
   tool(
     'keys_create',
@@ -199,21 +227,21 @@ export const ADMIN_TOOLS: Tool[] = [
       ['name', 'credentials'],
     ),
     (io, a, s) =>
-      admin(io, s, 'POST', '/v1/keys', () => ({
+      admin(io, s, 'POST', '/v1/keys', {
         name: a.name,
         credentials: a.credentials,
-        ...(a.env ? { env: a.env } : {}),
-        ...(a.agent ? { agentId: a.agent } : {}),
-        ...(a.skus ? { skus: a.skus } : {}),
-        ...(a.sessionCap
-          ? { sessionCapMicros: usdToMicros(a.sessionCap as string).toString() }
+        ...(typeof a.env === 'string' ? { env: a.env } : {}),
+        ...(typeof a.agent === 'string' ? { agentId: a.agent } : {}),
+        ...(Array.isArray(a.skus) ? { skus: a.skus } : {}),
+        ...(typeof a.sessionCap === 'string'
+          ? { sessionCapMicros: usdToMicros(a.sessionCap).toString() }
           : {}),
-        ...(a.canMintSessions ? { canMintSessions: true } : {}),
-        ...(a.expires ? { expiresAt: a.expires } : {}),
-        ...(a.countries
-          ? { countries: (a.countries as string[]).map((c) => c.toUpperCase()) }
+        ...(typeof a.canMintSessions === 'boolean' ? { canMintSessions: a.canMintSessions } : {}),
+        ...(typeof a.expires === 'string' ? { expiresAt: a.expires } : {}),
+        ...(Array.isArray(a.countries)
+          ? { countries: a.countries.map((c) => String(c).toUpperCase()) }
           : {}),
-      })),
+      }),
   ),
   tool(
     'keys_revoke',
@@ -221,7 +249,7 @@ export const ADMIN_TOOLS: Tool[] = [
     'Revoke a virtual key. It can no longer spend.',
     DESTROY,
     schema({ id: idArg }, ['id']),
-    (io, a, s) => admin(io, s, 'DELETE', () => `/v1/keys/${pathId(a.id as string, 'id')}`),
+    (io, a, s) => admin(io, s, 'DELETE', `/v1/keys/${pathId(a.id, 'id')}`),
   ),
   tool(
     'keys_resume',
@@ -229,7 +257,7 @@ export const ADMIN_TOOLS: Tool[] = [
     'Resume a key the loop breaker paused, and reset its repeat counts.',
     WRITE,
     schema({ id: idArg }, ['id']),
-    (io, a, s) => admin(io, s, 'POST', () => `/v1/keys/${pathId(a.id as string, 'id')}/resume`),
+    (io, a, s) => admin(io, s, 'POST', `/v1/keys/${pathId(a.id, 'id')}/resume`),
   ),
   tool('caps_list', 'List caps', 'List hard and soft caps. Read-only.', READ, none, (io, _a, s) =>
     admin(io, s, 'GET', '/v1/caps'),
@@ -249,23 +277,15 @@ export const ADMIN_TOOLS: Tool[] = [
       },
       ['scope'],
     ),
-    (io, a, s) =>
-      admin(
-        io,
-        s,
-        'PUT',
-        () => `/v1/caps/${encodeURIComponent(a.scope as string)}`,
-        () => {
-          const day = moneyWindow(a.day as string | undefined, a.softDay as string | undefined);
-          const month = moneyWindow(
-            a.month as string | undefined,
-            a.softMonth as string | undefined,
-          );
-          if (!day && !month)
-            throw new CliError('Give day and/or month, or a soft limit.', EXIT.usage);
-          return { ...(day ? { day } : {}), ...(month ? { month } : {}) };
-        },
-      ),
+    (io, a, s) => {
+      const day = moneyWindow(a.day, a.softDay);
+      const month = moneyWindow(a.month, a.softMonth);
+      if (!day && !month) throw new CliError('Give day and/or month, or a soft limit.', EXIT.usage);
+      return admin(io, s, 'PUT', `/v1/caps/${scopeOf(a.scope)}`, {
+        ...(day ? { day } : {}),
+        ...(month ? { month } : {}),
+      });
+    },
   ),
   tool(
     'caps_rm',
@@ -273,14 +293,7 @@ export const ADMIN_TOOLS: Tool[] = [
     `Remove a scope's caps. kind "d" or "m" removes one window. ${pending}`,
     DESTROY,
     schema({ scope: scopeArg, kind: { type: 'string', enum: ['d', 'm'] } }, ['scope']),
-    (io, a, s) =>
-      admin(
-        io,
-        s,
-        'DELETE',
-        () =>
-          `/v1/caps/${encodeURIComponent(a.scope as string)}${query({ kind: a.kind as string | undefined })}`,
-      ),
+    (io, a, s) => admin(io, s, 'DELETE', `/v1/caps/${scopeOf(a.scope)}${query({ kind: a.kind })}`),
   ),
   tool(
     'kill',
@@ -312,12 +325,7 @@ export const ADMIN_TOOLS: Tool[] = [
     'Live remaining budget. Omit scopes for the org and every active key. Read-only.',
     READ,
     schema({ scopes: { ...strings, description: 'Scope labels, same form as caps' } }),
-    (io, a, s) =>
-      admin(io, s, 'GET', () => {
-        const scopes = (a.scopes as string[] | undefined) ?? [];
-        const q = scopes.map((scope) => `scope=${encodeURIComponent(scope)}`).join('&');
-        return `/v1/status${q ? `?${q}` : ''}`;
-      }),
+    (io, a, s) => admin(io, s, 'GET', `/v1/status${query({ scope: a.scopes })}`),
   ),
   tool(
     'spend',
@@ -338,16 +346,14 @@ export const ADMIN_TOOLS: Tool[] = [
         io,
         s,
         'GET',
-        () => {
-          const from =
-            (a.from as string | undefined) ??
-            new Date(Date.now() - Number(a.days ?? 30) * 86_400_000).toISOString();
-          return `/v1/spend${query({
-            groupBy: (a.groupBy as string | undefined) ?? 'day',
-            from,
-            to: a.to as string | undefined,
-          })}`;
-        },
+        `/v1/spend${query({
+          groupBy: typeof a.groupBy === 'string' ? a.groupBy : 'day',
+          from:
+            typeof a.from === 'string'
+              ? a.from
+              : new Date(Date.now() - num(a.days, 30) * 86_400_000).toISOString(),
+          to: a.to,
+        })}`,
         undefined,
         SLOW_MS,
       ),
@@ -372,13 +378,13 @@ export const ADMIN_TOOLS: Tool[] = [
         s,
         'GET',
         `/v1/events${query({
-          source: a.source as string | undefined,
-          type: a.type as string | undefined,
-          keyId: a.keyId as string | undefined,
-          from: a.from as string | undefined,
-          to: a.to as string | undefined,
-          limit: (a.limit as number | undefined) ?? 50,
-          cursor: a.cursor as string | undefined,
+          source: a.source,
+          type: a.type,
+          keyId: a.keyId,
+          from: a.from,
+          to: a.to,
+          limit: num(a.limit, 50),
+          cursor: a.cursor,
         })}`,
         undefined,
         SLOW_MS,
@@ -391,14 +397,7 @@ export const ADMIN_TOOLS: Tool[] = [
     READ,
     schema({ days: { type: 'integer', minimum: 1, maximum: 90 } }),
     (io, a, s) =>
-      admin(
-        io,
-        s,
-        'POST',
-        '/v1/estimates/migration',
-        { days: (a.days as number | undefined) ?? 30 },
-        SLOW_MS,
-      ),
+      admin(io, s, 'POST', '/v1/estimates/migration', { days: num(a.days, 30) }, SLOW_MS),
   ),
   tool(
     'custom_apis_list',
@@ -414,7 +413,7 @@ export const ADMIN_TOOLS: Tool[] = [
     'Get one custom API. Read-only.',
     READ,
     schema({ id: idArg }, ['id']),
-    (io, a, s) => admin(io, s, 'GET', () => `/v1/custom-apis/${pathId(a.id as string, 'id')}`),
+    (io, a, s) => admin(io, s, 'GET', `/v1/custom-apis/${pathId(a.id, 'id')}`),
   ),
   tool(
     'custom_apis_add',
@@ -436,8 +435,7 @@ export const ADMIN_TOOLS: Tool[] = [
       },
       ['id', 'definition'],
     ),
-    (io, a, s) =>
-      admin(io, s, 'PUT', () => `/v1/custom-apis/${pathId(a.id as string, 'id')}`, a.definition),
+    (io, a, s) => admin(io, s, 'PUT', `/v1/custom-apis/${pathId(a.id, 'id')}`, a.definition),
   ),
   tool(
     'custom_apis_delete',
@@ -445,7 +443,7 @@ export const ADMIN_TOOLS: Tool[] = [
     'Delete a custom API and its provider keys. Refused while virtual keys use it.',
     DESTROY,
     schema({ id: idArg }, ['id']),
-    (io, a, s) => admin(io, s, 'DELETE', () => `/v1/custom-apis/${pathId(a.id as string, 'id')}`),
+    (io, a, s) => admin(io, s, 'DELETE', `/v1/custom-apis/${pathId(a.id, 'id')}`),
   ),
   tool(
     'credentials_list',
@@ -481,8 +479,7 @@ export const ADMIN_TOOLS: Tool[] = [
     'Delete a provider key. Keys that use it move to another key of that provider, or the delete is refused.',
     DESTROY,
     schema({ id: idArg }, ['id']),
-    (io, a, s) =>
-      admin(io, s, 'DELETE', () => `/v1/providers/credentials/${pathId(a.id as string, 'id')}`),
+    (io, a, s) => admin(io, s, 'DELETE', `/v1/providers/credentials/${pathId(a.id, 'id')}`),
   ),
   tool(
     'webhooks_list',
@@ -503,7 +500,10 @@ export const ADMIN_TOOLS: Tool[] = [
         url: str,
         preset: { type: 'string', enum: ['raw', 'slack', 'discord', 'teams'] },
         events: strings,
-        secret: { ...str, description: 'Signing secret. Omit to have one generated.' },
+        secret: {
+          ...str,
+          description: 'Signing secret, at least 16 characters. Omit to have one generated.',
+        },
       },
       ['name', 'url'],
     ),
@@ -522,7 +522,7 @@ export const ADMIN_TOOLS: Tool[] = [
     'Delete an alert webhook.',
     DESTROY,
     schema({ id: idArg }, ['id']),
-    (io, a, s) => admin(io, s, 'DELETE', () => `/v1/webhooks/${pathId(a.id as string, 'id')}`),
+    (io, a, s) => admin(io, s, 'DELETE', `/v1/webhooks/${pathId(a.id, 'id')}`),
   ),
   tool(
     'webhooks_deliveries',
@@ -535,10 +535,7 @@ export const ADMIN_TOOLS: Tool[] = [
         io,
         s,
         'GET',
-        () =>
-          `/v1/webhooks/${pathId(a.id as string, 'id')}/deliveries${query({
-            limit: (a.limit as number | undefined) ?? 50,
-          })}`,
+        `/v1/webhooks/${pathId(a.id, 'id')}/deliveries${query({ limit: num(a.limit, 50) })}`,
       ),
   ),
   tool(
@@ -591,7 +588,7 @@ export const ADMIN_TOOLS: Tool[] = [
     'Metrics for the org, in Prometheus text format. Cut at 100 KB. Read-only.',
     READ,
     none,
-    (io, _a, s) => admin(io, s, 'GET', '/v1/metrics', undefined, SLOW_MS),
+    (io, _a, s) => admin(io, s, 'GET', '/v1/metrics', undefined, SLOW_MS, metricsText),
   ),
   tool(
     'org_get',
@@ -618,14 +615,16 @@ export const ADMIN_TOOLS: Tool[] = [
       ['parentKeyId'],
     ),
     (io, a, s) =>
-      admin(io, s, 'POST', '/v1/sessions', () => ({
+      admin(io, s, 'POST', '/v1/sessions', {
         parentKeyId: a.parentKeyId,
-        ...(a.budget ? { budgetMicros: usdToMicros(a.budget as string).toString() } : {}),
-        ...(a.dayBudget ? { dayBudgetMicros: usdToMicros(a.dayBudget as string).toString() } : {}),
-        ...(a.agent ? { agentId: a.agent } : {}),
-        ...(a.ttlSec !== undefined ? { ttlSec: a.ttlSec } : {}),
-        ...(a.name ? { name: a.name } : {}),
-      })),
+        ...(typeof a.budget === 'string' ? { budgetMicros: usdToMicros(a.budget).toString() } : {}),
+        ...(typeof a.dayBudget === 'string'
+          ? { dayBudgetMicros: usdToMicros(a.dayBudget).toString() }
+          : {}),
+        ...(typeof a.agent === 'string' ? { agentId: a.agent } : {}),
+        ...(typeof a.ttlSec === 'number' ? { ttlSec: a.ttlSec } : {}),
+        ...(typeof a.name === 'string' ? { name: a.name } : {}),
+      }),
   ),
   tool(
     'sessions_end',
@@ -633,8 +632,7 @@ export const ADMIN_TOOLS: Tool[] = [
     'Revoke a session key and report what it spent.',
     DESTROY,
     schema({ keyId: { ...str, description: 'The session key id' } }, ['keyId']),
-    (io, a, s) =>
-      admin(io, s, 'DELETE', () => `/v1/sessions/${pathId(a.keyId as string, 'keyId')}`),
+    (io, a, s) => admin(io, s, 'DELETE', `/v1/sessions/${pathId(a.keyId, 'keyId')}`),
   ),
   tool(
     'approvals_list',
@@ -642,8 +640,7 @@ export const ADMIN_TOOLS: Tool[] = [
     'Cap raises waiting for, or decided by, a second person. Read-only. Needs the approvals feature.',
     READ,
     schema({ status: { type: 'string', enum: ['pending', 'approved', 'rejected'] } }),
-    (io, a, s) =>
-      admin(io, s, 'GET', `/v1/approvals${query({ status: a.status as string | undefined })}`),
+    (io, a, s) => admin(io, s, 'GET', `/v1/approvals${query({ status: a.status })}`),
   ),
   tool(
     'approvals_get_policy',
@@ -668,8 +665,8 @@ export const ADMIN_TOOLS: Tool[] = [
     WRITE,
     schema({ id: idArg, reason: str }, ['id']),
     (io, a, s) =>
-      admin(io, s, 'POST', () => `/v1/approvals/${pathId(a.id as string, 'id')}/approve`, {
-        ...(a.reason ? { reason: a.reason } : {}),
+      admin(io, s, 'POST', `/v1/approvals/${pathId(a.id, 'id')}/approve`, {
+        ...(typeof a.reason === 'string' ? { reason: a.reason } : {}),
       }),
   ),
   tool(
@@ -679,8 +676,8 @@ export const ADMIN_TOOLS: Tool[] = [
     WRITE,
     schema({ id: idArg, reason: str }, ['id']),
     (io, a, s) =>
-      admin(io, s, 'POST', () => `/v1/approvals/${pathId(a.id as string, 'id')}/reject`, {
-        ...(a.reason ? { reason: a.reason } : {}),
+      admin(io, s, 'POST', `/v1/approvals/${pathId(a.id, 'id')}/reject`, {
+        ...(typeof a.reason === 'string' ? { reason: a.reason } : {}),
       }),
   ),
   tool(
@@ -698,13 +695,10 @@ export const ADMIN_TOOLS: Tool[] = [
         io,
         s,
         'GET',
-        `/v1/audit/export${query({
-          from: a.from as string | undefined,
-          to: a.to as string | undefined,
-          cursor: a.cursor as string | undefined,
-        })}`,
+        `/v1/audit/export${query({ from: a.from, to: a.to, cursor: a.cursor })}`,
         undefined,
         SLOW_MS,
+        auditLines,
       ),
   ),
   tool(
@@ -784,22 +778,21 @@ export const OWNER_TOOLS: Tool[] = [
       loop: loopSchema,
       providers: { ...jsonObj, description: 'Provider pricing policy, as PUT /v1/org expects' },
     }),
-    (io, a, s) =>
-      admin(io, s, 'PUT', '/v1/org', () => {
-        const body: Json = {};
-        for (const k of [
-          'name',
-          'timeZone',
-          'alertEmail',
-          'requireLoginForRaise',
-          'loop',
-          'providers',
-        ]) {
-          if (a[k] !== undefined) body[k] = a[k];
-        }
-        if (!Object.keys(body).length) throw new CliError('Give a setting to change.', EXIT.usage);
-        return body;
-      }),
+    (io, a, s) => {
+      const body: Json = {};
+      for (const k of [
+        'name',
+        'timeZone',
+        'alertEmail',
+        'requireLoginForRaise',
+        'loop',
+        'providers',
+      ]) {
+        if (a[k] !== undefined) body[k] = a[k];
+      }
+      if (!Object.keys(body).length) throw new CliError('Give a setting to change.', EXIT.usage);
+      return admin(io, s, 'PUT', '/v1/org', body);
+    },
   ),
   tool(
     'tokens_list',
@@ -835,7 +828,7 @@ export const OWNER_TOOLS: Tool[] = [
     'Revoke an admin API token. Owner.',
     DESTROY,
     schema({ id: idArg }, ['id']),
-    (io, a, s) => admin(io, s, 'DELETE', () => `/v1/tokens/${pathId(a.id as string, 'id')}`),
+    (io, a, s) => admin(io, s, 'DELETE', `/v1/tokens/${pathId(a.id, 'id')}`),
   ),
   tool('users_list', 'List people', 'People in the org. Owner.', READ, none, (io, _a, s) =>
     admin(io, s, 'GET', '/v1/users'),
@@ -854,8 +847,7 @@ export const OWNER_TOOLS: Tool[] = [
     'Change the role of a person. Their sessions end. Owner.',
     WRITE,
     schema({ id: idArg, role: { type: 'string', enum: [...ROLES] } }, ['id', 'role']),
-    (io, a, s) =>
-      admin(io, s, 'PATCH', () => `/v1/users/${pathId(a.id as string, 'id')}`, { role: a.role }),
+    (io, a, s) => admin(io, s, 'PATCH', `/v1/users/${pathId(a.id, 'id')}`, { role: a.role }),
   ),
   tool(
     'users_delete',
@@ -863,7 +855,7 @@ export const OWNER_TOOLS: Tool[] = [
     'Remove a person. Their sessions end. Owner.',
     DESTROY,
     schema({ id: idArg }, ['id']),
-    (io, a, s) => admin(io, s, 'DELETE', () => `/v1/users/${pathId(a.id as string, 'id')}`),
+    (io, a, s) => admin(io, s, 'DELETE', `/v1/users/${pathId(a.id, 'id')}`),
   ),
   tool(
     'license_install',
