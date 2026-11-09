@@ -1,5 +1,5 @@
 # Run published images instead of building from source:
-#   BRAKE_VERSION=0.3.0 docker compose -f infra/docker-compose.yml \
+#   BRAKE_VERSION=0.4.0 docker compose -f infra/docker-compose.yml \
 #     -f infra/docker-compose.release.yml pull
 #   ... up -d --wait
 # With the ee overlay, list it before this file and set BRAKE_API_IMAGE=ee-api and

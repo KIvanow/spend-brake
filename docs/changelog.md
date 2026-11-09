@@ -14,6 +14,8 @@ images for linux/amd64 and linux/arm64
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-09
+
 ### Added
 
 - `brake mcp` offers the rest of the capped calls: Brave and SerpApi search, the Google Maps
