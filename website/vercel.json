@@ -14,7 +14,8 @@
       "has": [{ "type": "host", "value": "status.spendbrake.dev" }],
       "destination": "https://spendbrake.dev/status",
       "permanent": false
-    }
+    },
+    { "source": "/pricing", "destination": "/#pricing", "permanent": true }
   ],
   "headers": [
     {

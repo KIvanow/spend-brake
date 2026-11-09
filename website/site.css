@@ -615,6 +615,9 @@ h2 {
     gap: 56px;
   }
 }
+.split + .split {
+  margin-top: 72px;
+}
 .split ul {
   padding-left: 0;
   list-style: none;
