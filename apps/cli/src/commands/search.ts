@@ -11,11 +11,11 @@ function count(value: string | undefined, max: number): number | undefined {
   return n;
 }
 
-interface SearchOpts {
+export interface SearchOpts {
   results?: string;
   depth?: string;
   type?: string;
-  engine: string;
+  engine?: string;
 }
 
 /** One web search on each provider, with its cheapest settings unless asked otherwise. */
@@ -53,10 +53,18 @@ const PROVIDERS: Record<string, (q: string, o: SearchOpts) => ProxyRequest> = {
     return {
       method: 'GET',
       path: '/serpapi/search.json',
-      query: { engine: o.engine, q, ...(n !== undefined ? { num: String(n) } : {}) },
+      query: { engine: o.engine ?? 'google', q, ...(n !== undefined ? { num: String(n) } : {}) },
     };
   },
 };
+
+/** The request `brake search` sends. An unknown provider or an out-of-range count throws. */
+export function searchRequest(provider: string, query: string, o: SearchOpts = {}): ProxyRequest {
+  // Own keys only: `constructor` or `__proto__` would pass a plain lookup.
+  if (!Object.hasOwn(PROVIDERS, provider))
+    throw new CliError(`unknown provider ${provider}`, EXIT.usage);
+  return PROVIDERS[provider]!(query, o);
+}
 
 export function searchCommand(program: Command, io: Io, done: (code: number) => void): void {
   program
@@ -70,9 +78,7 @@ export function searchCommand(program: Command, io: Io, done: (code: number) => 
     .option('--engine <engine>', 'SerpApi engine', 'google')
     .option('--pretty', 'human-readable output instead of JSON')
     .action(async (provider: string, query: string[], o: SearchOpts, cmd: Command) => {
-      const build = PROVIDERS[provider];
-      if (!build) throw new CliError(`unknown provider ${provider}`, EXIT.usage);
       const pretty = Boolean(cmd.optsWithGlobals<{ pretty?: boolean }>().pretty);
-      done(report(io, await proxyCall(io, build(query.join(' '), o)), pretty));
+      done(report(io, await proxyCall(io, searchRequest(provider, query.join(' '), o)), pretty));
     });
 }

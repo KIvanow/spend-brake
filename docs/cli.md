@@ -147,10 +147,16 @@ See [checking a workload](../agents/#check-the-workload-with-brake-doctor) for t
 
 ## brake mcp
 
-An MCP server on stdio with capped `tavily_search` and `exa_search` tools and a read-only
-`brake_budget` tool (preview). It reads `BRAKE_KEY`, `BRAKE_URL` and `BRAKE_API_URL` (set all
-three: the budget tool otherwise asks `http://localhost:8081`);
-`--tools tavily,exa` picks the providers. The same server is published as `@spend-brake/mcp`. Setup: [MCP clients](../agents/#mcp-clients-preview).
+An MCP server on stdio (preview). With no flags it offers capped search (Tavily, Exa, Brave,
+SerpApi), the Google Maps commands, `brake_call`, and a read-only `brake_budget`. It reads
+`BRAKE_KEY`, `BRAKE_URL` and `BRAKE_API_URL` (set all three: the budget tool otherwise asks
+`http://localhost:8081`). `--tools tavily,exa,brave,serpapi,maps,call` narrows the groups;
+`--tools tavily,exa` is the previous search-only set.
+
+`brake mcp --admin` offers the admin API instead, and needs `BRAKE_ADMIN_TOKEN`. `--owner`
+(with `--admin`) adds tokens, people, SSO, the license and orgs. `--tools` does not combine
+with `--admin`. Run the admin server as its own MCP entry. The same server is published as
+`@spend-brake/mcp`. Setup: [MCP clients](../agents/#mcp-clients-preview).
 
 ## Admin commands
 

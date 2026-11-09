@@ -7,7 +7,7 @@ import { callCommand } from './commands/call.js';
 import { doctorCommand } from './commands/doctor.js';
 import { initCommand } from './commands/init.js';
 import { mapsCommand } from './commands/maps.js';
-import { mcpCommand } from './commands/mcp.js';
+import { mcpCommand } from './commands/mcp/index.js';
 import { searchCommand } from './commands/search.js';
 import { sessionCommand } from './commands/session.js';
 import { CliError, EXIT, type Io } from './io.js';

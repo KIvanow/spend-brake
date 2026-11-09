@@ -110,6 +110,12 @@ describe('brake maps', () => {
   it('rejects bad input with exit 2 and a missing key with exit 5', async () => {
     expect((await runMaps(['nearby', '--lat', 'north', '--lng', '1'])).code).toBe(EXIT.usage);
     expect((await runMaps(['route', 'a', 'b', '--mode', 'teleport'])).code).toBe(EXIT.usage);
+    // An inherited name is not a mode either, and nothing is sent.
+    for (const mode of ['constructor', 'toString', '__proto__']) {
+      const r = await runMaps(['route', 'a', 'b', '--mode', mode]);
+      expect(r.code, mode).toBe(EXIT.usage);
+      expect(r.f.calls, mode).toHaveLength(0);
+    }
     expect((await runMaps(['details', '../admin'])).code).toBe(EXIT.usage);
     const noKey = await runMaps(['geocode', 'x'], { BRAKE_URL: 'http://proxy' });
     expect(noKey.code).toBe(EXIT.auth);
@@ -160,6 +166,21 @@ describe('exit codes for proxy refusals', () => {
 });
 
 describe('brake call', () => {
+  it('refuses a path that would leave the provider through dot segments', async () => {
+    for (const path of [
+      '/../google-places/v1/x',
+      '/a/%2e%2E/b',
+      '/a\\..\\b',
+      // URL parsing drops tab and newline, which would turn these into "..".
+      '/x/.\t./.\n./custom/evil/y',
+      '/x/.\r.',
+    ]) {
+      const f = fake(ENV, () => ok);
+      expect(await run(['call', 'brave', 'GET', path], f.io), path).toBe(EXIT.usage);
+      expect(f.calls).toHaveLength(0);
+    }
+  });
+
   it('sends any capped request through the proxy', async () => {
     const f = fake(ENV, () => ok);
     const code = await run(
@@ -395,6 +416,12 @@ describe('brake search', () => {
     const unknown = await runSearch(['google', 'x']);
     expect(unknown.code).toBe(EXIT.usage);
     expect(unknown.f.calls).toHaveLength(0);
+    // An inherited name is not a provider: nothing is sent anywhere.
+    for (const name of ['constructor', 'toString', '__proto__']) {
+      const r = await runSearch([name, 'x']);
+      expect(r.code, name).toBe(EXIT.usage);
+      expect(r.f.calls, name).toHaveLength(0);
+    }
     const tooMany = await runSearch(['tavily', 'x', '--results', '50']);
     expect(tooMany.code).toBe(EXIT.usage);
     expect(tooMany.f.calls).toHaveLength(0);

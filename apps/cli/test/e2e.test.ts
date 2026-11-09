@@ -117,7 +117,7 @@ async function parentKey(opts: {
   agentId?: string;
 }) {
   const orgId = `org_${randomBytes(3).toString('hex')}`;
-  await bootstrapOrg({ db, registry }, { id: orgId, name: orgId });
+  const ownerToken = await bootstrapOrg({ db, registry }, { id: orgId, name: orgId });
   // The key exists in Valkey (what the proxy and the session endpoint read) and Postgres.
   const { token, record } = await registry.createKey({
     id: `key_parent_${randomBytes(3).toString('hex')}`,
@@ -136,7 +136,7 @@ async function parentKey(opts: {
     prefix: token.slice(0, 12),
     config: record,
   });
-  return { orgId, token, keyId: record.id };
+  return { orgId, token, keyId: record.id, ownerToken };
 }
 
 describe('brake session end to end', () => {
@@ -341,5 +341,56 @@ describe('brake mcp end to end', () => {
     child.stdin.end();
     const [code] = (await exited) as [number | null];
     expect(code).toBe(0);
+  });
+
+  it('geocodes through the proxy and lists caps with the admin token', async () => {
+    const parent = await parentKey({ canMintSessions: false });
+    const rpc = async (
+      args: string[],
+      env: Record<string, string>,
+      name: string,
+      toolArgs: object,
+    ) => {
+      const child = spawn(process.execPath, [CLI, 'mcp', ...args], {
+        env: { PATH: process.env.PATH ?? '', BRAKE_URL: proxyUrl, BRAKE_API_URL: apiUrl, ...env },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      const exited = once(child, 'exit');
+      onTestFinished(async () => {
+        child.stdin.end();
+        if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
+        await exited;
+      });
+      const replies = createInterface({ input: child.stdout })[Symbol.asyncIterator]();
+      const send = async (id: number, method: string, params: object = {}) => {
+        child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
+        const line = await replies.next();
+        return JSON.parse(line.value as string) as { result: Record<string, unknown> };
+      };
+      await send(1, 'initialize', { protocolVersion: '2025-06-18', capabilities: {} });
+      const result = (await send(2, 'tools/call', { name, arguments: toolArgs })).result as {
+        content: { text: string }[];
+        isError?: boolean;
+      };
+      child.stdin.end();
+      const [code] = (await exited) as [number | null];
+      return { code, result };
+    };
+
+    const before = googleCalls;
+    const geo = await rpc([], { BRAKE_KEY: parent.token }, 'maps_geocode', {
+      address: '1 Main St',
+    });
+    expect(geo.code).toBe(0);
+    expect(geo.result.isError).toBeUndefined();
+    expect((JSON.parse(geo.result.content[0]!.text) as { result: unknown }).result).toMatchObject({
+      status: 'OK',
+    });
+    expect(googleCalls - before).toBe(1);
+
+    const caps = await rpc(['--admin'], { BRAKE_ADMIN_TOKEN: parent.ownerToken }, 'caps_list', {});
+    expect(caps.code).toBe(0);
+    expect(caps.result.isError).toBeUndefined();
+    expect(JSON.parse(caps.result.content[0]!.text)).toEqual({ items: [] });
   });
 });

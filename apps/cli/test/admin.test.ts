@@ -173,6 +173,8 @@ describe('brake init and admin commands', () => {
     expect(
       (await c.run('caps', 'set', `key:${keyId}`, '--day', '1.50', '--soft-day', '1')).code,
     ).toBe(0);
+    // An alert only: the $1.50 hard cap stays (the API would remove a value left out).
+    expect((await c.run('caps', 'set', `key:${keyId}`, '--soft-day', '0.5')).code).toBe(0);
     const status = await c.run('status', '--scope', `key:${keyId}`, '--pretty');
     expect(status.out).toMatch(
       new RegExp(`key:${keyId}\\s+d:\\d{8}\\s+\\$0\\.0000\\s+\\$1\\.50\\s+\\$1\\.5000`),

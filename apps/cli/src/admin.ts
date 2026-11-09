@@ -1,4 +1,4 @@
-import { CliError, EXIT, type Io, config, microsToUsd } from './io.js';
+import { CliError, EXIT, type Io, config, microsToUsd, usdToMicros } from './io.js';
 
 /** A refusal from the admin API, with its HTTP status. */
 export class ApiRefusal extends CliError {
@@ -13,14 +13,21 @@ export class ApiRefusal extends CliError {
   }
 }
 
-/** Call the admin API with the admin token (env or `brake init` config). */
-export async function apiCall<T = unknown>(
+export interface ApiResponse<T> {
+  data: T;
+  headers: Headers;
+  /** Body text before JSON parsing. Audit export and metrics are not JSON. */
+  text: string;
+}
+
+/** Call the admin API and keep the response headers (audit export sends `X-Next-Cursor`). */
+export async function apiExchange<T = unknown>(
   io: Io,
   method: string,
   path: string,
   body?: unknown,
   auth: Record<string, string> | null = null,
-): Promise<T> {
+): Promise<ApiResponse<T>> {
   const cfg = config(io);
   const headers: Record<string, string> = { ...auth };
   if (!auth) {
@@ -38,7 +45,12 @@ export async function apiCall<T = unknown>(
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
   } catch (err) {
-    throw new CliError(`cannot reach the admin API at ${cfg.apiUrl}: ${(err as Error).message}`);
+    // The cause stays attached: a timeout must still read as one (see timedOut).
+    throw new CliError(
+      `cannot reach the admin API at ${cfg.apiUrl}: ${(err as Error).message}`,
+      EXIT.error,
+      { cause: err },
+    );
   }
   const text = await res.text();
   let data: unknown = text;
@@ -48,15 +60,36 @@ export async function apiCall<T = unknown>(
     // keep text
   }
   if (!res.ok) {
-    const e = data as { message?: string; error?: string } | null;
+    const e = data as { message?: string; error?: string; issues?: unknown } | null;
+    // Which field failed and why (the API never echoes the values), so the caller can fix it.
+    const issues = Array.isArray(e?.issues)
+      ? (e.issues as { path?: unknown; message?: unknown }[])
+          .filter((i) => typeof i.message === 'string')
+          .map((i) =>
+            typeof i.path === 'string' && i.path
+              ? `${i.path}: ${i.message as string}`
+              : (i.message as string),
+          )
+      : [];
     throw new ApiRefusal(
-      e?.message ?? `HTTP ${res.status}`,
+      `${e?.message ?? `HTTP ${res.status}`}${issues.length ? ` (${issues.join('; ')})` : ''}`,
       res.status === 401 ? EXIT.auth : EXIT.error,
       res.status,
       typeof e?.error === 'string' ? e.error : undefined,
     );
   }
-  return data as T;
+  return { data: data as T, headers: res.headers, text };
+}
+
+/** Call the admin API with the admin token (env or `brake init` config). */
+export async function apiCall<T = unknown>(
+  io: Io,
+  method: string,
+  path: string,
+  body?: unknown,
+  auth: Record<string, string> | null = null,
+): Promise<T> {
+  return (await apiExchange<T>(io, method, path, body, auth)).data;
 }
 
 /** GET /v1/me: a virtual key's own view of its caps and policy. */
@@ -159,3 +192,47 @@ export function print(
 
 export const money = (v: unknown, decimals = 2) =>
   v === null || v === undefined ? '' : microsToUsd(BigInt(v as number), decimals);
+
+/** A cap as GET /v1/caps lists it (micros). */
+interface CapRow {
+  scope: string;
+  kind: 'd' | 'm';
+  hard: number | null;
+  soft: number | null;
+}
+
+/** Dollar amounts for a caps change; a window left out is not touched. */
+export interface CapsChange {
+  day?: string | undefined;
+  month?: string | undefined;
+  softDay?: string | undefined;
+  softMonth?: string | undefined;
+}
+
+/**
+ * The body of PUT /v1/caps/<scope>. The API replaces a window's hard and soft values together (a
+ * value left out is removed), so a window given only one of them keeps the other from the current
+ * cap, read first. Used by `brake caps set` and the MCP caps_set tool alike.
+ */
+export async function capsSetBody(io: Io, scope: string, o: CapsChange) {
+  const given = { day: [o.day, o.softDay], month: [o.month, o.softMonth] } as const;
+  const partial = Object.values(given).some(
+    ([hard, soft]) => (hard === undefined) !== (soft === undefined),
+  );
+  const current = partial
+    ? (await apiExchange<{ items: CapRow[] }>(io, 'GET', '/v1/caps')).data.items.filter(
+        (c) => c.scope === scope,
+      )
+    : [];
+  const keep = (v: number | null | undefined) => (v === null || v === undefined ? null : String(v));
+  const body: Record<string, { hard: string | null; soft: string | null }> = {};
+  for (const [window, [hard, soft]] of Object.entries(given)) {
+    if (hard === undefined && soft === undefined) continue;
+    const now = current.find((c) => c.kind === window[0]);
+    body[window] = {
+      hard: hard !== undefined ? usdToMicros(hard).toString() : keep(now?.hard),
+      soft: soft !== undefined ? usdToMicros(soft).toString() : keep(now?.soft),
+    };
+  }
+  return body;
+}

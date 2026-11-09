@@ -46,10 +46,11 @@ verify.
 
 ## MCP server (preview)
 
-`brake mcp` is a stdio MCP server with capped `tavily_search` and `exa_search` tools and a
-read-only `brake_budget` tool, also published on its own as
+`brake mcp` is a stdio MCP server for the capped calls (search, Google Maps, and `brake_call`)
+plus a read-only `brake_budget`. `brake mcp --admin` is a separate entry for the admin API.
+Also published on its own as
 [`@spend-brake/mcp`](https://www.npmjs.com/package/@spend-brake/mcp). Replace a Tavily or Exa MCP
-server entry with:
+server entry, or add one, with:
 
 ```json
 {

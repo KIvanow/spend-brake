@@ -57,22 +57,31 @@ const call = (id: number, name: string, args: object = {}) => ({
 });
 
 describe('brake mcp', () => {
-  it('negotiates the protocol version and lists its three tools', async () => {
+  it('negotiates the protocol version and lists the spend tools', async () => {
     const m = await mcp([init(), initialized, { jsonrpc: '2.0', id: 2, method: 'tools/list' }]);
     expect(m.code).toBe(EXIT.ok);
     // The notification gets no answer.
     expect(m.replies).toHaveLength(2);
-    expect(String(m.byId(1).result!.instructions)).toContain(
-      'do not switch to the other search tool',
-    );
+    expect(String(m.byId(1).result!.instructions)).toContain('do not switch to another tool');
     expect(m.byId(1).result).toMatchObject({
       protocolVersion: '2025-06-18',
       capabilities: { tools: {} },
-      serverInfo: { name: 'spend-brake' },
+      serverInfo: { name: 'spend-brake', title: 'Spend Brake' },
     });
+    // jsonArg marks free JSON with a symbol, so the published schema stays plain JSON Schema.
+    expect(JSON.stringify(m.byId(2).result!.tools)).not.toContain('x-json');
     expect(m.byId(2).result!.tools!.map((t) => t.name)).toEqual([
       'tavily_search',
       'exa_search',
+      'brave_search',
+      'serpapi_search',
+      'maps_search',
+      'maps_nearby',
+      'maps_details',
+      'maps_geocode',
+      'maps_reverse',
+      'maps_route',
+      'brake_call',
       'brake_budget',
     ]);
     // The searches spend money, and a repeat spends it again; only the budget is read-only.
@@ -98,9 +107,22 @@ describe('brake mcp', () => {
       args: ['--tools', 'exa'],
     });
     expect(m.byId(2).result!.tools!.map((t) => t.name)).toEqual(['exa_search', 'brake_budget']);
+    const only = await mcp([{ jsonrpc: '2.0', id: 2, method: 'tools/list' }], undefined, {
+      args: ['--tools', 'tavily'],
+    });
+    expect(only.byId(2).result!.tools!.map((t) => t.name)).toEqual([
+      'tavily_search',
+      'brake_budget',
+    ]);
     const f = fake(ENV, () => found);
     f.io.stdin = new PassThrough();
     expect(await run(['mcp', '--tools', 'google'], f.io)).toBe(EXIT.usage);
+    const both = fake(ENV, () => found);
+    both.io.stdin = new PassThrough();
+    expect(await run(['mcp', '--admin', '--tools', 'tavily'], both.io)).toBe(EXIT.usage);
+    const owner = fake(ENV, () => found);
+    owner.io.stdin = new PassThrough();
+    expect(await run(['mcp', '--owner'], owner.io)).toBe(EXIT.usage);
   });
 
   it('sends a Tavily search through the proxy with cheap defaults and reports the cost', async () => {
@@ -390,5 +412,549 @@ describe('brake mcp', () => {
       headers: { 'x-brake-cost-micros': '5000' },
     }));
     expect(m.byId(2).result!.content![0]!.text).toContain('charged $0.0050');
+  });
+
+  it('sends Brave, SerpApi, Maps and brake_call with the cheap defaults', async () => {
+    const m = await mcp([
+      init(),
+      call(2, 'brave_search', { query: 'coffee' }),
+      call(3, 'serpapi_search', { query: 'coffee', engine: 'bing', num: 3 }),
+      call(4, 'maps_search', { query: 'pizza' }),
+      call(5, 'maps_nearby', { lat: '42.7', lng: '23.3' }),
+      call(6, 'maps_details', { placeId: 'ChIJabc' }),
+      call(7, 'maps_geocode', { address: '1 Main St' }),
+      call(8, 'maps_reverse', { lat: '42.7', lng: '23.3' }),
+      call(9, 'maps_route', { origin: 'Sofia', destination: '42.14,24.75' }),
+      call(10, 'brake_call', {
+        provider: 'mapbox',
+        method: 'GET',
+        path: '/styles/v1/mapbox/streets-v12',
+        query: { limit: '1' },
+      }),
+    ]);
+    // Calls run concurrently, so match each request rather than the arrival order.
+    const seen = m.f.calls.map((c) => {
+      const u = new URL(c.url);
+      return {
+        method: c.method,
+        path: u.pathname,
+        query: Object.fromEntries(u.searchParams),
+        body: c.body ? (JSON.parse(c.body) as unknown) : undefined,
+        mask: c.headers['x-goog-fieldmask'],
+      };
+    });
+    const one = (path: string, queryKey?: string) => {
+      const hits = seen.filter((s) => s.path === path && (!queryKey || queryKey in s.query));
+      expect(hits).toHaveLength(1);
+      return hits[0]!;
+    };
+    expect(seen).toHaveLength(9);
+    expect(one('/brave/res/v1/web/search')).toMatchObject({
+      method: 'GET',
+      query: { q: 'coffee' },
+    });
+    expect(one('/serpapi/search.json')).toMatchObject({
+      method: 'GET',
+      query: { engine: 'bing', q: 'coffee', num: '3' },
+    });
+    expect(one('/google-places/v1/places:searchText')).toMatchObject({
+      method: 'POST',
+      body: { textQuery: 'pizza' },
+      mask: 'places.id,places.name',
+    });
+    expect(one('/google-places/v1/places:searchNearby')).toMatchObject({
+      method: 'POST',
+      body: {
+        locationRestriction: {
+          circle: { center: { latitude: 42.7, longitude: 23.3 }, radius: 500 },
+        },
+      },
+      mask: 'places.id,places.displayName,places.formattedAddress,places.location',
+    });
+    expect(one('/google-places/v1/places/ChIJabc')).toMatchObject({
+      method: 'GET',
+      mask: 'id,formattedAddress,location,types',
+    });
+    expect(one('/google-maps/maps/api/geocode/json', 'address')).toMatchObject({
+      method: 'GET',
+      query: { address: '1 Main St' },
+    });
+    expect(one('/google-maps/maps/api/geocode/json', 'latlng')).toMatchObject({
+      method: 'GET',
+      query: { latlng: '42.7,23.3' },
+    });
+    expect(one('/google-routes/directions/v2:computeRoutes')).toMatchObject({
+      method: 'POST',
+      body: {
+        origin: { address: 'Sofia' },
+        destination: { location: { latLng: { latitude: 42.14, longitude: 24.75 } } },
+        travelMode: 'DRIVE',
+      },
+      mask: 'routes.duration,routes.distanceMeters',
+    });
+    expect(one('/mapbox/styles/v1/mapbox/streets-v12')).toMatchObject({
+      method: 'GET',
+      query: { limit: '1' },
+    });
+  });
+
+  it('refuses a brake_call that would read a file, spoof the key, or leave the provider', async () => {
+    const m = await mcp([
+      init(),
+      call(2, 'brake_call', { provider: '..', method: 'GET', path: '/x' }),
+      call(3, 'brake_call', { provider: 'foo/bar', method: 'GET', path: '/x' }),
+      call(4, 'brake_call', {
+        provider: 'mapbox',
+        method: 'POST',
+        path: '/x',
+        body: '@secret.json',
+      }),
+      call(5, 'brake_call', {
+        provider: 'mapbox',
+        method: 'GET',
+        path: '/x',
+        headers: { 'X-Brake-Key': 'sb_live_stolen' },
+      }),
+    ]);
+    expect(m.f.calls).toHaveLength(0);
+    expect(m.byId(2).result!.content![0]!.text).toContain('invalid provider');
+    expect(m.byId(3).result!.content![0]!.text).toContain('invalid provider');
+    expect(m.byId(4).result!.content![0]!.text).toContain('cannot read a file');
+    expect(m.byId(5).result!.content![0]!.text).toContain(
+      'X-Brake-Key is set by the server from BRAKE_KEY',
+    );
+  });
+
+  it('keeps admin tools on their own server, and owner tools behind --owner', async () => {
+    const env = { ...ENV, BRAKE_ADMIN_TOKEN: 'sbt_test' };
+    const listed = await mcp([init(), { jsonrpc: '2.0', id: 2, method: 'tools/list' }], undefined, {
+      args: ['--admin'],
+      env,
+    });
+    const adminNames = listed.byId(2).result!.tools!.map((t) => t.name);
+    expect(adminNames).toContain('kill');
+    expect(adminNames).toContain('caps_list');
+    expect(adminNames).not.toContain('tavily_search');
+    expect(adminNames).not.toContain('tokens_create');
+    expect(listed.byId(1).result!.serverInfo).toMatchObject({ title: 'Spend Brake admin' });
+    const owner = await mcp([init(), { jsonrpc: '2.0', id: 2, method: 'tools/list' }], undefined, {
+      args: ['--admin', '--owner'],
+      env,
+    });
+    expect(owner.byId(2).result!.tools!.map((t) => t.name)).toContain('tokens_create');
+  });
+
+  it('warns when the spend server can see an admin token, and still lists only spend tools', async () => {
+    const m = await mcp([init(), { jsonrpc: '2.0', id: 2, method: 'tools/list' }], undefined, {
+      env: { ...ENV, BRAKE_ADMIN_TOKEN: 'sbt_test' },
+    });
+    expect(m.f.err.join('')).toContain('Admin tools are not offered here');
+    expect(m.f.err.join('')).toContain('BRAKE_ADMIN_TOKEN is set on the spend server');
+    expect(m.f.out.join('')).not.toContain('Admin tools are not offered here');
+    const names = m.byId(2).result!.tools!.map((t) => t.name);
+    expect(names).toContain('tavily_search');
+    expect(names).not.toContain('kill');
+  });
+
+  it('lists caps, passes a pending cap change through, and maps a 403', async () => {
+    const env = { ...ENV, BRAKE_ADMIN_TOKEN: 'sbt_test' };
+    const caps = await mcp(
+      [init(), call(2, 'caps_list'), call(3, 'caps_set', { scope: 'org', day: '5' })],
+      (c) =>
+        c.url.endsWith('/v1/caps')
+          ? { status: 200, body: { items: [] } }
+          : { status: 200, body: { pending: true, scope: 'org' } },
+      { args: ['--admin'], env },
+    );
+    const listed = caps.f.calls.find((c) => c.url === 'http://api/v1/caps')!;
+    const set = caps.f.calls.find((c) => c.url === 'http://api/v1/caps/org')!;
+    expect(listed).toMatchObject({
+      method: 'GET',
+      headers: { authorization: 'Bearer sbt_test' },
+    });
+    expect(JSON.parse(caps.byId(2).result!.content![0]!.text)).toEqual({ items: [] });
+    expect(set).toMatchObject({ method: 'PUT' });
+    // Only the hard cap was given: the soft value is the current one (none here).
+    expect(JSON.parse(set.body!)).toEqual({ day: { hard: '5000000', soft: null } });
+    expect(JSON.parse(caps.byId(3).result!.content![0]!.text)).toMatchObject({ pending: true });
+
+    const refused = await mcp(
+      [init(), call(2, 'kill', { target: 'org' })],
+      () => ({
+        status: 403,
+        body: { error: 'license_required', message: 'This install does not include that feature.' },
+      }),
+      { args: ['--admin'], env },
+    );
+    expect(refused.f.calls[0]).toMatchObject({
+      method: 'POST',
+      url: 'http://api/v1/kill',
+    });
+    expect(JSON.parse(refused.f.calls[0]!.body!)).toEqual({ target: 'org' });
+    expect(refused.byId(2).result).toMatchObject({ isError: true });
+    expect(refused.byId(2).result!.content![0]!.text).toContain(
+      'This install does not include that feature.',
+    );
+    // The status and code the server's instructions key on.
+    expect(refused.byId(2).result!.content![0]!.text).toContain('(HTTP 403 license_required)');
+  });
+
+  it('caps_set keeps the value a window is not given, instead of removing it', async () => {
+    const env = { ...ENV, BRAKE_ADMIN_TOKEN: 'sbt_test' };
+    const m = await mcp(
+      [
+        init(),
+        // An alert only: the $10 hard cap must stay. A hard cap only: the $8 alert must stay.
+        call(2, 'caps_set', { scope: 'key:abc', softDay: '8' }),
+        call(3, 'caps_set', { scope: 'key:abc', month: '50' }),
+      ],
+      (c) =>
+        c.method === 'GET'
+          ? {
+              status: 200,
+              body: {
+                items: [
+                  { scope: 'key:abc', kind: 'd', hard: 10_000_000, soft: null },
+                  { scope: 'key:abc', kind: 'm', hard: 40_000_000, soft: 8_000_000 },
+                  { scope: 'org', kind: 'd', hard: 1, soft: 1 },
+                ],
+              },
+            }
+          : { status: 200, body: { items: [] } },
+      { args: ['--admin'], env },
+    );
+    const puts = m.f.calls
+      .filter((c) => c.method === 'PUT')
+      .map((c) => JSON.parse(c.body!) as unknown);
+    expect(puts).toContainEqual({ day: { hard: '10000000', soft: '8000000' } });
+    expect(puts).toContainEqual({ month: { hard: '50000000', soft: '8000000' } });
+  });
+
+  it('says an admin write that timed out may have been applied', async () => {
+    const m = await mcp(
+      [init(), call(2, 'kill', { target: 'org' })],
+      () => {
+        throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+      },
+      { args: ['--admin'], env: { ...ENV, BRAKE_ADMIN_TOKEN: 'sbt_test' } },
+    );
+    const t = m.byId(2).result!.content![0]!.text;
+    expect(m.byId(2).result!.isError).toBe(true);
+    expect(t).toContain('A change might have been applied: check before sending it again.');
+  });
+
+  it('says an admin read that timed out changed nothing', async () => {
+    const m = await mcp(
+      [init(), call(2, 'keys_list', {})],
+      () => {
+        throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+      },
+      { args: ['--admin'], env: { ...ENV, BRAKE_ADMIN_TOKEN: 'sbt_test' } },
+    );
+    const t = m.byId(2).result!.content![0]!.text;
+    expect(m.byId(2).result!.isError).toBe(true);
+    expect(t).toContain('Nothing was changed.');
+    expect(t).not.toContain('might have been applied');
+  });
+
+  it('refuses a brake_call path with dot segments, and sends a string body as JSON', async () => {
+    const bad = await mcp([
+      init(),
+      call(2, 'brake_call', { provider: 'brave', method: 'GET', path: '/../google-places/v1/x' }),
+      call(3, 'brake_call', { provider: 'brave', method: 'GET', path: '/a/%2e%2e/%2E%2E/x' }),
+      call(4, 'brake_call', { provider: 'brave', method: 'GET', path: '/a\\..\\x' }),
+      call(5, 'brake_call', {
+        provider: 'mapbox',
+        method: 'GET',
+        path: '/x',
+        headers: { ' X-Brake-Session': 'x' },
+      }),
+    ]);
+    expect(bad.f.calls).toHaveLength(0);
+    for (const id of [2, 3, 4]) {
+      expect(bad.byId(id).result!.content![0]!.text).toContain('must not contain . or ..');
+    }
+    expect(bad.byId(5).result!.content![0]!.text).toContain('is set by the server from BRAKE_KEY');
+
+    const sent = await mcp([
+      init(),
+      call(2, 'brake_call', { provider: 'mapbox', method: 'POST', path: '/x', body: 'hello' }),
+    ]);
+    expect(sent.f.calls[0]!.body).toBe('"hello"');
+  });
+
+  it('publishes a nullable alertEmail as JSON Schema, and sends null to clear it', async () => {
+    const env = { ...ENV, BRAKE_ADMIN_TOKEN: 'sbt_test' };
+    const m = await mcp(
+      [
+        init(),
+        { jsonrpc: '2.0', id: 2, method: 'tools/list' },
+        call(3, 'org_update', { alertEmail: null }),
+      ],
+      () => ({ status: 200, body: { ok: true } }),
+      { args: ['--admin', '--owner'], env },
+    );
+    const tools = m.byId(2).result!.tools as unknown as {
+      name: string;
+      inputSchema: { properties: Record<string, { type: unknown; nullable?: unknown }> };
+    }[];
+    const email = tools.find((t) => t.name === 'org_update')!.inputSchema.properties.alertEmail!;
+    expect(email.type).toEqual(['string', 'null']);
+    expect(email.nullable).toBeUndefined();
+    expect(JSON.parse(m.f.calls[0]!.body!)).toEqual({ alertEmail: null });
+  });
+
+  it('strips show fields from a custom API write and refuses a mismatched id', async () => {
+    const env = { ...ENV, BRAKE_ADMIN_TOKEN: 'sbt_test' };
+    const shown = {
+      id: 'acme',
+      name: 'Acme',
+      origin: 'https://acme.example',
+      auth: { type: 'header', name: 'Authorization' },
+      routes: [],
+      billed: '2xx',
+      timeoutBilled: false,
+      proxyPath: '/custom/acme',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    const kept = {
+      id: 'acme',
+      name: 'Acme',
+      origin: 'https://acme.example',
+      auth: { type: 'header', name: 'Authorization' },
+      routes: [],
+      billed: '2xx',
+      timeoutBilled: false,
+    };
+    const m = await mcp(
+      [
+        init(),
+        call(2, 'custom_apis_add', { definition: shown }),
+        call(3, 'custom_apis_update', { id: 'acme', definition: shown }),
+      ],
+      // The update reads the current definition first (same origin here).
+      (c) =>
+        c.method === 'GET' ? { status: 200, body: shown } : { status: 200, body: { id: 'acme' } },
+      { args: ['--admin'], env },
+    );
+    const post = m.f.calls.find((c) => c.method === 'POST')!;
+    const put = m.f.calls.find((c) => c.method === 'PUT')!;
+    expect(post).toMatchObject({ url: 'http://api/v1/custom-apis' });
+    expect(JSON.parse(post.body!)).toEqual(kept);
+    expect(put).toMatchObject({ url: 'http://api/v1/custom-apis/acme' });
+    const updated = Object.fromEntries(Object.entries(kept).filter(([k]) => k !== 'id'));
+    expect(JSON.parse(put.body!)).toEqual(updated);
+
+    const bad = await mcp(
+      [
+        init(),
+        call(2, 'custom_apis_update', { id: 'acme', definition: { ...shown, id: 'other' } }),
+      ],
+      () => ({ status: 200, body: {} }),
+      { args: ['--admin'], env },
+    );
+    expect(bad.f.calls).toHaveLength(0);
+    expect(bad.byId(2).result).toMatchObject({ isError: true });
+    expect(bad.byId(2).result!.content![0]!.text).toContain('"other"');
+  });
+
+  it('sends a provider secret and does not echo it', async () => {
+    const secret = 'tvly-secret-value';
+    const m = await mcp(
+      [init(), call(2, 'credentials_add', { provider: 'tavily', name: 'main', secret })],
+      () => ({ status: 201, body: { id: 'cred_1', provider: 'tavily', name: 'main' } }),
+      { args: ['--admin'], env: { ...ENV, BRAKE_ADMIN_TOKEN: 'sbt_test' } },
+    );
+    expect(JSON.parse(m.f.calls[0]!.body!)).toMatchObject({ secret });
+    expect(m.byId(2).result!.content![0]!.text).not.toContain(secret);
+    expect(m.f.err.join('')).not.toContain(secret);
+    expect(m.f.out.join('')).not.toContain(secret);
+  });
+
+  it('explains a missing admin token on the first call instead of failing to start', async () => {
+    const m = await mcp([init(), call(2, 'caps_list')], undefined, {
+      args: ['--admin'],
+      env: { BRAKE_API_URL: 'http://api' },
+    });
+    expect(m.f.calls).toHaveLength(0);
+    expect(m.byId(2).result).toMatchObject({ isError: true });
+    expect(m.byId(2).result!.content![0]!.text).toContain(
+      'add an admin token to the "env" of its entry',
+    );
+  });
+
+  it('pages through a cut audit export from the last line kept', async () => {
+    const env = { ...ENV, BRAKE_ADMIN_TOKEN: 'sbt_test' };
+    // Audit lines carry their row id, which is what the cursor is.
+    const page = (n: number) =>
+      `${Array.from({ length: n }, (_, i) => JSON.stringify({ id: String(1000 + i) })).join('\n')}\n`;
+    const cut = await mcp(
+      [init(), call(2, 'audit_export')],
+      () => ({ status: 200, body: page(5000), headers: { 'x-next-cursor': '5999' } }),
+      { args: ['--admin'], env },
+    );
+    const cutBody = JSON.parse(cut.byId(2).result!.content![0]!.text) as {
+      lines: string[];
+      truncated: boolean;
+      nextCursor?: string;
+    };
+    expect(cutBody.truncated).toBe(true);
+    expect(cutBody.lines).toHaveLength(200);
+    // Not the API's cursor (it would skip lines 200 to 4999): the last line kept.
+    expect(cutBody.nextCursor).toBe('1199');
+
+    const whole = await mcp(
+      [init(), call(2, 'audit_export')],
+      () => ({ status: 200, body: page(1), headers: { 'x-next-cursor': 'page-2' } }),
+      { args: ['--admin'], env },
+    );
+    expect(JSON.parse(whole.byId(2).result!.content![0]!.text)).toMatchObject({
+      truncated: false,
+      nextCursor: 'page-2',
+      lines: ['{"id":"1000"}'],
+    });
+  });
+
+  it('keeps stored secrets with their host: telemetry headers and custom API origins', async () => {
+    const env = { ...ENV, BRAKE_ADMIN_TOKEN: 'sbt_test' };
+    const stored = {
+      otlp: {
+        endpoint: 'https://otlp.honeycomb.io/v1/traces',
+        enabled: false,
+        headerNames: ['x-api-key'],
+      },
+    };
+    const m = await mcp(
+      [
+        init(),
+        // Another host, no headers: refused, nothing written.
+        call(2, 'telemetry_set', { endpoint: 'https://evil.example/v1/traces' }),
+        // Same host, no headers: kept, and a disabled export stays disabled.
+        call(3, 'telemetry_set', { endpoint: 'https://otlp.honeycomb.io/v2/traces' }),
+        // Another host with headers given again: allowed.
+        call(4, 'telemetry_set', { endpoint: 'https://collector.example', headers: {} }),
+      ],
+      (c) =>
+        c.method === 'GET' ? { status: 200, body: stored } : { status: 200, body: { otlp: null } },
+      { args: ['--admin'], env },
+    );
+    expect(m.byId(2).result!.content![0]!.text).toContain('give headers again');
+    const puts = m.f.calls
+      .filter((c) => c.method === 'PUT')
+      .map((c) => JSON.parse(c.body!) as unknown);
+    expect(puts).toEqual([
+      { endpoint: 'https://otlp.honeycomb.io/v2/traces', enabled: false },
+      { endpoint: 'https://collector.example', headers: {}, enabled: false },
+    ]);
+
+    const shown = { id: 'acme', name: 'Acme', origin: 'https://acme.example', routes: [] };
+    const moved = { ...shown, origin: 'https://evil.example' };
+    const c = await mcp(
+      [
+        init(),
+        call(2, 'custom_apis_update', { id: 'acme', definition: moved }),
+        call(3, 'custom_apis_update', { id: 'acme', definition: moved, moveOrigin: true }),
+      ],
+      (r) => (r.method === 'GET' ? { status: 200, body: shown } : { status: 200, body: moved }),
+      { args: ['--admin'], env },
+    );
+    expect(c.byId(2).result!.content![0]!.text).toContain('Pass moveOrigin: true');
+    expect(c.f.calls.filter((r) => r.method === 'PUT')).toHaveLength(1);
+  });
+
+  it('marks the tools that loosen spend or reach outside hosts as destructive', async () => {
+    const env = { ...ENV, BRAKE_ADMIN_TOKEN: 'sbt_test' };
+    const hints = async (args: string[], e: Record<string, string>) => {
+      const m = await mcp([init(), { jsonrpc: '2.0', id: 2, method: 'tools/list' }], undefined, {
+        args,
+        env: e,
+      });
+      const tools = m.byId(2).result!.tools as unknown as {
+        name: string;
+        annotations: { destructiveHint?: boolean; openWorldHint?: boolean };
+      }[];
+      return Object.fromEntries(tools.map((t) => [t.name, t.annotations]));
+    };
+    const owner = await hints(['--admin', '--owner'], env);
+    for (const name of [
+      'caps_set',
+      'keys_resume',
+      'org_update',
+      'sso_set',
+      'users_update',
+      'license_install',
+      'telemetry_set',
+      'custom_apis_update',
+    ]) {
+      expect(owner[name]!.destructiveHint, name).toBe(true);
+    }
+    expect(owner.telemetry_set!.openWorldHint).toBe(true);
+    expect(owner.custom_apis_update!.openWorldHint).toBe(true);
+    // The owner-only policy route is offered with --owner only; listing people needs admin.
+    const adminOnly = await hints(['--admin'], env);
+    expect(adminOnly.approvals_set_policy).toBeUndefined();
+    expect(owner.approvals_set_policy).toBeDefined();
+    expect(adminOnly.users_list).toBeDefined();
+    const spend = await hints([], ENV);
+    expect(spend.brake_call!.destructiveHint).toBe(true);
+  });
+
+  it('names the field an admin request failed on, and converts dollars to micros', async () => {
+    const env = { ...ENV, BRAKE_ADMIN_TOKEN: 'sbt_test' };
+    const refused = await mcp(
+      [init(), call(2, 'keys_list')],
+      () => ({
+        status: 400,
+        body: {
+          error: 'invalid_request',
+          message: 'Request failed validation.',
+          issues: [{ in: 'body', path: 'expiresAt', message: 'Invalid ISO datetime' }],
+        },
+      }),
+      { args: ['--admin'], env },
+    );
+    expect(refused.byId(2).result!.content![0]!.text).toBe(
+      'Request failed validation. (expiresAt: Invalid ISO datetime) (HTTP 400 invalid_request)',
+    );
+
+    const minted = await mcp(
+      [init(), call(2, 'sessions_mint', { parentKeyId: 'key_p', budget: '1.25', dayBudget: '10' })],
+      () => ({ status: 201, body: { sessionId: 's', keyId: 'k', token: 't' } }),
+      { args: ['--admin'], env },
+    );
+    expect(JSON.parse(minted.f.calls[0]!.body!)).toMatchObject({
+      parentKeyId: 'key_p',
+      budgetMicros: '1250000',
+      dayBudgetMicros: '10000000',
+    });
+  });
+
+  it('answers a timeout while caps_set reads the current caps as a tool error', async () => {
+    const m = await mcp(
+      [init(), call(2, 'caps_set', { scope: 'org', softDay: '1' })],
+      () => {
+        throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+      },
+      { args: ['--admin'], env: { ...ENV, BRAKE_ADMIN_TOKEN: 'sbt_test' } },
+    );
+    expect(m.byId(2).result).toMatchObject({ isError: true });
+    expect(m.byId(2).result!.content![0]!.text).toContain('Nothing was changed');
+  });
+
+  it('cuts metrics at a line end', async () => {
+    const line = 'brake_requests_total{provider="x"} 1\n';
+    const body = line.repeat(Math.ceil(110_000 / line.length));
+    const m = await mcp([init(), call(2, 'metrics')], () => ({ status: 200, body }), {
+      args: ['--admin'],
+      env: { ...ENV, BRAKE_ADMIN_TOKEN: 'sbt_test' },
+    });
+    const out = JSON.parse(m.byId(2).result!.content![0]!.text) as {
+      text: string;
+      truncated: boolean;
+    };
+    expect(out.truncated).toBe(true);
+    expect(out.text.endsWith('\n')).toBe(true);
+    expect(out.text.length).toBeLessThanOrEqual(100_001);
   });
 });

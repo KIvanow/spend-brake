@@ -1,5 +1,5 @@
 import type { Command } from 'commander';
-import { ApiRefusal, apiCall, money, print } from '../admin.js';
+import { ApiRefusal, apiCall, capsSetBody, money, print } from '../admin.js';
 import { CliError, EXIT, type Io, config, keyHeaders, usdToMicros } from '../io.js';
 
 const pretty = (cmd: Command) => Boolean(cmd.optsWithGlobals<{ pretty?: boolean }>().pretty);
@@ -237,21 +237,16 @@ export function adminCommands(program: Command, io: Io, done: (code: number) => 
         o: { day?: string; month?: string; softDay?: string; softMonth?: string },
         cmd: Command,
       ) => {
-        const window = (hard?: string, soft?: string) =>
-          hard || soft
-            ? {
-                hard: hard ? usdToMicros(hard).toString() : null,
-                ...(soft ? { soft: usdToMicros(soft).toString() } : {}),
-              }
-            : undefined;
-        const day = window(o.day, o.softDay);
-        const month = window(o.month, o.softMonth);
-        if (!day && !month) throw new CliError('Give --day and/or --month.', EXIT.usage);
+        // A window given only a hard or only a soft value keeps the other one.
+        const body = await capsSetBody(io, scope, o);
+        if (!body.day && !body.month) {
+          throw new CliError('Give --day, --month, --soft-day or --soft-month.', EXIT.usage);
+        }
         const r = await apiCall<{ items: Cap[]; pending?: unknown[] }>(
           io,
           'PUT',
           `/v1/caps/${encodeURIComponent(scope)}`,
-          { ...(day ? { day } : {}), ...(month ? { month } : {}) },
+          body,
         );
         printCaps(io, r, pretty(cmd));
         done(EXIT.ok);

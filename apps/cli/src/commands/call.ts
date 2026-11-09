@@ -1,9 +1,72 @@
 import { readFileSync } from 'node:fs';
 import type { Command } from 'commander';
 import { CliError, EXIT, type Io } from '../io.js';
-import { proxyCall, report } from '../proxy.js';
+import { type ProxyRequest, proxyCall, report } from '../proxy.js';
 
 const METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
+
+export interface CallInput {
+  query?: Record<string, string>;
+  headers?: Record<string, string>;
+  /** A JSON value, or a JSON string (the CLI passes the text of `-d`). */
+  body?: unknown;
+}
+
+/**
+ * The request `brake call` sends. `X-Brake-*` headers are dropped: the key comes from
+ * `BRAKE_KEY`. An invalid provider, method or path throws.
+ */
+export function callRequest(
+  provider: string,
+  method: string,
+  path: string,
+  o: CallInput = {},
+): ProxyRequest {
+  const m = method.toUpperCase();
+  if (!METHODS.has(m)) throw new CliError(`unknown method ${method}`, EXIT.usage);
+  // Custom APIs live under /custom/<id>/ on the proxy.
+  if (!/^(custom\/)?[A-Za-z0-9_.-]+$/.test(provider) || /(^|\/)\.\.?$/.test(provider)) {
+    throw new CliError('invalid provider', EXIT.usage);
+  }
+  if (!path.startsWith('/')) throw new CliError('path must start with /', EXIT.usage);
+  // URL parsing resolves `.` and `..` (also encoded, or after `\`): the request would leave the
+  // provider's prefix, and be priced as another provider's route.
+  const segments = path.split(/[/\\]/).map((seg) => {
+    try {
+      return decodeURIComponent(seg);
+    } catch {
+      return seg;
+    }
+  });
+  if (path.includes('\\') || segments.some((seg) => seg === '.' || seg === '..')) {
+    throw new CliError('path must not contain . or .. segments, or backslashes', EXIT.usage);
+  }
+  // URL parsing drops tab, CR and LF first (".\t." would then read as ".."): refuse control
+  // characters, and check the path as the parser resolves it, which is what is sent.
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(path)) {
+    throw new CliError('path must not contain control characters', EXIT.usage);
+  }
+  const prefix = `/${provider}`;
+  const resolved = new URL(`http://h${prefix}${path}`).pathname;
+  if (resolved !== prefix && !resolved.startsWith(`${prefix}/`)) {
+    throw new CliError('path leaves the provider', EXIT.usage);
+  }
+  const headers: Record<string, string> = {};
+  for (const [k, v] of Object.entries(o.headers ?? {})) {
+    const name = k.trim().toLowerCase();
+    if (!name) throw new CliError('empty header name', EXIT.usage);
+    if (name.startsWith('x-brake-')) continue;
+    headers[name] = v;
+  }
+  return {
+    method: m,
+    path: `/${provider}${path}`,
+    query: o.query ?? {},
+    headers,
+    ...(o.body !== undefined ? { body: o.body } : {}),
+  };
+}
 
 /** Any capped request through the proxy, for providers without dedicated commands. */
 export function callCommand(program: Command, io: Io, done: (code: number) => void): void {
@@ -31,13 +94,6 @@ export function callCommand(program: Command, io: Io, done: (code: number) => vo
         o: { data?: string; query?: string[]; header?: string[] },
         cmd: Command,
       ) => {
-        const m = method.toUpperCase();
-        if (!METHODS.has(m)) throw new CliError(`unknown method ${method}`, EXIT.usage);
-        // Custom APIs live under /custom/<id>/ on the proxy.
-        if (!/^(custom\/)?[A-Za-z0-9_.-]+$/.test(provider) || /(^|\/)\.\.?$/.test(provider)) {
-          throw new CliError('invalid provider', EXIT.usage);
-        }
-        if (!path.startsWith('/')) throw new CliError('path must start with /', EXIT.usage);
         const query: Record<string, string> = {};
         for (const q of o.query ?? []) {
           const i = q.indexOf('=');
@@ -48,7 +104,7 @@ export function callCommand(program: Command, io: Io, done: (code: number) => vo
         for (const h of o.header ?? []) {
           const i = h.indexOf(':');
           if (i < 1) throw new CliError(`bad --header ${h}`, EXIT.usage);
-          headers[h.slice(0, i).trim().toLowerCase()] = h.slice(i + 1).trim();
+          headers[h.slice(0, i).trim()] = h.slice(i + 1).trim();
         }
         let body: string | undefined;
         if (o.data !== undefined) {
@@ -59,13 +115,14 @@ export function callCommand(program: Command, io: Io, done: (code: number) => vo
             throw new CliError('--data must be JSON', EXIT.usage);
           }
         }
-        const result = await proxyCall(io, {
-          method: m,
-          path: `/${provider}${path}`,
-          query,
-          headers,
-          ...(body !== undefined ? { body } : {}),
-        });
+        const result = await proxyCall(
+          io,
+          callRequest(provider, method, path, {
+            query,
+            headers,
+            ...(body !== undefined ? { body } : {}),
+          }),
+        );
         done(report(io, result, Boolean(cmd.optsWithGlobals<{ pretty?: boolean }>().pretty)));
       },
     );
